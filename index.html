@@ -123,6 +123,24 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 .dtime{margin-left:auto;flex:0 0 auto;font-size:11.5px;color:var(--ink-3)}
 
 .empty{padding:26px;text-align:center;color:var(--ink-3);font-size:13.5px}
+
+/* 별표 & 검색 & 외부링크 */
+.badge-new{font-size:10.5px;font-weight:800;color:var(--good-text);white-space:nowrap;
+  background:rgba(12,163,12,.12);border-radius:4px;padding:1px 6px;vertical-align:1px}
+.badge-days{font-size:10.5px;font-weight:700;color:var(--ink-2);white-space:nowrap;
+  background:var(--chip-bg);border-radius:4px;padding:1px 6px;vertical-align:1px}
+.star{cursor:pointer;font-size:15px;color:var(--ink-3);margin-right:5px;user-select:none}
+.star.on{color:#eda100}
+.star:hover{color:#eda100}
+#searchBox{width:100%;padding:10px 14px;font-size:15px;border:1px solid var(--ring);
+  border-radius:10px;background:var(--surface-1);color:var(--ink-1);outline:none;
+  margin-bottom:10px;font-family:inherit}
+#searchBox:focus{border-color:var(--series-1)}
+.xlink{font-size:11px;color:var(--series-1-deep);text-decoration:none;margin-left:6px;
+  border:1px solid var(--ring);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.xlink:hover{background:var(--chip-bg)}
+.card .links{margin-top:8px}
+.card .links .xlink{margin-left:0;margin-right:6px}
 footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   font-size:11.5px;color:var(--ink-3);line-height:1.7}
 #loaderr{display:none;margin:30px 0;padding:16px;border:1px solid var(--ring);
@@ -140,13 +158,23 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   <div class="tiles" id="tiles"></div>
 
   <nav class="chips">
+    <a href="#watch">관심종목</a>
     <a href="#ideas">오늘의 아이디어</a>
     <a href="#flow">수급 스캐너</a>
     <a href="#value">밸류업 스크리너</a>
     <a href="#disc">공시 시그널</a>
+    <a href="#search">종목 검색</a>
   </nav>
 
   <div id="loaderr"></div>
+
+  <section id="watch">
+    <h2>⭐ 관심종목</h2>
+    <p class="sub">표의 별표(☆)를 눌러 추가·제거 · 이 브라우저에만 저장됩니다</p>
+    <div class="tblwrap"><table id="watchTbl"></table></div>
+    <div class="empty" id="watchEmpty" style="display:none">
+      아직 관심종목이 없습니다. 아래 표에서 ☆를 눌러 추가하세요.</div>
+  </section>
 
   <section id="ideas">
     <h2>오늘의 아이디어 5선</h2>
@@ -165,6 +193,14 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <h2>밸류업 스크리너</h2>
     <p class="sub">저PBR · 저PER · 고배당 조합 점수 상위 · 열 제목 클릭 시 정렬</p>
     <div class="tblwrap"><table id="valueTbl"></table></div>
+  </section>
+
+  <section id="search">
+    <h2>종목 검색</h2>
+    <p class="sub">수집된 전체 종목에서 이름·코드로 검색</p>
+    <input type="search" id="searchBox" placeholder="예: 삼성전자 또는 005930" autocomplete="off">
+    <div class="tblwrap" id="searchWrap" style="display:none"><table id="searchTbl"></table></div>
+    <div class="empty" id="searchHint">검색어를 입력하세요.</div>
   </section>
 
   <section id="disc">
@@ -190,6 +226,96 @@ const arrow = v => v==null||v===0 ? "" : v>0 ? "▲" : "▼";
 const esc = s => String(s??"").replace(/[&<>"]/g,
   c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+/* ---------- 관심종목 (이 브라우저에 저장) ---------- */
+let DATA = null;
+const WKEY = "kr_idea_watchlist";
+const getWatch = () => { try { return JSON.parse(localStorage.getItem(WKEY)) || []; } catch(e){ return []; } };
+const setWatch = a => { try { localStorage.setItem(WKEY, JSON.stringify(a)); } catch(e){} };
+const starHtml = code =>
+  `<span class="star${getWatch().includes(code)?" on":""}" data-code="${code}" title="관심종목 추가/제거">${getWatch().includes(code)?"★":"☆"}</span>`;
+const linksHtml = code =>
+  `<a class="xlink" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">차트</a>`+
+  `<a class="xlink" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">뉴스</a>`;
+
+function allStocks(d){
+  if(d.all_stocks && d.all_stocks.length) return d.all_stocks;
+  // 구버전 data.json 폴백: 표시 중인 목록의 합집합
+  const seen = {}, out = [];
+  [...(d.ideas||[]), ...(d.flow_scan||[]), ...(d.value_screen||[])].forEach(s=>{
+    if(!seen[s.code]){ seen[s.code]=1; out.push(s); }
+  });
+  return out;
+}
+
+document.addEventListener("click", e=>{
+  const el = e.target.closest(".star");
+  if(!el) return;
+  const code = el.dataset.code;
+  let w = getWatch();
+  w = w.includes(code) ? w.filter(c=>c!==code) : [...w, code];
+  setWatch(w);
+  document.querySelectorAll(`.star[data-code="${code}"]`).forEach(s=>{
+    s.classList.toggle("on", w.includes(code));
+    s.textContent = w.includes(code) ? "★" : "☆";
+  });
+  if(DATA) watchSection(DATA);
+});
+
+function watchSection(d){
+  const codes = getWatch();
+  const tbl = document.getElementById("watchTbl");
+  const empty = document.getElementById("watchEmpty");
+  const wrap = tbl.closest(".tblwrap");
+  const pool = allStocks(d);
+  const rows = codes.map(c=>pool.find(s=>s.code===c)).filter(Boolean);
+  if(!rows.length){
+    wrap.style.display="none"; empty.style.display="";
+    return;
+  }
+  wrap.style.display=""; empty.style.display="none";
+  tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>PBR</th>"+
+    "<th>배당률</th><th>외인 연속</th><th>종합점수</th><th>바로가기</th></tr></thead><tbody>"+
+    rows.map(s=>`<tr>
+      <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
+      <td>${fmt(s.price)}</td>
+      <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
+      <td>${s.pbr==null?"–":s.pbr.toFixed(2)}</td>
+      <td>${s.dvr==null?"–":s.dvr.toFixed(1)+"%"}</td>
+      <td><span class="streak${(s.f_streak||0)>=5?" hi":""}">${s.f_streak||0}일</span></td>
+      <td><b>${s.score??"–"}</b></td>
+      <td>${linksHtml(s.code)}</td></tr>`).join("")+"</tbody>";
+}
+
+/* ---------- 종목 검색 ---------- */
+function initSearch(d){
+  const box = document.getElementById("searchBox");
+  const wrap = document.getElementById("searchWrap");
+  const tbl = document.getElementById("searchTbl");
+  const hint = document.getElementById("searchHint");
+  const pool = allStocks(d);
+  if(!d.all_stocks) hint.textContent = "검색어를 입력하세요. (전체 종목 검색은 다음 데이터 갱신 후 활성화됩니다)";
+  box.addEventListener("input", ()=>{
+    const q = box.value.trim().toLowerCase();
+    if(!q){ wrap.style.display="none"; hint.style.display=""; return; }
+    const hits = pool.filter(s=>
+      s.name.toLowerCase().includes(q) || s.code.includes(q)).slice(0,30);
+    hint.style.display="none"; wrap.style.display="";
+    tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>PBR</th>"+
+      "<th>PER</th><th>배당률</th><th>외인 연속</th><th>종합점수</th><th>바로가기</th></tr></thead><tbody>"+
+      (hits.length ? hits.map(s=>`<tr>
+        <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
+        <td>${fmt(s.price)}</td>
+        <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
+        <td>${s.pbr==null?"–":s.pbr.toFixed(2)}</td>
+        <td>${s.per==null?"–":s.per.toFixed(1)}</td>
+        <td>${s.dvr==null?"–":s.dvr.toFixed(1)+"%"}</td>
+        <td><span class="streak${(s.f_streak||0)>=5?" hi":""}">${s.f_streak||0}일</span></td>
+        <td><b>${s.score??"–"}</b></td>
+        <td>${linksHtml(s.code)}</td></tr>`).join("")
+       : '<tr><td colspan="9" style="text-align:center;color:var(--ink-3)">검색 결과가 없습니다</td></tr>')+"</tbody>";
+  });
+}
+
 function tiles(d){
   const k = d.indices?.KOSPI||{}, q = d.indices?.KOSDAQ||{};
   const t = (lbl,o)=>`<div class="tile"><div class="lbl">${lbl}</div>
@@ -211,11 +337,14 @@ function ideaCards(d){
   <div class="card">
     <div class="row1"><span class="rank">${i+1}</span>
       <span class="nm">${esc(s.name)}</span><span class="cd">${s.code}</span>
+      ${s.idea_days===1?'<span class="badge-new">NEW</span>':
+        s.idea_days>1?`<span class="badge-days">${s.idea_days}일째</span>`:""}
       <span class="px ${cls(s.change_pct)}">${fmt(s.price)} ${arrow(s.change_pct)}${s.change_pct==null?"":Math.abs(s.change_pct).toFixed(2)+"%"}</span>
     </div>
     <div class="scorebar"><i style="width:${Math.min(100,s.score)}%"></i></div>
     <div class="sc">종합 <b>${s.score}</b> · 수급 ${s.flow_score} · 밸류 ${s.value_score} · 공시 ${s.disc_score>=0?"+":""}${s.disc_score}</div>
     <div class="tags">${(s.reasons||[]).slice(0,4).map(r=>`<span class="tag">${esc(r)}</span>`).join("")}</div>
+    <div class="links">${starHtml(s.code)}${linksHtml(s.code)}<a class="xlink" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(s.name)}">공시</a></div>
   </div>`).join("");
 }
 
@@ -256,7 +385,7 @@ function makeTable(elId, rows, cols, defaultKey){
   render();
 }
 
-const nameCell = s=>`<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>`;
+const nameCell = s=>`${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>`;
 const streakCell = (n,hi)=>`<span class="streak${(n||0)>=hi?" hi":""}">${n||0}일</span>`;
 const pctCell = s=>`<span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span>`;
 const signAmt = v=>v==null?"–":`<span class="${cls(v)}">${fmt(v)}</span>`;
@@ -272,6 +401,9 @@ function flowTable(d){
     {k:"i_5d_amt_100m",h:"기관 5일(억)",f:s=>signAmt(s.i_5d_amt_100m)},
     {k:"f_20d_amt_100m",h:"외인 20일(억)",f:s=>signAmt(s.f_20d_amt_100m)},
     {k:"flow_score",h:"수급점수",f:s=>`<b>${s.flow_score??"–"}</b>`},
+    {k:"flow_delta",h:"Δ전일",f:s=>s.flow_delta==null?"–":
+      `<span class="${cls(s.flow_delta)}">${s.flow_delta>0?"+":""}${s.flow_delta}</span>`+
+      (s.flow_delta>=8?' <span class="badge-new">급등</span>':"")},
   ], "flow_score");
 }
 
@@ -304,11 +436,13 @@ function discList(d){
 }
 
 function renderAll(d){
+  DATA = d;
   document.getElementById("stamp").textContent =
     (d.market_date ? d.market_date.replace(/-/g,".")+" 장 마감 기준" : "") +
     (d.generated_at ? " · "+d.generated_at.replace(/^\d{4}-\d{2}-\d{2} /,"")+" 수집" : "");
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
-  tiles(d); ideaCards(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
+  tiles(d); watchSection(d); ideaCards(d); flowBars(d); flowTable(d);
+  valueTable(d); discList(d); initSearch(d);
 }
 
 fetch("data.json?t="+Date.now())
