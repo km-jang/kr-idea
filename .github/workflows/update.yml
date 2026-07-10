@@ -2,7 +2,8 @@ name: 데이터 갱신
 
 on:
   schedule:
-    - cron: "10 10 * * 1-5"   # 매 영업일 19:10 KST
+    - cron: "10 10 * * 1-5"   # 매 영업일 19:10 KST - 데이터 수집
+    - cron: "0 23 * * 0-4"    # 매 영업일 08:00 KST - 아침 브리핑 발송
   workflow_dispatch: {}
 
 permissions:
@@ -27,14 +28,17 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 오프라인 테스트
+        if: github.event.schedule != '0 23 * * 0-4'
         run: python test_parsers.py
 
       - name: 데이터 수집
+        if: github.event.schedule != '0 23 * * 0-4'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
         run: python collect.py
 
       - name: 커밋 & 푸시
+        if: github.event.schedule != '0 23 * * 0-4'
         run: |
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
@@ -45,3 +49,10 @@ jobs:
             git commit -m "data: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')"
             git push
           fi
+
+      - name: 텔레그램 브리핑 발송
+        if: github.event.schedule == '0 23 * * 0-4' || github.event_name == 'workflow_dispatch'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python notify.py
