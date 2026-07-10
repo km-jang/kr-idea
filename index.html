@@ -304,7 +304,9 @@ function discList(d){
 }
 
 function renderAll(d){
-  document.getElementById("stamp").textContent = d.generated_at ? d.generated_at+" 기준" : "";
+  document.getElementById("stamp").textContent =
+    (d.market_date ? d.market_date.replace(/-/g,".")+" 장 마감 기준" : "") +
+    (d.generated_at ? " · "+d.generated_at.replace(/^\d{4}-\d{2}-\d{2} /,"")+" 수집" : "");
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
   tiles(d); ideaCards(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
 }

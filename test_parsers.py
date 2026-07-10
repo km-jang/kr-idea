@@ -247,6 +247,66 @@ def test_to_num():
     assert collect.to_num("+1,400") == 1400.0
 
 
+
+# ---------------------------------------------------------------------------
+# 6) 품질 가드 & 휴장일 스킵
+# ---------------------------------------------------------------------------
+
+def _universe(n, price=True, days=True, pbr=True):
+    out = []
+    for i in range(n):
+        s = {"code": f"{i:06d}", "name": f"종목{i}", "price": 10000 if price else None}
+        if days: s["days"] = 20
+        if pbr: s["pbr"] = 1.0
+        out.append(s)
+    return out
+
+
+def test_validate_ok():
+    assert collect.validate_collection(_universe(300)) == []
+
+
+def test_validate_small_universe():
+    fatal = collect.validate_collection(_universe(50))
+    assert fatal and "유니버스" in fatal[0]
+
+
+def test_validate_missing_flows():
+    stocks = _universe(300, days=False)
+    fatal = collect.validate_collection(stocks)
+    assert any("수급" in f for f in fatal)
+
+
+def test_validate_missing_fundamentals():
+    stocks = _universe(300, pbr=False)
+    fatal = collect.validate_collection(stocks)
+    assert any("펀더멘털" in f for f in fatal)
+
+
+def test_holiday_skip():
+    prev = {"sample": False, "market_date": "2026-07-10"}
+    assert collect.is_holiday_rerun(prev, "2026-07-10") is True    # 같은 장 기준일 → 스킵
+    assert collect.is_holiday_rerun(prev, "2026-07-11") is False   # 새 거래일 → 진행
+    assert collect.is_holiday_rerun(None, "2026-07-10") is False   # 이전 데이터 없음 → 진행
+    assert collect.is_holiday_rerun(prev, None) is False           # 기준일 미확인 → 진행(안전)
+
+
+def test_load_previous(tmp_path=None):
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "data.json")
+        # 샘플 데이터는 None 취급
+        open(p, "w").write(json.dumps({"sample": True, "market_date": "2026-07-09"}))
+        assert collect.load_previous(p) is None
+        open(p, "w").write(json.dumps({"sample": False, "market_date": "2026-07-09"}))
+        assert collect.load_previous(p)["market_date"] == "2026-07-09"
+        assert collect.load_previous(os.path.join(td, "없는파일.json")) is None
+
+
+def test_assemble_market_date():
+    data = collect.build_sample()
+    assert "market_date" in data
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

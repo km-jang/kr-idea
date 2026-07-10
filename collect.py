@@ -418,7 +418,8 @@ def build_disclosure_signals(raw_items):
 # ---------------------------------------------------------------------------
 
 def fetch_indices():
-    out = {}
+    """지수 스냅샷. 반환: (지수dict, 최근거래일 'YYYY-MM-DD' 또는 None)"""
+    out, traded = {}, None
     for idx in ("KOSPI", "KOSDAQ"):
         try:
             data = get_json(
@@ -431,10 +432,55 @@ def fetch_indices():
             if rate and rate > 0 and crt in ("5", "4"):
                 rate = -rate
             out[idx] = {"value": val, "change_pct": rate}
+            lta = str(d.get("localTradedAt") or "")   # 예: 2026-07-10T18:01:33+09:00
+            m = re.match(r"(\d{4}-\d{2}-\d{2})", lta)
+            if m and not traded:
+                traded = m.group(1)
         except Exception:
             out[idx] = {"value": None, "change_pct": None}
         time.sleep(REQUEST_DELAY)
-    return out
+    return out, traded
+
+
+# ---------------------------------------------------------------------------
+# 품질 가드 & 휴장일 판정
+# ---------------------------------------------------------------------------
+
+def validate_collection(stocks, min_universe=150, min_flow=0.5, min_fund=0.4):
+    """수집 결과 품질 검증. 치명적 문제 리스트 반환 (비어 있으면 통과).
+
+    소스 장애로 데이터가 반쪽짜리일 때 엉터리 대시보드가 배포되는 것을 막는다.
+    """
+    fatal = []
+    n = len(stocks)
+    if n < min_universe:
+        fatal.append(f"유니버스 {n}종목 (기준 {min_universe} 미만) - 소스 장애 의심")
+        return fatal
+    priced = sum(1 for s in stocks if s.get("price"))
+    if priced < n * 0.7:
+        fatal.append(f"가격 수집 {priced}/{n} (70% 미만)")
+    flows = sum(1 for s in stocks if s.get("days"))
+    if flows < n * min_flow:
+        fatal.append(f"수급 수집 {flows}/{n} ({int(min_flow*100)}% 미만)")
+    funds = sum(1 for s in stocks if s.get("pbr") is not None or s.get("per") is not None)
+    if funds < n * min_fund:
+        fatal.append(f"펀더멘털 수집 {funds}/{n} ({int(min_fund*100)}% 미만)")
+    return fatal
+
+
+def load_previous(path):
+    """기존 data.json 로드 (없거나 샘플이면 None)."""
+    try:
+        prev = json.loads(Path(path).read_text(encoding="utf-8"))
+        return None if prev.get("sample") else prev
+    except Exception:
+        return None
+
+
+def is_holiday_rerun(prev, market_date):
+    """직전 발행분과 장 기준일이 같으면 휴장일 재실행 → 갱신 생략."""
+    return bool(prev and market_date
+                and prev.get("market_date") == market_date)
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +644,8 @@ def build_sample():
 # 조립 & 메인
 # ---------------------------------------------------------------------------
 
-def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None):
+def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None,
+             market_date=None):
     def slim(s):
         return {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -611,6 +658,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
     value_rank = sorted(stocks, key=lambda s: -(s.get("value_score") or 0))[:30]
     return {
         "generated_at": now.strftime("%Y-%m-%d %H:%M KST"),
+        "market_date": market_date or now.strftime("%Y-%m-%d"),
         "sample": sample,
         "indices": indices,
         "ideas": [slim(s) for s in ideas],
@@ -622,9 +670,16 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
     }
 
 
-def run_full(max_universe=None):
+def run_full(max_universe=None, out_path=None):
     errors = []
     now = datetime.now(KST)
+
+    print("[0/5] 장 기준일 확인...")
+    indices, market_date = fetch_indices()
+    prev = load_previous(out_path or OUT_PATH)
+    if is_holiday_rerun(prev, market_date):
+        print(f"휴장일/중복 실행 감지 (장 기준일 {market_date} 동일) - 갱신 생략")
+        return None
 
     print("[1/5] 유니버스 수집...")
     stocks = fetch_universe()
@@ -670,14 +725,19 @@ def run_full(max_universe=None):
     disclosures = build_disclosure_signals(raw)
     print(f"  → 공시 {len(raw)}건 중 시그널 {len(disclosures)}건")
 
-    print("[5/5] 지수/점수화...")
-    indices = fetch_indices()
+    print("[5/5] 품질 검증/점수화...")
+    fatal = validate_collection(stocks)
+    if fatal:
+        print("수집 품질 미달 - 갱신 중단 (직전 데이터 유지):", *fatal, sep="\n  ")
+        sys.exit(2)
+
     stocks = score_stocks(stocks, disclosures)
     ideas = pick_ideas(stocks, 5)
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")
-    return assemble(stocks, disclosures, ideas, indices, now, errors=errors[:20])
+    return assemble(stocks, disclosures, ideas, indices, now, errors=errors[:20],
+                    market_date=market_date)
 
 
 def main():
@@ -687,13 +747,24 @@ def main():
     ap.add_argument("--out", default=str(OUT_PATH))
     args = ap.parse_args()
 
-    data = build_sample() if args.sample else run_full(args.max_universe)
-
     out = Path(args.out)
+    data = build_sample() if args.sample else run_full(args.max_universe, out_path=out)
+    if data is None:          # 휴장일 → 갱신 없음 (정상 종료)
+        return
+
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"저장 완료: {out}  (아이디어 {len(data['ideas'])}건, "
-          f"공시 시그널 {len(data['disclosures'])}건)")
+    payload = json.dumps(data, ensure_ascii=False, indent=1)
+    out.write_text(payload, encoding="utf-8")
+
+    # 히스토리 축적 (실데이터만): history/YYYY-MM-DD.json
+    if not data.get("sample"):
+        hist = out.parent / "history" / f"{data['market_date']}.json"
+        hist.parent.mkdir(parents=True, exist_ok=True)
+        hist.write_text(payload, encoding="utf-8")
+        print(f"히스토리 저장: {hist}")
+
+    print(f"저장 완료: {out}  (장 기준일 {data['market_date']}, "
+          f"아이디어 {len(data['ideas'])}건, 공시 시그널 {len(data['disclosures'])}건)")
 
 
 if __name__ == "__main__":
