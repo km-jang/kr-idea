@@ -321,11 +321,20 @@ NEGATIVE_KW = [
     ("감자결정", "감자", -10),
     ("관리종목", "관리종목", -15),
     ("상장폐지", "상폐 위험", -20),
+    ("자기주식처분결정", "자사주 처분", -5),
+    ("소송등의제기", "소송 제기", -8),
+    ("횡령ㆍ배임", "횡령·배임", -20),
+    ("영업정지", "영업정지", -15),
+    ("전환가액의조정", "전환가 조정", -3),
 ]
 WATCH_KW = [
     ("임원ㆍ주요주주특정증권등소유상황보고서", "내부자 지분변동", 0),
     ("최대주주변경", "최대주주 변경", 0),
     ("주식등의대량보유상황보고서", "5%룰 보고", 0),
+    ("회사합병결정", "합병", 0),
+    ("영업양수결정", "영업양수", 0),
+    ("타법인주식및출자증권취득결정", "타법인 취득", 0),
+    ("유형자산취득결정", "자산 취득", 0),
 ]
 
 
@@ -475,6 +484,57 @@ def load_previous(path):
         return None if prev.get("sample") else prev
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# 전일 대비 변화 (히스토리 기반) - 데이터가 쌓이면 자동 활성화
+# ---------------------------------------------------------------------------
+
+def apply_flow_delta(stocks, prev):
+    """전일 데이터 대비 수급점수 변화량(flow_delta)을 각 종목에 기록."""
+    if not prev:
+        return stocks
+    pool = prev.get("all_stocks") or (prev.get("flow_scan") or []) + (prev.get("ideas") or [])
+    prev_map = {p["code"]: p.get("flow_score") for p in pool if p.get("code")}
+    for s in stocks:
+        pf = prev_map.get(s["code"])
+        if pf is not None and s.get("flow_score") is not None:
+            s["flow_delta"] = round(s["flow_score"] - pf, 1)
+    return stocks
+
+
+def load_history_idea_codes(hist_dir, before_date, limit=15):
+    """히스토리 폴더에서 before_date 이전 날짜들의 '아이디어 코드 집합' 리스트 (최신순)."""
+    out = []
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"), reverse=True)
+    except Exception:
+        return out
+    for f in files[:limit * 2]:
+        day = f.stem                      # YYYY-MM-DD
+        if before_date and day >= before_date:
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            out.append(set(s["code"] for s in d.get("ideas", [])))
+        except Exception:
+            continue
+        if len(out) >= limit:
+            break
+    return out
+
+
+def apply_idea_streaks(ideas, past_idea_sets):
+    """아이디어 종목별 연속 선정일수(idea_days) 계산. 오늘 포함 1부터 시작."""
+    for s in ideas:
+        days = 1
+        for past in past_idea_sets:       # 최신순으로 연속 여부 확인
+            if s["code"] in past:
+                days += 1
+            else:
+                break
+        s["idea_days"] = days
+    return ideas
 
 
 def is_holiday_rerun(prev, market_date):
@@ -632,7 +692,11 @@ def build_sample():
         for (t, c, ti, mk, tag, senti, sc) in SAMPLE_DISCLOSURES
     ]
     stocks = score_stocks(stocks, disclosures)
+    for s in stocks:                       # 미리보기용 전일 대비 변화량
+        s["flow_delta"] = round(random.uniform(-6, 12), 1)
     ideas = pick_ideas(stocks, 5)
+    for i, s in enumerate(ideas):          # 미리보기용 연속 선정일수
+        s["idea_days"] = (1, 3, 1, 2, 5)[i % 5]
     now = datetime.now(KST)
     return assemble(stocks, disclosures, ideas,
                     {"KOSPI": {"value": 3412.68, "change_pct": 0.87},
@@ -652,7 +716,15 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
             "pbr", "per", "dvr", "f_streak", "i_streak",
             "f_5d_amt_100m", "i_5d_amt_100m", "f_20d_amt_100m", "i_20d_amt_100m",
             "flow_score", "value_score", "disc_score", "score", "reasons",
+            "flow_delta", "idea_days",
             "disclosures")}
+
+    def compact(s):
+        """전체 종목 목록용 축약 레코드 (검색·워치리스트에 사용)."""
+        return {k: s.get(k) for k in (
+            "code", "name", "market", "price", "change_pct", "mktcap_100m",
+            "pbr", "per", "dvr", "f_streak", "i_streak", "f_5d_amt_100m",
+            "flow_score", "value_score", "score", "flow_delta")}
 
     flow_rank = sorted(stocks, key=lambda s: -(s.get("flow_score") or 0))[:30]
     value_rank = sorted(stocks, key=lambda s: -(s.get("value_score") or 0))[:30]
@@ -665,6 +737,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "flow_scan": [slim(s) for s in flow_rank],
         "value_screen": [slim(s) for s in value_rank],
         "disclosures": disclosures[:60],
+        "all_stocks": [compact(s) for s in
+                       sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
         "errors": errors or [],
     }
@@ -732,7 +806,10 @@ def run_full(max_universe=None, out_path=None):
         sys.exit(2)
 
     stocks = score_stocks(stocks, disclosures)
+    stocks = apply_flow_delta(stocks, prev)
     ideas = pick_ideas(stocks, 5)
+    hist_dir = Path(out_path or OUT_PATH).parent / "history"
+    ideas = apply_idea_streaks(ideas, load_history_idea_codes(hist_dir, market_date))
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")

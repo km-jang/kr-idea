@@ -226,7 +226,7 @@ def test_score_and_pick():
 def test_sample_build_schema():
     data = collect.build_sample()
     for key in ("generated_at", "indices", "ideas", "flow_scan",
-                "value_screen", "disclosures", "universe_size"):
+                "value_screen", "disclosures", "universe_size", "all_stocks"):
         assert key in data, key
     assert data["sample"] is True
     assert 1 <= len(data["ideas"]) <= 5
@@ -306,6 +306,56 @@ def test_load_previous(tmp_path=None):
 def test_assemble_market_date():
     data = collect.build_sample()
     assert "market_date" in data
+
+
+def test_classify_new_keywords():
+    assert collect.classify_disclosure("주요사항보고서(자기주식처분결정)")[1] == "negative"
+    assert collect.classify_disclosure("소송등의제기ㆍ신청")[1] == "negative"
+    assert collect.classify_disclosure("회사합병결정")[1] == "watch"
+    assert collect.classify_disclosure("타법인주식및출자증권취득결정")[1] == "watch"
+
+
+def test_flow_delta():
+    stocks = [{"code": "A", "flow_score": 30.0}, {"code": "B", "flow_score": 10.0},
+              {"code": "C", "flow_score": 5.0}]
+    prev = {"all_stocks": [{"code": "A", "flow_score": 18.0}, {"code": "B", "flow_score": 12.0}]}
+    out = collect.apply_flow_delta(stocks, prev)
+    assert out[0]["flow_delta"] == 12.0      # 급등
+    assert out[1]["flow_delta"] == -2.0
+    assert "flow_delta" not in out[2]        # 전일 데이터 없는 신규 종목
+    assert collect.apply_flow_delta(stocks, None) == stocks  # 이전 데이터 없으면 그대로
+
+
+def test_flow_delta_old_format():
+    # 구버전 data.json (all_stocks 없음) → flow_scan 폴백
+    stocks = [{"code": "A", "flow_score": 20.0}]
+    prev = {"flow_scan": [{"code": "A", "flow_score": 15.0}], "ideas": []}
+    assert collect.apply_flow_delta(stocks, prev)[0]["flow_delta"] == 5.0
+
+
+def test_idea_streaks():
+    ideas = [{"code": "A"}, {"code": "B"}, {"code": "C"}]
+    past = [{"A", "B"}, {"A"}, {"A", "C"}]   # 최신순: 어제, 그제, 그끄제
+    out = collect.apply_idea_streaks(ideas, past)
+    by = {s["code"]: s["idea_days"] for s in out}
+    assert by["A"] == 4                       # 오늘 포함 4일 연속
+    assert by["B"] == 2                       # 어제부터
+    assert by["C"] == 1                       # 그끄제엔 있었지만 연속 아님 → NEW
+    assert collect.apply_idea_streaks([{"code":"X"}], [])[0]["idea_days"] == 1
+
+
+def test_history_loader():
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        for day, codes in (("2026-07-08", ["A"]), ("2026-07-09", ["A","B"]),
+                           ("2026-07-10", ["B"])):
+            open(os.path.join(td, day+".json"), "w").write(
+                json.dumps({"ideas": [{"code": c} for c in codes]}))
+        # 오늘(7/10) 이전 것만, 최신순
+        sets = collect.load_history_idea_codes(td, "2026-07-10")
+        assert sets == [{"A","B"}, {"A"}]
+        assert collect.load_history_idea_codes(td, None) or True  # 예외 없이 동작
+        assert collect.load_history_idea_codes("/없는폴더", "2026-07-10") == []
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
