@@ -502,6 +502,57 @@ def test_weekly_message():
     msg2 = notify.build_weekly_message({"performance": {"days": 0}})
     assert "쌓이는 중" in msg2
 
+
+def test_stooq_csv_parse():
+    import notify
+    csv = """Date,Open,High,Low,Close,Volume
+2026-07-08,6100,6150,6080,6120,0
+2026-07-09,6120,6200,6110,6180,0
+2026-07-10,6180,6260,6170,6250,0"""
+    val, chg = notify.parse_stooq_csv(csv)
+    assert val == 6250.0
+    assert abs(chg - 1.13) < 0.01
+    assert notify.parse_stooq_csv("Date,Open\n") == (None, None)
+    assert notify.parse_stooq_csv("") == (None, None)
+
+
+def test_us_mood_wording():
+    import notify
+    assert "강세" in notify.us_mood_line({"나스닥": 2.1})
+    assert "보수적" in notify.us_mood_line({"나스닥": -2.0})
+    assert "원화 약세" in notify.us_mood_line({"환율": 0.8})
+    assert "반도체" in notify.us_mood_line({"나스닥": 0.2, "반도체SOX": 3.5})
+    assert notify.us_mood_line({"나스닥": 0.3}) == ""     # 평온한 날은 침묵
+
+
+def test_gap_signals():
+    import notify
+    fake = {"nvda.us": (900, 5.2), "tsla.us": (300, -4.1), "aapl.us": (230, 0.5),
+            "mu.us": (None, None), "amd.us": (150, 1.0), "lly.us": (800, 2.9),
+            "avgo.us": (1700, 0.1)}
+    lines = notify.gap_signal_lines(fetch=lambda s: fake.get(s, (None, None)))
+    assert len(lines) == 2                     # ±3% 이상만 (엔비디아, 테슬라)
+    assert any("엔비디아" in l and "▲5.2%" in l and "주목" in l for l in lines)
+    assert any("테슬라" in l and "약세 주의" in l for l in lines)
+    assert len(notify.gap_signal_lines(fetch=lambda s: fake.get(s, (None, None)),
+                                       threshold=5.0)) == 1
+
+
+def test_us_block_failsafe():
+    import notify
+    old = notify.fetch_stooq_change
+    try:
+        notify.fetch_stooq_change = lambda s, days=10: (None, None)
+        assert notify.us_market_block() == []
+        data = {"market_date": "2026-07-10", "sample": False,
+                "indices": {"KOSPI": {"value": 7475.94, "change_pct": 2.52},
+                            "KOSDAQ": {"value": 837.43, "change_pct": 5.47}},
+                "ideas": [], "disclosures": [], "all_stocks": []}
+        msg = notify.build_message(data)
+        assert "아이디어 브리핑" in msg and "미국장" not in msg
+    finally:
+        notify.fetch_stooq_change = old
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

@@ -72,11 +72,131 @@ def arrow(pct):
     return "▲" if pct > 0 else ("▼" if pct < 0 else "-")
 
 
+# ---------------------------------------------------------------------------
+# 미국장 연동 (stooq.com 무료 데이터, 키 불필요)
+# ---------------------------------------------------------------------------
+
+US_INDICES = [
+    ("^spx", "S&P500"), ("^ndq", "나스닥"), ("^sox", "반도체SOX"),
+    ("usdkrw", "환율"), ("cl.f", "WTI"),
+]
+US_MAP_PATH = ROOT / "us_kr_map.json"
+
+
+def fetch_stooq_change(symbol, days=10):
+    """stooq 일봉 CSV → (최근종가, 등락률%). 실패 시 (None, None)."""
+    try:
+        import datetime as _dt
+        end = _dt.date.today()
+        start = end - _dt.timedelta(days=days)
+        url = (f"https://stooq.com/q/d/l/?s={symbol}"
+               f"&d1={start:%Y%m%d}&d2={end:%Y%m%d}&i=d")
+        r = requests.get(url, timeout=10,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None, None
+        return parse_stooq_csv(r.text)
+    except Exception:
+        return None, None
+
+
+def parse_stooq_csv(text):
+    """stooq CSV (Date,Open,High,Low,Close[,Volume]) → (마지막 종가, 등락률%)"""
+    rows = [ln.split(",") for ln in (text or "").strip().splitlines()[1:] if "," in ln]
+    closes = []
+    for row in rows:
+        try:
+            closes.append(float(row[4]))
+        except (IndexError, ValueError):
+            continue
+    if len(closes) < 2:
+        return (closes[-1], None) if closes else (None, None)
+    last, prev = closes[-1], closes[-2]
+    return last, round((last / prev - 1) * 100, 2)
+
+
+def us_mood_line(chg_map):
+    """규칙 기반 시장 분위기 워딩 (API 불필요)."""
+    ndq = chg_map.get("나스닥")
+    sox = chg_map.get("반도체SOX")
+    fx = chg_map.get("환율")
+    lines = []
+    if ndq is not None:
+        if ndq >= 1.5:
+            lines.append("미국 기술주 강세 마감 — 성장주 우호적 출발 기대")
+        elif ndq <= -1.5:
+            lines.append("미국 기술주 약세 마감 — 보수적 접근 권장")
+    if sox is not None and abs(sox) >= 2 and (ndq is None or abs(sox) > abs(ndq)):
+        lines.append("반도체지수 변동 큼 — 반도체 대형주 갭 주의"
+                     if sox < 0 else "반도체지수 강세 — 반도체 대형주 주목")
+    if fx is not None and fx >= 0.5:
+        lines.append("환율 상승(원화 약세) — 외국인 수급에 부담 가능")
+    elif fx is not None and fx <= -0.5:
+        lines.append("환율 하락(원화 강세) — 외국인 수급 우호적")
+    return " · ".join(lines[:2])
+
+
+def load_us_map():
+    try:
+        return json.loads(US_MAP_PATH.read_text(encoding="utf-8")).get("mappings", [])
+    except Exception:
+        return []
+
+
+def gap_signal_lines(fetch=None, threshold=3.0):
+    """연동주 매핑: 미국 종목 ±threshold% 이상이면 국내 관련주 라인 생성."""
+    fetch = fetch or fetch_stooq_change
+    out = []
+    for m in load_us_map()[:10]:
+        _, chg = fetch(m.get("us", ""))
+        if chg is None or abs(chg) < threshold:
+            continue
+        sign = "▲" if chg > 0 else "▼"
+        mood = "주목" if chg > 0 else "약세 주의"
+        krs = "·".join(m.get("kr", [])[:3])
+        out.append(f"⚡ {m.get('us_name')} {sign}{abs(chg):.1f}% → "
+                   f"{m.get('theme')} ({krs}) {mood}")
+    return out[:4]
+
+
+def us_market_block():
+    """아침 브리핑용 미국장 블록. 어떤 실패에도 빈 리스트 반환 (브리핑 발송은 계속)."""
+    try:
+        chg_map, parts = {}, []
+        for sym, name in US_INDICES:
+            val, chg = fetch_stooq_change(sym)
+            if val is None:
+                continue
+            chg_map[name] = chg
+            if name == "환율":
+                arrow_s = "" if chg is None else ("▲" if chg > 0 else "▼")
+                parts.append(f"환율 {val:,.0f}원{arrow_s}")
+            elif name == "WTI":
+                parts.append(f"WTI {val:,.1f}")
+            else:
+                arrow_s = "" if chg is None else ("▲" if chg > 0 else "▼")
+                chg_s = "" if chg is None else f"{arrow_s}{abs(chg):.1f}%"
+                parts.append(f"{name} {chg_s}")
+        if not parts:
+            return []
+        lines = ["🌎 <b>밤사이 미국장</b>", " · ".join(parts)]
+        mood = us_mood_line(chg_map)
+        if mood:
+            lines.append(f"<i>{mood}</i>")
+        lines.extend(gap_signal_lines())
+        lines.append("")
+        return lines
+    except Exception:
+        return []
+
+
 def build_message(data):
     """data.json → 텔레그램 메시지 (HTML 포맷)."""
     e = lambda s: html.escape(str(s or ""))
     md = (data.get("market_date") or "").replace("-", ".")
     lines = [f"📊 <b>국내장 아이디어 브리핑</b>  <i>({e(md)} 장 마감 기준)</i>", ""]
+
+    lines.extend(us_market_block())   # 🌎 밤사이 미국장 (실패 시 자동 생략)
 
     idx = data.get("indices") or {}
     k, q = idx.get("KOSPI") or {}, idx.get("KOSDAQ") or {}
