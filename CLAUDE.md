@@ -1,0 +1,71 @@
+# AI 작업 지침 (CLAUDE.md)
+
+이 파일은 AI 어시스턴트(Claude 등 모든 모델)가 이 저장소에서 작업할 때 따라야 할
+지침이다. 사람이 읽어도 유용하다. **작업 전 반드시 이 파일과 README.md를 읽을 것.**
+
+## 프로젝트 개요
+
+국내 주식(KOSPI/KOSDAQ) 투자 아이디어 대시보드. 소유자는 비개발자이므로
+**모든 안내는 클릭 단위로 쉽게**, 전문용어 없이 설명한다.
+
+- 웹: https://km-jang.github.io/kr-idea/ (GitHub Pages, main 브랜치 루트)
+- 자동화: GitHub Actions (`.github/workflows/update.yml`) — 스케줄 3개
+  - 평일 19:10 KST 수집+마감요약 / 평일 08:00 KST 아침 브리핑 / 일요일 18:00 KST 주간 결산
+- 알림: 텔레그램 (Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, 선택 `DART_API_KEY`)
+
+## 아키텍처 (파일 전부 저장소 최상위)
+
+| 파일 | 역할 | 수정 빈도 |
+|---|---|---|
+| `collect.py` | 수집·점수화 파이프라인. **튜닝은 상단 CONFIG만** | 튜닝 시 |
+| `notify.py` | 텔레그램 발송 (기본/`--evening`/`--weekly`/`--dry-run`) | 드묾 |
+| `index.html` | 대시보드 전체 (단일 파일, 외부 JS 라이브러리 없음) | 기능 추가 시 |
+| `data.json` | 최신 수집 결과 (봇이 커밋) | 자동 |
+| `history/*.json` | 일별 스냅샷 — 성과 트래킹·추세의 재료. **삭제 금지** | 자동 |
+| `test_parsers.py` | 오프라인 테스트. 수집 전 Actions에서 자동 실행 | 코드 수정 시 |
+| `watchlist.txt` | 텔레그램 관심종목 (6자리 코드, # 주석) | 사용자가 |
+
+## 절대 규칙 (어기면 시스템이 깨진다)
+
+1. **data.json 스키마는 하위호환 유지.** 키 삭제·이름 변경 금지 (추가만 허용).
+   index.html과 notify.py가 과거 형식도 읽도록 폴백이 있는데, 새 코드도 같은 원칙을 따를 것.
+2. **모든 코드 수정 후 `python test_parsers.py` 전체 통과 확인.** 새 기능엔 테스트 추가.
+   Actions가 수집 전에 테스트를 돌리므로, 테스트가 깨지면 갱신 자체가 안 된다 (의도된 안전장치).
+3. **휴장일 스킵과 품질 가드 로직을 우회하지 말 것** (`is_holiday_rerun`, `validate_collection`).
+   이게 엉터리 데이터 배포를 막는 핵심 안전장치다.
+4. **한국 주식 색 관례: 빨강=상승, 파랑=하락.** 서구식으로 뒤집지 말 것.
+5. **네이버 요청 예의**: `REQUEST_DELAY`(0.12s) 제거 금지, 유니버스 무리하게 확대 금지.
+6. **시크릿을 코드·파일·로그에 절대 노출하지 말 것.** 환경변수로만 접근.
+7. **점수 산식 변경은 CONFIG 값 조정으로.** 산식 구조 자체를 바꿀 땐 README의 산식 설명도 갱신.
+
+## 배포 방법 (중요 — 특수한 환경)
+
+AI 세션에서 git push가 막혀 있을 수 있다. 그 경우 배포 절차:
+- 수정 파일들을 ZIP으로 사용자에게 전달 → 사용자가 GitHub 웹에서
+  `Add file → Upload files`로 덮어쓰기 (같은 파일명 자동 교체)
+- `.github/` 안의 파일은 드래그 업로드가 안 되므로, 웹 편집 링크
+  (`github.com/km-jang/kr-idea/edit/main/.github/workflows/update.yml`)로 붙여넣기 안내
+- 전달 전 반드시: 테스트 전체 통과 + (UI 변경 시) 로컬 렌더링 확인
+- 반영 후 `raw.githubusercontent.com`으로 파일 일치 검증 (캐시 지연 몇 분 감안)
+
+## 미세조정(튜닝) 요청을 받으면
+
+1. `collect.py` 상단 CONFIG의 해당 숫자만 수정 (README '튜닝 가이드' 참고)
+2. `python test_parsers.py` 통과 확인
+3. `python collect.py --sample`로 샘플 생성 후 로직 이상 없는지 확인
+4. collect.py 하나만 전달, 사용자에게 업로드 안내
+5. 가중치(수급/밸류/모멘텀/공시 비중) 얘기라면 코드 수정 전에
+   **대시보드 슬라이더로 먼저 실험**하도록 권할 것
+
+## 검증 체크리스트 (모든 작업 공통)
+
+- [ ] test_parsers.py 전체 통과
+- [ ] `collect.py --sample` 정상 생성 (스키마 키 확인)
+- [ ] UI 변경 시: 라이트/다크/모바일(390px) 렌더링 + 콘솔 에러 0
+- [ ] notify 변경 시: `--dry-run`으로 3종 메시지 미리보기, 4096자 미만
+- [ ] update.yml 변경 시: YAML 파싱 + 스케줄별 step 조건 확인
+- [ ] 사용자 안내는 클릭 단위로, 파일 몇 개를 올리는지 명시
+
+## 장애 발생 시
+
+`PLAYBOOK.md`의 증상별 매뉴얼을 따를 것.
