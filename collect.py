@@ -41,11 +41,16 @@ OUT_PATH = ROOT / "data.json"
 # ===========================================================================
 CONFIG = {
     # 유니버스
-    "kospi_n": 200,             # 코스피 시총 상위 몇 종목
-    "kosdaq_n": 100,            # 코스닥 시총 상위 몇 종목
+    "kospi_n": 300,             # 코스피 시총 상위 몇 종목
+    "kosdaq_n": 200,            # 코스닥 시총 상위 몇 종목
     # 아이디어 선정
     "idea_count": 5,            # 오늘의 아이디어 개수
     "idea_min_mktcap": 3000,    # 최소 시가총액 (억원)
+    "min_turnover_100m": 30,    # 최소 일 거래대금 (억원) - 미달 종목은 5선/스캐너 제외
+    # 심리 시그널 (네이버 개발자 키 있을 때만 동작: NAVER_CLIENT_ID/SECRET)
+    "senti_top_n": 100,         # 점수 상위 몇 종목에 대해 심리 조회
+    "senti_trend_hot": 3.0,     # 검색량 오늘/30일평균 이 배수 이상이면 급증
+    "senti_news_hot": 10,       # 24시간 기사 수 이 값 이상이면 뉴스 급증
     # 수급 점수 (최대 40)
     "flow_f_streak_cap": 10,    # 외국인 연속일 상한 (x2점 = 최대 20)
     "flow_i_streak_cap": 5,     # 기관 연속일 상한 (x2점 = 최대 10)
@@ -510,6 +515,117 @@ def build_disclosure_signals(raw_items):
 
 
 # ---------------------------------------------------------------------------
+# 4.5) 심리 시그널 (선택: 네이버 개발자센터 키 필요)
+#   Secrets: NAVER_CLIENT_ID, NAVER_CLIENT_SECRET (developers.naver.com 무료)
+#   키가 없으면 이 단계 전체가 조용히 생략된다.
+# ---------------------------------------------------------------------------
+
+def naver_api_keys():
+    cid = os.environ.get("NAVER_CLIENT_ID", "").strip()
+    sec = os.environ.get("NAVER_CLIENT_SECRET", "").strip()
+    return (cid, sec) if cid and sec else None
+
+
+def fetch_trend_ratios(names, keys, now=None):
+    """데이터랩 검색어 트렌드 → {종목명: 오늘/30일평균 배수}. 5개씩 묶어 조회."""
+    cid, sec = keys
+    now = now or datetime.now(KST)
+    end = now - timedelta(days=1)            # 데이터랩은 전일까지 집계
+    start = end - timedelta(days=30)
+    out = {}
+    for i in range(0, len(names), 5):
+        batch = names[i:i + 5]
+        body = {
+            "startDate": start.strftime("%Y-%m-%d"),
+            "endDate": end.strftime("%Y-%m-%d"),
+            "timeUnit": "date",
+            "keywordGroups": [{"groupName": n, "keywords": [n]} for n in batch],
+        }
+        try:
+            r = requests.post(
+                "https://openapi.naver.com/v1/datalab/search",
+                json=body, timeout=TIMEOUT,
+                headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec})
+            if r.status_code != 200:
+                continue
+            out.update(parse_datalab(r.json()))
+        except Exception:
+            continue
+        time.sleep(REQUEST_DELAY)
+    return out
+
+
+def parse_datalab(data):
+    """데이터랩 응답 → {그룹명: 마지막날/기간평균 배수}"""
+    out = {}
+    for g in (data or {}).get("results", []):
+        pts = [p.get("ratio") for p in g.get("data", []) if p.get("ratio") is not None]
+        if len(pts) < 8:
+            continue
+        avg = sum(pts[:-1]) / max(1, len(pts) - 1)
+        if avg > 0:
+            out[g.get("title")] = round(pts[-1] / avg, 2)
+    return out
+
+
+def fetch_news_count(name, keys, now=None):
+    """뉴스 검색 API → 최근 24시간 기사 수 (최대 100)."""
+    cid, sec = keys
+    now = now or datetime.now(KST)
+    try:
+        r = requests.get(
+            "https://openapi.naver.com/v1/search/news.json",
+            params={"query": name, "display": 100, "sort": "date"},
+            timeout=TIMEOUT,
+            headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec})
+        if r.status_code != 200:
+            return None
+        return count_recent_news(r.json(), now)
+    except Exception:
+        return None
+
+
+def count_recent_news(data, now):
+    """뉴스 API 응답 → 24시간 내 기사 수"""
+    from email.utils import parsedate_to_datetime
+    n = 0
+    for it in (data or {}).get("items", []):
+        try:
+            dt = parsedate_to_datetime(it.get("pubDate", ""))
+            if (now - dt).total_seconds() <= 86400:
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
+def apply_sentiment(stocks, errors):
+    """점수 상위 종목에 검색 트렌드·뉴스 빈도 부여. 키 없으면 no-op."""
+    keys = naver_api_keys()
+    if not keys:
+        print("  → 네이버 개발자 키 없음 - 심리 시그널 생략")
+        return stocks, False
+    top = sorted(stocks, key=lambda s: -(s.get("score") or 0))[:CONFIG["senti_top_n"]]
+    names = [s["name"] for s in top]
+    try:
+        ratios = fetch_trend_ratios(names, keys)
+        for s in top:
+            if s["name"] in ratios:
+                s["trend_ratio"] = ratios[s["name"]]
+    except Exception as e:
+        errors.append(f"datalab: {e}")
+    hot = 0
+    for s in top:
+        cnt = fetch_news_count(s["name"], keys)
+        if cnt is not None:
+            s["news_24h"] = cnt
+            hot += 1 if cnt >= CONFIG["senti_news_hot"] else 0
+        time.sleep(REQUEST_DELAY)
+    print(f"  → 심리 조회 {len(top)}종목 (뉴스 급증 {hot}건)")
+    return stocks, True
+
+
+# ---------------------------------------------------------------------------
 # 5) 지수 스냅샷
 # ---------------------------------------------------------------------------
 
@@ -800,12 +916,22 @@ def score_stocks(stocks, disclosure_signals):
     return stocks
 
 
+def turnover_100m(s):
+    """당일 거래대금 (억원). 가격x거래량 / 1e8."""
+    p, v = s.get("price"), s.get("volume")
+    if not p or not v:
+        return None
+    return round(p * v / 1e8, 1)
+
+
 def pick_ideas(stocks, n=None, min_mktcap_100m=None):
-    """종합점수 상위 n개 (시총 필터 적용, 마이너스 공시 종목 제외)."""
+    """종합점수 상위 n개 (시총·거래대금 필터, 마이너스 공시 종목 제외)."""
     n = n or CONFIG["idea_count"]
     min_mktcap_100m = min_mktcap_100m or CONFIG["idea_min_mktcap"]
+    min_to = CONFIG.get("min_turnover_100m", 0)
     cands = [s for s in stocks
              if (s.get("mktcap_100m") or 0) >= min_mktcap_100m
+             and (turnover_100m(s) is None or turnover_100m(s) >= min_to)
              and s.get("disc_score", 0) >= 0
              and s.get("score", 0) > 0]
     cands.sort(key=lambda s: -s["score"])
@@ -881,6 +1007,9 @@ def build_sample():
     for s in stocks:                       # 미리보기용 52주 최고가
         s["h52"] = round(s["price"] / random.choice((0.72, 0.85, 0.93, 0.96, 0.99)))
     stocks = score_stocks(stocks, disclosures)
+    for i, s in enumerate(stocks):         # 미리보기용 심리 시그널
+        s["trend_ratio"] = round(random.uniform(0.5, 5.0), 1)
+        s["news_24h"] = random.randint(0, 25)
     for s in stocks:                       # 미리보기용 전일 대비 변화량
         s["flow_delta"] = round(random.uniform(-6, 12), 1)
     ideas = pick_ideas(stocks, 5)
@@ -913,7 +1042,7 @@ def build_sample():
                     {"KOSPI": {"value": 3412.68, "change_pct": 0.87},
                      "KOSDAQ": {"value": 812.45, "change_pct": -0.21}},
                     now, sample=True, errors=[], performance=performance,
-                    kospi_trend=trend)
+                    kospi_trend=trend, sentiment_enabled=True)
 
 
 # ---------------------------------------------------------------------------
@@ -921,7 +1050,8 @@ def build_sample():
 # ---------------------------------------------------------------------------
 
 def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None,
-             market_date=None, performance=None, kospi_trend=None):
+             market_date=None, performance=None, kospi_trend=None,
+             sentiment_enabled=False):
     def slim(s):
         return {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -929,6 +1059,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
             "f_5d_amt_100m", "i_5d_amt_100m", "f_20d_amt_100m", "i_20d_amt_100m",
             "flow_score", "value_score", "mom_score", "disc_score", "score",
             "reasons", "flow_delta", "idea_days", "near_52w_pct", "sector",
+            "trend_ratio", "news_24h",
             "disclosures")}
 
     def compact(s):
@@ -937,7 +1068,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
             "pbr", "per", "dvr", "f_streak", "i_streak", "f_5d_amt_100m",
             "flow_score", "value_score", "mom_score", "disc_score", "score",
-            "flow_delta", "near_52w_pct", "reasons", "sector")}
+            "flow_delta", "near_52w_pct", "reasons", "sector",
+            "volume", "trend_ratio", "news_24h")}
 
     flow_rank = sorted(stocks, key=lambda s: -(s.get("flow_score") or 0))[:30]
     value_rank = sorted(stocks, key=lambda s: -(s.get("value_score") or 0))[:30]
@@ -952,6 +1084,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "disclosures": disclosures[:60],
         "performance": performance or {"days": 0, "records": []},
         "kospi_trend": kospi_trend or [],
+        "sentiment_enabled": sentiment_enabled,
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1031,6 +1164,8 @@ def run_full(max_universe=None, out_path=None):
         sys.exit(2)
 
     stocks = score_stocks(stocks, disclosures)
+    print("[4.5/5] 심리 시그널 (검색 트렌드·뉴스)...")
+    stocks, senti_on = apply_sentiment(stocks, errors)
     stocks = apply_flow_delta(stocks, prev)
     ideas = pick_ideas(stocks, 5)
     hist_dir = Path(out_path or OUT_PATH).parent / "history"
@@ -1042,7 +1177,7 @@ def run_full(max_universe=None, out_path=None):
         print("경고:", *errors[:5], sep="\n  ")
     return assemble(stocks, disclosures, ideas, indices, now, errors=errors[:20],
                     market_date=market_date, performance=performance,
-                    kospi_trend=kospi_trend)
+                    kospi_trend=kospi_trend, sentiment_enabled=senti_on)
 
 
 def main():

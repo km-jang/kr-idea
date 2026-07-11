@@ -18,7 +18,10 @@
 | 파일 | 역할 | 수정 빈도 |
 |---|---|---|
 | `collect.py` | 수집·점수화 파이프라인. **튜닝은 상단 CONFIG만** | 튜닝 시 |
-| `notify.py` | 텔레그램 발송 (기본/`--evening`/`--weekly`/`--dry-run`) | 드묾 |
+| `notify.py` | 텔레그램 발송 (기본/`--evening`/`--weekly`/`--dry-run`, 미국장 블록) | 드묾 |
+| `closing_scan.py` | 14:50 종가매매 스캔 (튜닝: CONFIG_SCAN) | 튜닝 시 |
+| `us_kr_map.json` | 미국↔국내 연동주 매핑 | 분기 점검 |
+| `ROADMAP.md` | 남은 기획·의사결정 기록 | 기획 변경 시 |
 | `index.html` | 대시보드 전체 (단일 파일, 외부 JS 라이브러리 없음) | 기능 추가 시 |
 | `data.json` | 최신 수집 결과 (봇이 커밋) | 자동 |
 | `history/*.json` | 일별 스냅샷 — 성과 트래킹·추세의 재료. **삭제 금지** | 자동 |

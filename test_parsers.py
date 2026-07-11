@@ -193,7 +193,7 @@ def _mk(code, name, **kw):
     base = {"code": code, "name": name, "market": "KOSPI", "price": 10000,
             "change_pct": 0.0, "mktcap_100m": 50000, "pbr": 1.0, "per": 10.0,
             "dvr": 2.0, "f_streak": 0, "i_streak": 0, "f_5d_amt_100m": 0,
-            "i_5d_amt_100m": 0, "h52": None}
+            "i_5d_amt_100m": 0, "h52": None, "volume": 1_000_000}
     base.update(kw)
     return base
 
@@ -576,6 +576,79 @@ def test_us_fetch_fallback_chain():
         assert notify.fetch_stooq_change("^spx") == (None, None)
     finally:
         notify._stooq, notify._yahoo = old_s, old_y
+
+
+def test_closing_scan_logic():
+    import closing_scan as cs
+    universe = [
+        {"code": "A00001", "name": "강한종목", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000, "f_streak": 4, "near_52w_pct": 95},
+        {"code": "A00002", "name": "고가이탈", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000},
+        {"code": "A00003", "name": "과열종목", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000},
+        {"code": "A00004", "name": "소형종목", "price": 10000, "volume": 100000,
+         "mktcap_100m": 500},
+    ]
+    quotes = {
+        "A00001": {"price": 10700, "high": 10800, "volume": 900000, "chg": 7.0},   # 통과 (대금 96억)
+        "A00002": {"price": 10500, "high": 11500, "volume": 900000, "chg": 5.0},   # 고가유지 미달
+        "A00003": {"price": 12500, "high": 12600, "volume": 900000, "chg": 25.0},  # 과열 제외
+        "A00004": {"price": 10700, "high": 10800, "volume": 900000, "chg": 7.0},   # 시총 미달
+    }
+    cands = cs.scan_candidates(universe, quotes)
+    assert len(cands) == 1 and cands[0]["name"] == "강한종목"
+    assert any("외인 4일" in n for n in cands[0]["notes"])
+    msg = cs.build_scan_message(cands)
+    assert "강한종목" in msg and "매수 신호가 아닙니다" in msg
+    assert "조건을 만족하는" in cs.build_scan_message([])
+
+
+def test_realtime_parse():
+    import closing_scan as cs
+    data = {"datas": [
+        {"itemCode": "005930", "closePrice": "87,400", "highPrice": "88,000",
+         "accumulatedTradingVolume": "12,345,678", "fluctuationsRatio": "1.63",
+         "compareToPreviousPrice": {"code": "2"}},
+        {"itemCode": "035420", "closePrice": "231,500", "highPrice": "235,000",
+         "accumulatedTradingVolume": "1,000,000", "fluctuationsRatio": "1.07",
+         "compareToPreviousPrice": {"code": "5"}}]}
+    q = cs.parse_realtime(data)
+    assert q["005930"]["price"] == 87400 and q["005930"]["chg"] == 1.63
+    assert q["035420"]["chg"] == -1.07
+    assert cs.parse_realtime({}) == {}
+
+
+def test_datalab_parse():
+    data = {"results": [
+        {"title": "삼성전자", "data": [{"ratio": 10.0}]*29 + [{"ratio": 45.0}]},
+        {"title": "데이터부족", "data": [{"ratio": 5.0}]*3}]}
+    out = collect.parse_datalab(data)
+    assert abs(out["삼성전자"] - 4.5) < 0.1
+    assert "데이터부족" not in out
+    assert collect.parse_datalab({}) == {}
+
+
+def test_news_count():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 7, 11, 12, 0, tzinfo=timezone(timedelta(hours=9)))
+    data = {"items": [
+        {"pubDate": "Sat, 11 Jul 2026 10:00:00 +0900"},   # 2시간 전 → 포함
+        {"pubDate": "Fri, 10 Jul 2026 14:00:00 +0900"},   # 22시간 전 → 포함
+        {"pubDate": "Thu, 09 Jul 2026 10:00:00 +0900"},   # 이틀 전 → 제외
+        {"pubDate": "잘못된 날짜"}]}
+    assert collect.count_recent_news(data, now) == 2
+
+
+def test_turnover_filter():
+    stocks = [
+        _mk("T00001", "대금충분", f_streak=8, volume=1_000_000),      # 100억
+        _mk("T00002", "대금미달", f_streak=9, volume=10_000),         # 1억
+    ]
+    scored = collect.score_stocks(stocks, [])
+    ideas = collect.pick_ideas(scored)
+    names = [s["name"] for s in ideas]
+    assert "대금충분" in names and "대금미달" not in names
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

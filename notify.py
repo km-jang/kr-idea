@@ -281,6 +281,14 @@ def build_message(data):
     if pos or neg:
         lines.append("")
 
+    hot = [s for s in (data.get("all_stocks") or [])
+           if (s.get("trend_ratio") or 0) >= 3 or (s.get("news_24h") or 0) >= 10]
+    if hot:
+        hot.sort(key=lambda s: -(s.get("trend_ratio") or 0))
+        names = ", ".join(e(s["name"]) for s in hot[:5])
+        lines.append(f"🔥 관심 급증: {names}")
+        lines.append("")
+
     wl = watchlist_lines(data, parse_watchlist(
         WATCHLIST_PATH.read_text(encoding="utf-8") if WATCHLIST_PATH.exists() else ""))
     if wl:
