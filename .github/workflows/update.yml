@@ -2,8 +2,9 @@ name: 데이터 갱신
 
 on:
   schedule:
-    - cron: "10 10 * * 1-5"   # 매 영업일 19:10 KST - 데이터 수집
+    - cron: "10 10 * * 1-5"   # 매 영업일 19:10 KST - 데이터 수집 + 마감 요약
     - cron: "0 23 * * 0-4"    # 매 영업일 08:00 KST - 아침 브리핑 발송
+    - cron: "0 9 * * 0"       # 일요일 18:00 KST - 주간 결산 발송
   workflow_dispatch: {}
 
 permissions:
@@ -28,17 +29,17 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 오프라인 테스트
-        if: github.event.schedule != '0 23 * * 0-4'
+        if: github.event.schedule == '10 10 * * 1-5' || github.event_name == 'workflow_dispatch'
         run: python test_parsers.py
 
       - name: 데이터 수집
-        if: github.event.schedule != '0 23 * * 0-4'
+        if: github.event.schedule == '10 10 * * 1-5' || github.event_name == 'workflow_dispatch'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
         run: python collect.py
 
       - name: 커밋 & 푸시
-        if: github.event.schedule != '0 23 * * 0-4'
+        if: github.event.schedule == '10 10 * * 1-5' || github.event_name == 'workflow_dispatch'
         run: |
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
@@ -50,9 +51,25 @@ jobs:
             git push
           fi
 
-      - name: 텔레그램 브리핑 발송
+      - name: 아침 브리핑 발송
         if: github.event.schedule == '0 23 * * 0-4' || github.event_name == 'workflow_dispatch'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python notify.py
+
+      - name: 마감 요약 발송
+        if: github.event.schedule == '10 10 * * 1-5'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python notify.py --evening
+
+      - name: 주간 결산 발송
+        if: github.event.schedule == '0 9 * * 0'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python notify.py --weekly
