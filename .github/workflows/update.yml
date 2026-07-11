@@ -5,6 +5,7 @@ on:
     - cron: "10 10 * * 1-5"   # 매 영업일 19:10 KST - 데이터 수집 + 마감 요약
     - cron: "0 23 * * 0-4"    # 매 영업일 08:00 KST - 아침 브리핑 발송
     - cron: "0 9 * * 0"       # 일요일 18:00 KST - 주간 결산 발송
+    - cron: "50 5 * * 1-5"    # 매 영업일 14:50 KST - 종가매매 스캔
   workflow_dispatch: {}
 
 permissions:
@@ -36,6 +37,8 @@ jobs:
         if: github.event.schedule == '10 10 * * 1-5' || github.event_name == 'workflow_dispatch'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: python collect.py
 
       - name: 커밋 & 푸시
@@ -73,3 +76,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python notify.py --weekly
+
+      - name: 종가매매 스캔
+        if: github.event.schedule == '50 5 * * 1-5'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python closing_scan.py
