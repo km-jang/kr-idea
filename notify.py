@@ -83,8 +83,24 @@ US_INDICES = [
 US_MAP_PATH = ROOT / "us_kr_map.json"
 
 
+# stooq 실패 시 야후 파이낸스로 자동 전환하기 위한 심볼 대응표
+YAHOO_MAP = {
+    "^spx": "^GSPC", "^ndq": "^IXIC", "^sox": "^SOX",
+    "usdkrw": "KRW=X", "cl.f": "CL=F",
+    "nvda.us": "NVDA", "mu.us": "MU", "amd.us": "AMD", "tsla.us": "TSLA",
+    "aapl.us": "AAPL", "lly.us": "LLY", "avgo.us": "AVGO",
+}
+
+
 def fetch_stooq_change(symbol, days=10):
-    """stooq 일봉 CSV → (최근종가, 등락률%). 실패 시 (None, None)."""
+    """미국 시세: stooq 우선, 실패 시 야후 폴백 → (최근종가, 등락률%)."""
+    val, chg = _stooq(symbol, days)
+    if val is not None:
+        return val, chg
+    return _yahoo(YAHOO_MAP.get(symbol, symbol))
+
+
+def _stooq(symbol, days=10):
     try:
         import datetime as _dt
         end = _dt.date.today()
@@ -98,6 +114,34 @@ def fetch_stooq_change(symbol, days=10):
         return parse_stooq_csv(r.text)
     except Exception:
         return None, None
+
+
+def _yahoo(symbol):
+    """야후 차트 API (키 불필요) → (최근종가, 등락률%)."""
+    try:
+        url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+               f"?range=5d&interval=1d")
+        r = requests.get(url, timeout=10,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None, None
+        return parse_yahoo_chart(r.json())
+    except Exception:
+        return None, None
+
+
+def parse_yahoo_chart(data):
+    """야후 v8 chart 응답 → (마지막 종가, 등락률%)"""
+    try:
+        res = data["chart"]["result"][0]
+        closes = [c for c in res["indicators"]["quote"][0]["close"] if c is not None]
+        if len(closes) >= 2:
+            return round(closes[-1], 2), round((closes[-1] / closes[-2] - 1) * 100, 2)
+        if closes:
+            return round(closes[-1], 2), None
+    except (KeyError, IndexError, TypeError):
+        pass
+    return None, None
 
 
 def parse_stooq_csv(text):
@@ -162,10 +206,11 @@ def gap_signal_lines(fetch=None, threshold=3.0):
 def us_market_block():
     """아침 브리핑용 미국장 블록. 어떤 실패에도 빈 리스트 반환 (브리핑 발송은 계속)."""
     try:
-        chg_map, parts = {}, []
+        chg_map, parts, misses = {}, [], []
         for sym, name in US_INDICES:
             val, chg = fetch_stooq_change(sym)
             if val is None:
+                misses.append(name)
                 continue
             chg_map[name] = chg
             if name == "환율":
@@ -177,6 +222,8 @@ def us_market_block():
                 arrow_s = "" if chg is None else ("▲" if chg > 0 else "▼")
                 chg_s = "" if chg is None else f"{arrow_s}{abs(chg):.1f}%"
                 parts.append(f"{name} {chg_s}")
+        print(f"미국장 데이터: {len(parts)}/{len(US_INDICES)} 수신"
+              + (f" (실패: {', '.join(misses)})" if misses else ""))
         if not parts:
             return []
         lines = ["🌎 <b>밤사이 미국장</b>", " · ".join(parts)]

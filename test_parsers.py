@@ -553,6 +553,30 @@ def test_us_block_failsafe():
     finally:
         notify.fetch_stooq_change = old
 
+
+def test_yahoo_chart_parse():
+    import notify
+    data = {"chart": {"result": [{"indicators": {"quote": [{
+        "close": [6100.0, None, 6180.0, 6250.0]}]}}]}}
+    val, chg = notify.parse_yahoo_chart(data)
+    assert val == 6250.0
+    assert abs(chg - 1.13) < 0.01
+    assert notify.parse_yahoo_chart({}) == (None, None)
+    assert notify.parse_yahoo_chart({"chart": {"result": []}}) == (None, None)
+
+
+def test_us_fetch_fallback_chain():
+    import notify
+    old_s, old_y = notify._stooq, notify._yahoo
+    try:
+        notify._stooq = lambda s, days=10: (None, None)
+        notify._yahoo = lambda s: (6250.0, 1.1) if s == "^GSPC" else (None, None)
+        assert notify.fetch_stooq_change("^spx") == (6250.0, 1.1)
+        notify._yahoo = lambda s: (None, None)
+        assert notify.fetch_stooq_change("^spx") == (None, None)
+    finally:
+        notify._stooq, notify._yahoo = old_s, old_y
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
