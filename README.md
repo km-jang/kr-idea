@@ -1,42 +1,99 @@
 # 국내장 아이디어 대시보드
 
-수급(외국인·기관) + 밸류(PBR·PER·배당) + DART 공시 시그널을 매 영업일 자동 수집해
-"오늘의 아이디어 5선"을 뽑아주는 웹 대시보드.
+수급(외국인·기관) + 밸류(PBR·PER·배당) + 모멘텀(52주 신고가) + DART 공시 시그널을
+매 영업일 자동 수집해 "오늘의 아이디어 5선"을 뽑아주는 웹 대시보드.
 
-- 접속: https://km-jang.github.io/kr-idea/
-- 갱신: 매 영업일 19:10 KST 자동 (GitHub Actions) + Actions 탭에서 수동 실행 가능
-- 데이터: 네이버 증권(시세·수급·펀더멘털), DART 전자공시
+- **접속**: https://km-jang.github.io/kr-idea/ (아이폰·안드로이드·PC 모든 브라우저)
+- **비용**: 0원 (GitHub 무료 플랜)
 
 > ⚠️ 투자 참고 자료이며 매수·매도 추천이 아닙니다. 데이터 오류·지연이 있을 수 있습니다.
+
+## 자동 스케줄 (KST)
+
+| 시각 | 요일 | 동작 |
+|---|---|---|
+| 19:10 | 월~금 | 데이터 수집 → 대시보드 갱신 + 히스토리 저장 + 🌙 마감 요약 텔레그램 |
+| 08:00 | 월~금 | 📊 아침 브리핑 텔레그램 (5선 + 공시 + 관심종목) |
+| 18:00 | 일 | 📅 주간 결산 텔레그램 (성과 성적표) |
+
+수동 실행: Actions 탭 → `데이터 갱신` → `Run workflow` (수집 + 아침 브리핑 발송)
 
 ## 파일 구성 (전부 최상위)
 
 | 파일 | 역할 |
 |---|---|
-| `index.html` | 대시보드 웹페이지 |
-| `data.json` | 수집 결과 (Actions가 매일 갱신) |
-| `collect.py` | 데이터 수집·점수화 파이프라인 |
-| `test_parsers.py` | 오프라인 테스트 |
-| `requirements.txt` | 파이썬 의존성 |
+| `index.html` | 대시보드 (워치리스트·검색·슬라이더·성과·업종·CSV·PWA) |
+| `data.json` | 최신 수집 결과 (자동 갱신) |
+| `history/*.json` | 일별 보관 (성과 트래킹·추세의 재료) |
+| `collect.py` | 수집·점수화 파이프라인 — **튜닝은 여기 상단 CONFIG** |
+| `notify.py` | 텔레그램 발송 (아침/마감/주간) |
+| `watchlist.txt` | 텔레그램 브리핑용 관심종목 (연필 아이콘으로 편집) |
+| `test_parsers.py` | 오프라인 테스트 (네트워크 불필요) |
+| `manifest.json` `sw.js` `icon-*.png` | PWA (홈 화면 앱) |
 | `.github/workflows/update.yml` | 자동 실행 스케줄 |
-
-## 설정 (1회)
-
-1. Settings → Pages → Source: `Deploy from a branch`, Branch: `main` / `/ (root)` → Save
-2. Settings → Actions → General → Workflow permissions: `Read and write permissions` → Save
-3. Actions 탭 → `데이터 갱신` → `Run workflow` (첫 데이터 수집)
-
-### 선택: DART OpenAPI 키 (공시 범위 당일 → 3일)
-
-https://opendart.fss.or.kr 에서 무료 키 발급 후
-Settings → Secrets and variables → Actions → New repository secret →
-Name: `DART_API_KEY`, Value: 발급 키
 
 ## 점수 산식
 
-수급(40) = 외국인 연속 순매수(최대 20) + 기관 연속(최대 10) + 동반매수(5) + 외인 5일 100억↑(5)
-밸류(40) = 저PBR 백분위(15) + 고배당 백분위(15) + PER 12배 미만(10)
-공시(±20) = 자사주·소각·무상증자 가점 / 유상증자·CB 감점
+**종합점수 = 수급(40) + 밸류(40) + 모멘텀(10) + 공시(±20)**
 
-"오늘의 아이디어 5선" = 종합점수 상위 5 (시총 3,000억 이상, 악재 공시 제외).
-`collect.py`의 `score_stocks()` / `pick_ideas()`에서 튜닝.
+- 수급: 외국인 연속 순매수일(x2, 최대20) + 기관 연속(x2, 최대10) + 동반매수(+5) + 외인 5일 100억↑(+5)
+- 밸류: 저PBR 백분위(15) + 고배당 백분위(15) + PER 12배 미만(+10)
+- 모멘텀: 52주 최고가 대비 95%↑(+10) / 90%↑(+7) / 85%↑(+4)
+- 공시: 자사주 매입(+10)·소각(+15)·무상증자(+10) 등 가점 / 유상증자(-10)·CB(-8) 등 감점
+
+**아이디어 5선** = 종합점수 상위 5개 (시총 3,000억↑, 악재 공시 제외)
+
+## 🔧 튜닝 가이드 (미세조정용)
+
+모든 튜닝 파라미터는 **`collect.py` 상단의 `CONFIG` 딕셔너리 한 곳**에 모여 있습니다.
+숫자만 바꾸면 되고, 코드 로직은 건드릴 필요 없습니다.
+
+```python
+CONFIG = {
+    "kospi_n": 200,             # 유니버스 크기 (늘리면 수집 시간 증가)
+    "idea_count": 5,            # 5선 → 10선으로 바꾸려면 10
+    "idea_min_mktcap": 3000,    # 소형주도 보려면 낮추기 (억원)
+    "flow_f_streak_cap": 10,    # 외국인 연속일 배점 상한
+    "value_per_max": 12,        # PER 기준선
+    "mom_tiers": [(0.95, 10.0), ...],  # 신고가 근접 구간·배점
+    ...
+}
+```
+
+수정 절차: GitHub에서 `collect.py` 열기 → 연필 아이콘 → CONFIG 숫자 수정 → Commit
+→ Actions에서 `Run workflow` (또는 다음 자동 실행 대기). 문법 실수가 있으면
+자동 테스트 단계에서 실행이 실패하고 이메일이 오므로, 대시보드가 망가질 걱정은 없습니다.
+
+공시 키워드 추가는 `collect.py`의 `POSITIVE_KW / NEGATIVE_KW / WATCH_KW` 리스트에
+`("공시제목 키워드", "표시태그", 점수)` 형태로 한 줄 추가하면 됩니다.
+
+가중치(수급/밸류/모멘텀/공시 비중)는 코드 수정 없이 **대시보드의 슬라이더**로
+조절하는 것을 권장합니다 — 성과 트래킹을 보면서 잘 맞는 조합을 찾은 뒤,
+그 비율을 CONFIG 배점에 반영하는 순서가 좋습니다.
+
+## 텔레그램 설정 (완료된 상태)
+
+Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 등록됨.
+관심종목 알림은 `watchlist.txt`에 6자리 종목코드를 한 줄에 하나씩 추가.
+
+### 선택: DART OpenAPI 키
+
+https://opendart.fss.or.kr 무료 키 발급 → Secrets에 `DART_API_KEY` 추가
+→ 공시 시그널이 당일 → 최근 3일로 확장.
+
+## 로컬 테스트
+
+```bash
+pip install -r requirements.txt
+python test_parsers.py          # 오프라인 테스트
+python collect.py --sample      # 샘플 데이터 생성
+python notify.py --dry-run      # 브리핑 메시지 미리보기
+cd . && python -m http.server   # http://localhost:8000 미리보기
+```
+
+## 문제 해결
+
+- **대시보드가 안 바뀜**: Actions 탭에서 최근 실행이 초록인지 확인. 빨간 X면 클릭해서 로그 확인
+- **"수집 품질 미달 - 갱신 중단"**: 데이터 소스 장애 시 정상 동작 (직전 데이터 유지). 다음 실행에서 대부분 자동 복구
+- **텔레그램이 안 옴**: 봇과의 대화방에서 Start를 눌렀는지, Secrets 두 개가 정확한지 확인
+- **주말**: 수집·브리핑 없음 (일요일 저녁 주간 결산만) — 정상

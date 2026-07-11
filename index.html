@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>국내장 아이디어 대시보드</title>
 <meta name="description" content="수급·밸류·공시 시그널 기반 국내 주식 투자 아이디어 대시보드">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2a78d6">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <style>
 :root{
   --surface-1:#fcfcfb; --page:#f9f9f7;
@@ -44,6 +48,14 @@ header.top h1{font-size:20px;font-weight:700;margin:0}
 .tile{background:var(--surface-1);border:1px solid var(--ring);border-radius:10px;padding:12px 14px}
 .tile .lbl{font-size:12px;color:var(--ink-3);margin-bottom:2px}
 .tile .val{font-size:22px;font-weight:700;letter-spacing:-.01em}
+.tile svg.spark{display:block;width:100%;height:26px;margin-top:6px}
+.csvbtn{float:right;font-size:11.5px;color:var(--ink-2);background:var(--chip-bg);
+  border:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit}
+.csvbtn:hover{color:var(--ink-1)}
+input.memo{width:130px;font-size:12px;font-family:inherit;color:var(--ink-2);
+  background:transparent;border:none;border-bottom:1px dashed var(--grid);
+  outline:none;padding:2px 0}
+input.memo:focus{border-bottom-color:var(--series-1);color:var(--ink-1)}
 .tile .delta{font-size:13px;font-weight:600;margin-left:6px}
 .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
 
@@ -125,6 +137,32 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 .empty{padding:26px;text-align:center;color:var(--ink-3);font-size:13.5px}
 
 /* 별표 & 검색 & 외부링크 */
+/* 가중치 슬라이더 */
+.sliders{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;
+  padding:12px 16px 8px;margin-bottom:12px}
+.slrow{display:grid;grid-template-columns:52px 1fr 46px;align-items:center;gap:10px;padding:3px 0}
+.sllbl{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.slval{font-size:12px;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums}
+.slrow input[type=range]{width:100%;accent-color:var(--series-1);height:22px}
+.slfoot{display:flex;align-items:center;gap:10px;padding:6px 0 4px}
+.slstate{font-size:11.5px;color:var(--ink-3)}
+.slreset{margin-left:auto;font-size:12px;color:var(--ink-2);background:var(--chip-bg);
+  border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit}
+.slreset:hover{color:var(--ink-1)}
+.slpreset{font-size:12px;color:var(--ink-2);background:var(--chip-bg);border:none;
+  border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit}
+.slpreset:hover{color:var(--ink-1)}
+
+/* 업종 바: 순매수(+)는 상승색, 순매도(-)는 하락색 */
+.brow .bfill.neg{background:var(--down);border-radius:4px 0 0 4px}
+.brow .bfill.pos{background:var(--up)}
+
+/* 성과 트래킹 */
+.perf-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}
+.perf-note{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;
+  padding:22px;text-align:center;color:var(--ink-3);font-size:13.5px}
+.pnames{font-size:11.5px;color:var(--ink-3);max-width:340px;white-space:normal}
+
 .badge-new{font-size:10.5px;font-weight:800;color:var(--good-text);white-space:nowrap;
   background:rgba(12,163,12,.12);border-radius:4px;padding:1px 6px;vertical-align:1px}
 .badge-days{font-size:10.5px;font-weight:700;color:var(--ink-2);white-space:nowrap;
@@ -160,6 +198,8 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   <nav class="chips">
     <a href="#watch">관심종목</a>
     <a href="#ideas">오늘의 아이디어</a>
+    <a href="#perf">성과</a>
+    <a href="#sector">업종 흐름</a>
     <a href="#flow">수급 스캐너</a>
     <a href="#value">밸류업 스크리너</a>
     <a href="#disc">공시 시그널</a>
@@ -178,25 +218,50 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
 
   <section id="ideas">
     <h2>오늘의 아이디어 5선</h2>
-    <p class="sub">수급(40) + 밸류(40) + 공시(20) 종합점수 상위 · 시총 3,000억 이상 · 악재 공시 종목 제외</p>
+    <p class="sub">수급(40) + 밸류(40) + 모멘텀(10) + 공시(±20) 종합점수 상위 · 시총 3,000억 이상 · 악재 공시 종목 제외</p>
+    <div class="sliders" id="sliderBox">
+      <div class="slrow"><span class="sllbl">수급</span><input type="range" id="wFlow" min="0" max="200" value="100"><span class="slval" id="wFlowV">100%</span></div>
+      <div class="slrow"><span class="sllbl">밸류</span><input type="range" id="wValue" min="0" max="200" value="100"><span class="slval" id="wValueV">100%</span></div>
+      <div class="slrow"><span class="sllbl">모멘텀</span><input type="range" id="wMom" min="0" max="200" value="100"><span class="slval" id="wMomV">100%</span></div>
+      <div class="slrow"><span class="sllbl">공시</span><input type="range" id="wDisc" min="0" max="200" value="100"><span class="slval" id="wDiscV">100%</span></div>
+      <div class="slfoot">
+        <button class="slpreset" data-w="150,70,120,100">수급형</button>
+        <button class="slpreset" data-w="70,160,60,120">가치형</button>
+        <button class="slpreset" data-w="110,60,200,80">모멘텀형</button>
+        <span id="slState" class="slstate"></span>
+        <button id="slReset" class="slreset">기본값</button>
+      </div>
+    </div>
     <div class="cards" id="ideaCards"></div>
   </section>
 
+  <section id="perf">
+    <h2>성과 트래킹</h2>
+    <p class="sub">과거 "아이디어 5선"이 오늘까지 실제로 낸 수익률 · 같은 기간 KOSPI와 비교</p>
+    <div id="perfBody"></div>
+  </section>
+
+  <section id="sector">
+    <h2>업종 자금 흐름</h2>
+    <p class="sub">업종별 외국인 5일 누적 순매수 금액 합계 (억원) · 돈이 어느 섹터로 흐르는지</p>
+    <div class="bars" id="sectorBars"></div>
+  </section>
+
   <section id="flow">
-    <h2>수급 스캐너</h2>
+    <h2>수급 스캐너 <button class="csvbtn" data-csv="flow">CSV 저장</button></h2>
     <p class="sub">외국인·기관 연속 순매수와 5/20일 누적 순매수 금액 (억원) · 열 제목 클릭 시 정렬</p>
     <div class="bars" id="flowBars"></div>
     <div class="tblwrap"><table id="flowTbl"></table></div>
   </section>
 
   <section id="value">
-    <h2>밸류업 스크리너</h2>
+    <h2>밸류업 스크리너 <button class="csvbtn" data-csv="value">CSV 저장</button></h2>
     <p class="sub">저PBR · 저PER · 고배당 조합 점수 상위 · 열 제목 클릭 시 정렬</p>
     <div class="tblwrap"><table id="valueTbl"></table></div>
   </section>
 
   <section id="search">
-    <h2>종목 검색</h2>
+    <h2>종목 검색 <button class="csvbtn" data-csv="all">전체 CSV 저장</button></h2>
     <p class="sub">수집된 전체 종목에서 이름·코드로 검색</p>
     <input type="search" id="searchBox" placeholder="예: 삼성전자 또는 005930" autocomplete="off">
     <div class="tblwrap" id="searchWrap" style="display:none"><table id="searchTbl"></table></div>
@@ -273,8 +338,9 @@ function watchSection(d){
     return;
   }
   wrap.style.display=""; empty.style.display="none";
+  const notes = getNotes();
   tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>PBR</th>"+
-    "<th>배당률</th><th>외인 연속</th><th>종합점수</th><th>바로가기</th></tr></thead><tbody>"+
+    "<th>배당률</th><th>외인 연속</th><th>종합점수</th><th>바로가기</th><th style='text-align:left'>메모</th></tr></thead><tbody>"+
     rows.map(s=>`<tr>
       <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
       <td>${fmt(s.price)}</td>
@@ -283,7 +349,9 @@ function watchSection(d){
       <td>${s.dvr==null?"–":s.dvr.toFixed(1)+"%"}</td>
       <td><span class="streak${(s.f_streak||0)>=5?" hi":""}">${s.f_streak||0}일</span></td>
       <td><b>${s.score??"–"}</b></td>
-      <td>${linksHtml(s.code)}</td></tr>`).join("")+"</tbody>";
+      <td>${linksHtml(s.code)}</td>
+      <td style="text-align:left"><input class="memo" data-code="${s.code}" placeholder="메모…"
+        value="${esc(notes[s.code]||"")}" maxlength="60"></td></tr>`).join("")+"</tbody>";
 }
 
 /* ---------- 종목 검색 ---------- */
@@ -316,22 +384,92 @@ function initSearch(d){
   });
 }
 
+function sparkline(pts){
+  if(!pts || pts.length < 3) return "";
+  const vs = pts.map(p=>p.v), mn = Math.min(...vs), mx = Math.max(...vs);
+  const W=100, H=26, pad=2;
+  const xy = vs.map((v,i)=>{
+    const x = pad + i*(W-2*pad)/(vs.length-1);
+    const y = mx===mn ? H/2 : pad + (1-(v-mn)/(mx-mn))*(H-2*pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <polyline points="${xy}" fill="none" stroke="var(--series-1)" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
 function tiles(d){
   const k = d.indices?.KOSPI||{}, q = d.indices?.KOSDAQ||{};
-  const t = (lbl,o)=>`<div class="tile"><div class="lbl">${lbl}</div>
+  const t = (lbl,o,extra)=>`<div class="tile"><div class="lbl">${lbl}</div>
     <div class="val">${fmt(o.value,2)}<span class="delta ${cls(o.change_pct)}">
-    ${arrow(o.change_pct)} ${o.change_pct==null?"":Math.abs(o.change_pct).toFixed(2)+"%"}</span></div></div>`;
+    ${arrow(o.change_pct)} ${o.change_pct==null?"":Math.abs(o.change_pct).toFixed(2)+"%"}</span></div>${extra||""}</div>`;
   document.getElementById("tiles").innerHTML =
-    t("KOSPI",k)+t("KOSDAQ",q)+
+    t("KOSPI",k,sparkline(d.kospi_trend))+t("KOSDAQ",q)+
     `<div class="tile"><div class="lbl">스캔 유니버스</div>
      <div class="val">${fmt(d.universe_size)}<span class="delta flat">종목</span></div></div>`+
     `<div class="tile"><div class="lbl">공시 시그널</div>
      <div class="val">${fmt((d.disclosures||[]).length)}<span class="delta flat">건</span></div></div>`;
 }
 
-function ideaCards(d){
+/* ---------- 가중치 슬라이더 ---------- */
+const WGKEY = "kr_idea_weights";
+const getW = () => { try { return JSON.parse(localStorage.getItem(WGKEY)) || {f:100,v:100,m:100,d:100}; } catch(e){ return {f:100,v:100,m:100,d:100}; } };
+const setW = w => { try { localStorage.setItem(WGKEY, JSON.stringify(w)); } catch(e){} };
+const isDefaultW = w => w.f===100 && w.v===100 && w.m===100 && w.d===100;
+
+function adjustedIdeas(d, w){
+  const pool = allStocks(d);
+  const byCode = {}; (d.ideas||[]).forEach(s=>byCode[s.code]=s);
+  return pool
+    .map(s=>{
+      const adj = (s.flow_score||0)*w.f/100 + (s.value_score||0)*w.v/100 +
+                  (s.mom_score||0)*w.m/100 + (s.disc_score||0)*w.d/100;
+      const orig = byCode[s.code];
+      return {...s, score: Math.round(Math.max(0,adj)*10)/10,
+              reasons: s.reasons || (orig?orig.reasons:[]),
+              idea_days: orig ? orig.idea_days : undefined};
+    })
+    .filter(s=>(s.mktcap_100m||0)>=3000 && (s.disc_score||0)>=0 && s.score>0)
+    .sort((a,b)=>b.score-a.score).slice(0,5);
+}
+
+function initSliders(d){
+  const w = getW();
+  const map = {f:"wFlow", v:"wValue", m:"wMom", d:"wDisc"};
+  const state = document.getElementById("slState");
+  function paint(){
+    const cur = getW();
+    for(const k in map){
+      document.getElementById(map[k]).value = cur[k];
+      document.getElementById(map[k]+"V").textContent = cur[k]+"%";
+    }
+    const extra = d.all_stocks ? "" : " (전체 종목 반영은 다음 갱신부터)";
+    state.textContent = isDefaultW(cur) ? "기본 가중치"+extra : "커스텀 가중치 적용 중"+extra;
+  }
+  function apply(){
+    const cur = getW();
+    ideaCards(d, isDefaultW(cur) ? null : adjustedIdeas(d, cur));
+  }
+  for(const k in map){
+    document.getElementById(map[k]).addEventListener("input", e=>{
+      const cur = getW(); cur[k] = +e.target.value; setW(cur); paint(); apply();
+    });
+  }
+  document.getElementById("slReset").addEventListener("click", ()=>{
+    setW({f:100,v:100,m:100,d:100}); paint(); apply();
+  });
+  document.querySelectorAll(".slpreset").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const [f,v,m,dd] = btn.dataset.w.split(",").map(Number);
+      setW({f, v, m, d: dd}); paint(); apply();
+    });
+  });
+  paint(); apply();
+}
+
+function ideaCards(d, override){
   const el = document.getElementById("ideaCards");
-  const list = d.ideas||[];
+  const list = override || d.ideas || [];
   if(!list.length){el.innerHTML='<div class="empty">조건을 만족하는 종목이 없습니다.</div>';return;}
   el.innerHTML = list.map((s,i)=>`
   <div class="card">
@@ -342,7 +480,7 @@ function ideaCards(d){
       <span class="px ${cls(s.change_pct)}">${fmt(s.price)} ${arrow(s.change_pct)}${s.change_pct==null?"":Math.abs(s.change_pct).toFixed(2)+"%"}</span>
     </div>
     <div class="scorebar"><i style="width:${Math.min(100,s.score)}%"></i></div>
-    <div class="sc">종합 <b>${s.score}</b> · 수급 ${s.flow_score} · 밸류 ${s.value_score} · 공시 ${s.disc_score>=0?"+":""}${s.disc_score}</div>
+    <div class="sc">종합 <b>${s.score}</b> · 수급 ${s.flow_score} · 밸류 ${s.value_score}${s.mom_score!=null?` · 모멘텀 ${s.mom_score}`:""} · 공시 ${s.disc_score>=0?"+":""}${s.disc_score}</div>
     <div class="tags">${(s.reasons||[]).slice(0,4).map(r=>`<span class="tag">${esc(r)}</span>`).join("")}</div>
     <div class="links">${starHtml(s.code)}${linksHtml(s.code)}<a class="xlink" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(s.name)}">공시</a></div>
   </div>`).join("");
@@ -359,6 +497,28 @@ function flowBars(d){
       <span class="bl">${esc(s.name)}</span>
       <span class="btrack"><span class="bfill" style="width:${(s.f_5d_amt_100m/max*100).toFixed(1)}%"></span></span>
       <span class="bv">${fmt(s.f_5d_amt_100m)}</span></div>`).join("");
+}
+
+/* ---------- 업종 자금 흐름 ---------- */
+function sectorBars(d){
+  const el = document.getElementById("sectorBars");
+  const pool = allStocks(d).filter(s=>s.sector && s.f_5d_amt_100m!=null);
+  if(!pool.length){
+    el.innerHTML = '<div class="empty" style="padding:18px">업종 데이터는 다음 갱신부터 표시됩니다.</div>';
+    return;
+  }
+  const agg = {};
+  pool.forEach(s=>{ agg[s.sector] = (agg[s.sector]||0) + s.f_5d_amt_100m; });
+  const rows = Object.entries(agg).map(([k,v])=>({sector:k, amt:Math.round(v)}))
+    .sort((a,b)=>b.amt-a.amt);
+  const max = Math.max(...rows.map(r=>Math.abs(r.amt)), 1);
+  el.innerHTML = rows.map(r=>{
+    const w = (Math.abs(r.amt)/max*100).toFixed(1);
+    return `<div class="brow" title="${esc(r.sector)} 외국인 5일 순매수 ${fmt(r.amt)}억">
+      <span class="bl">${esc(r.sector)}</span>
+      <span class="btrack"><span class="bfill ${r.amt>=0?"pos":"neg"}" style="width:${w}%"></span></span>
+      <span class="bv ${cls(r.amt)}">${r.amt>0?"+":""}${fmt(r.amt)}</span></div>`;
+  }).join("");
 }
 
 /* 정렬 가능한 테이블 렌더러 */
@@ -421,6 +581,76 @@ function valueTable(d){
   ], "value_score");
 }
 
+/* ---------- CSV 내보내기 ---------- */
+const CSV_FIELDS = [
+  ["code","코드"],["name","종목명"],["market","시장"],["price","현재가"],
+  ["change_pct","등락률%"],["mktcap_100m","시총(억)"],["pbr","PBR"],["per","PER"],
+  ["dvr","배당률%"],["f_streak","외인연속일"],["i_streak","기관연속일"],
+  ["f_5d_amt_100m","외인5일(억)"],["flow_score","수급점수"],["value_score","밸류점수"],
+  ["mom_score","모멘텀점수"],["score","종합점수"]];
+function downloadCSV(rows, fname){
+  const head = CSV_FIELDS.map(f=>f[1]).join(",");
+  const body = rows.map(r=>CSV_FIELDS.map(f=>{
+    const v = r[f[0]];
+    return v==null ? "" : String(v).includes(",") ? `"${v}"` : v;
+  }).join(",")).join("\n");
+  const blob = new Blob(["﻿"+head+"\n"+body], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = fname; a.click();
+  URL.revokeObjectURL(a.href);
+}
+document.addEventListener("click", e=>{
+  const btn = e.target.closest(".csvbtn");
+  if(!btn || !DATA) return;
+  const kind = btn.dataset.csv;
+  const md = (DATA.market_date||"data").replace(/-/g,"");
+  if(kind==="flow") downloadCSV(DATA.flow_scan||[], `수급스캐너_${md}.csv`);
+  else if(kind==="value") downloadCSV(DATA.value_screen||[], `밸류스크리너_${md}.csv`);
+  else downloadCSV(allStocks(DATA), `전체종목_${md}.csv`);
+});
+
+/* ---------- 종목 메모 (브라우저 저장) ---------- */
+const NKEY = "kr_idea_notes";
+const getNotes = () => { try { return JSON.parse(localStorage.getItem(NKEY)) || {}; } catch(e){ return {}; } };
+document.addEventListener("change", e=>{
+  if(!e.target.classList.contains("memo")) return;
+  const notes = getNotes();
+  const v = e.target.value.trim();
+  if(v) notes[e.target.dataset.code] = v; else delete notes[e.target.dataset.code];
+  try { localStorage.setItem(NKEY, JSON.stringify(notes)); } catch(err){}
+});
+
+/* ---------- 성과 트래킹 ---------- */
+function perfSection(d){
+  const el = document.getElementById("perfBody");
+  const p = d.performance;
+  if(!p || !p.days){
+    el.innerHTML = `<div class="perf-note">📈 데이터 축적 중입니다.<br>
+      히스토리가 쌓이면 "과거 5선의 실제 수익률"이 여기 자동으로 표시됩니다 (선정 다음 영업일부터).</div>`;
+    return;
+  }
+  const s = p.summary || {};
+  const pn = v => v==null ? "–" : `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
+  const tile = (lbl, val, sub) => `<div class="tile"><div class="lbl">${lbl}</div>
+    <div class="val">${val}</div>${sub?`<div class="lbl">${sub}</div>`:""}</div>`;
+  el.innerHTML =
+    `<div class="perf-tiles">`+
+    tile("평균 수익률", pn(s.avg_ret_pct), "선정일 → 현재") +
+    tile("승률", s.win_rate_pct!=null ? s.win_rate_pct+"%" : "–", "플러스로 끝난 날 비율") +
+    tile("KOSPI 대비 우위", s.beat_kospi_pct!=null ? s.beat_kospi_pct+"%" : "–", "지수보다 나은 날 비율") +
+    tile("추적 일수", p.days+"일", "쌓일수록 정확해져요") +
+    `</div>
+    <div class="tblwrap"><table>
+    <thead><tr><th>선정일</th><th>5선 평균</th><th>KOSPI</th><th style="text-align:left">종목별</th></tr></thead><tbody>`+
+    (p.records||[]).map(r=>`<tr>
+      <td>${r.date.slice(5).replace("-","/")}</td>
+      <td>${pn(r.avg_ret_pct)}</td>
+      <td>${pn(r.kospi_ret_pct)}</td>
+      <td class="pnames" style="text-align:left">${(r.ideas||[]).map(x=>
+        `${esc(x.name)} <span class="${cls(x.ret_pct)}">${x.ret_pct>0?"+":""}${x.ret_pct}%</span>`).join(" · ")}</td>
+    </tr>`).join("")+"</tbody></table></div>";
+}
+
 function discList(d){
   const el = document.getElementById("discList");
   const list = d.disclosures||[];
@@ -441,8 +671,12 @@ function renderAll(d){
     (d.market_date ? d.market_date.replace(/-/g,".")+" 장 마감 기준" : "") +
     (d.generated_at ? " · "+d.generated_at.replace(/^\d{4}-\d{2}-\d{2} /,"")+" 수집" : "");
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
-  tiles(d); watchSection(d); ideaCards(d); flowBars(d); flowTable(d);
-  valueTable(d); discList(d); initSearch(d);
+  tiles(d); watchSection(d); initSliders(d); perfSection(d); sectorBars(d);
+  flowBars(d); flowTable(d); valueTable(d); discList(d); initSearch(d);
+}
+
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 
 fetch("data.json?t="+Date.now())

@@ -193,7 +193,7 @@ def _mk(code, name, **kw):
     base = {"code": code, "name": name, "market": "KOSPI", "price": 10000,
             "change_pct": 0.0, "mktcap_100m": 50000, "pbr": 1.0, "per": 10.0,
             "dvr": 2.0, "f_streak": 0, "i_streak": 0, "f_5d_amt_100m": 0,
-            "i_5d_amt_100m": 0}
+            "i_5d_amt_100m": 0, "h52": None}
     base.update(kw)
     return base
 
@@ -356,6 +356,151 @@ def test_history_loader():
         assert sets == [{"A","B"}, {"A"}]
         assert collect.load_history_idea_codes(td, None) or True  # 예외 없이 동작
         assert collect.load_history_idea_codes("/없는폴더", "2026-07-10") == []
+
+
+def test_parse_integration_h52():
+    data = {"totalInfos": [
+        {"code": "highPriceOf52Weeks", "key": "52주 최고", "value": "89,000"},
+        {"code": "per", "key": "PER", "value": "10배"}]}
+    assert collect.parse_integration(data)["h52"] == 89000.0
+
+
+def test_momentum_score():
+    near = _mk("M00001", "신고가주", h52=10200)     # 10000/10200 = 98%
+    far = _mk("M00002", "저점주", h52=20000)        # 50%
+    scored = collect.score_stocks([near, far], [])
+    by = {s["name"]: s for s in scored}
+    assert by["신고가주"]["mom_score"] == 10.0
+    assert by["저점주"]["mom_score"] == 0.0
+    assert by["신고가주"]["score"] > by["저점주"]["score"]
+    assert any("신고가" in r for r in by["신고가주"]["reasons"])
+    assert by["신고가주"]["near_52w_pct"] == 98.0
+
+
+def test_build_performance():
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        # 이틀 전: A를 10000원에 선정 / KOSPI 7000
+        open(os.path.join(td, "2026-07-08.json"), "w").write(json.dumps({
+            "ideas": [{"code": "A", "name": "가", "price": 10000}],
+            "indices": {"KOSPI": {"value": 7000.0}}}))
+        # 어제: A(10500), B(20000) 선정 / KOSPI 7100
+        open(os.path.join(td, "2026-07-09.json"), "w").write(json.dumps({
+            "ideas": [{"code": "A", "name": "가", "price": 10500},
+                      {"code": "B", "name": "나", "price": 20000}],
+            "indices": {"KOSPI": {"value": 7100.0}}}))
+        # 오늘 가격: A=11000(+10%/+4.76%), B=19000(-5%)
+        stocks = [{"code": "A", "price": 11000}, {"code": "B", "price": 19000}]
+        indices = {"KOSPI": {"value": 7200.0}}
+        perf = collect.build_performance(td, stocks, indices, "2026-07-10")
+        assert perf["days"] == 2
+        r_by = {r["date"]: r for r in perf["records"]}
+        assert r_by["2026-07-08"]["avg_ret_pct"] == 10.0
+        assert abs(r_by["2026-07-09"]["avg_ret_pct"] - (-0.12)) < 0.02  # (4.76-5)/2
+        assert abs(r_by["2026-07-08"]["kospi_ret_pct"] - 2.86) < 0.01
+        assert perf["summary"]["win_rate_pct"] == 50
+        # 오늘 날짜 파일은 제외되는지
+        open(os.path.join(td, "2026-07-10.json"), "w").write(json.dumps({
+            "ideas": [{"code": "A", "name": "가", "price": 11000}],
+            "indices": {"KOSPI": {"value": 7200.0}}}))
+        perf2 = collect.build_performance(td, stocks, indices, "2026-07-10")
+        assert perf2["days"] == 2
+
+
+def test_build_performance_empty():
+    perf = collect.build_performance("/없는폴더", [], {}, "2026-07-10")
+    assert perf["days"] == 0
+
+
+def test_index_trend():
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        for day, v in (("2026-07-08", 7000.0), ("2026-07-09", 7100.0),
+                       ("2026-07-10", 7200.0)):
+            open(os.path.join(td, day+".json"), "w").write(json.dumps(
+                {"indices": {"KOSPI": {"value": v}}}))
+        pts = collect.build_index_trend(td, {"KOSPI": {"value": 7300.0}}, "2026-07-10")
+        assert [p["v"] for p in pts] == [7000.0, 7100.0, 7300.0]  # 오늘 파일 제외 + 현재값 추가
+        assert pts[-1]["d"] == "2026-07-10"
+        assert collect.build_index_trend("/없는폴더", {}, None) == []
+
+
+def test_watchlist_parse_and_lines():
+    import notify
+    txt = """# 주석
+005930 삼성전자
+000660  # 하이닉스
+잘못된줄
+005930  # 중복
+"""
+    codes = notify.parse_watchlist(txt)
+    assert codes == ["005930", "000660"]
+    data = {"all_stocks": [
+        {"code": "005930", "name": "삼성전자", "price": 87400, "change_pct": 1.6, "f_streak": 6},
+        {"code": "000660", "name": "SK하이닉스", "price": 292500, "change_pct": -0.5, "f_streak": 0}]}
+    lines = notify.watchlist_lines(data, codes)
+    assert len(lines) == 2
+    assert "삼성전자" in lines[0] and "외인6일" in lines[0]
+    assert "▼0.5%" in lines[1]
+    assert notify.watchlist_lines(data, []) == []
+
+
+def test_evening_message():
+    import notify
+    data = {"market_date": "2026-07-10", "sample": False,
+            "indices": {"KOSPI": {"value": 7475.94, "change_pct": 2.52},
+                        "KOSDAQ": {"value": 837.43, "change_pct": 5.47}},
+            "ideas": [{"code": "A", "name": "기업은행", "idea_days": 1, "score": 60,
+                       "reasons": []}],
+            "all_stocks": []}
+    msg = notify.build_evening_message(data)
+    assert "마감 요약" in msg and "기업은행" in msg and "🆕" in msg
+    assert len(msg) < 4096
+
+
+def test_config_wiring():
+    # CONFIG 값이 실제로 산식에 반영되는지 (idea_count)
+    old = collect.CONFIG["idea_count"]
+    try:
+        collect.CONFIG["idea_count"] = 2
+        stocks = collect.score_stocks(
+            [_mk(f"C{i:05d}", f"주식{i}", f_streak=i) for i in range(6)], [])
+        assert len(collect.pick_ideas(stocks)) == 2
+    finally:
+        collect.CONFIG["idea_count"] = old
+
+
+def test_parse_sector_items():
+    data = {"list": [
+        {"CMP_CD": "005930", "CMP_KOR": "삼성전자", "SEC_NM_KOR": "IT"},
+        {"CMP_CD": "105560", "CMP_KOR": "KB금융"},          # SEC 누락 → 폴백
+        {"CMP_CD": "", "CMP_KOR": "빈코드"}]}
+    items = collect.parse_sector_items(data, "금융")
+    assert ("005930", "IT") in items
+    assert ("105560", "금융") in items
+    assert len(items) == 2
+    assert collect.parse_sector_items({}, "x") == []
+    assert collect.parse_sector_items(None, "x") == []
+
+
+def test_weekly_message():
+    import notify
+    data = {"kospi_trend": [{"d": "2026-07-07", "v": 7300.0},
+                            {"d": "2026-07-10", "v": 7475.94}],
+            "performance": {"days": 3, "summary": {
+                "avg_ret_pct": 1.58, "win_rate_pct": 100, "beat_kospi_pct": 60},
+                "records": [
+                  {"date": "2026-07-09", "avg_ret_pct": 0.75, "kospi_ret_pct": 2.22,
+                   "ideas": [{"name": "현대차", "ret_pct": 1.6}]},
+                  {"date": "2026-07-08", "avg_ret_pct": 3.04, "kospi_ret_pct": 0.47,
+                   "ideas": [{"name": "현대차", "ret_pct": 3.6}]}]}}
+    msg = notify.build_weekly_message(data)
+    assert "주간 결산" in msg and "성적표" in msg
+    assert "1.58" in msg and "최다 선정: 현대차(2회)" in msg
+    assert len(msg) < 4096
+    # 데이터 없을 때도 안전
+    msg2 = notify.build_weekly_message({"performance": {"days": 0}})
+    assert "쌓이는 중" in msg2
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
