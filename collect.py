@@ -62,6 +62,11 @@ CONFIG = {
     "value_per_max": 12,        # PER 이 값 미만이면 +10
     # 모멘텀 점수 (최대 10): 52주 최고가 대비 현재가 비율 구간
     "mom_tiers": [(0.95, 10.0), (0.90, 7.0), (0.85, 4.0)],
+    # 뉴스 나침반
+    "compass_debut_prev_max": 1.0,   # 데뷔: 최근 평균 기사 이 값 이하였다가
+    "compass_debut_today_min": 3,    # 데뷔: 오늘 기사 이 값 이상 (보수적)
+    "compass_theme_hot_mult": 3.0,   # 테마 점화: 7일 평균 대비 배수
+    "compass_react_chg": 3.0,        # '주가 반응' 판정 등락률(%)
     # 침묵 레이더 (무관심 바닥 탐지)
     "silence_vol_max": 0.5,     # 거래량이 평소 평균의 이 비율 이하
     "silence_chg_max": 1.5,     # 당일 등락률 절대값 상한 (횡보 조건)
@@ -624,13 +629,15 @@ def apply_sentiment(stocks, errors, extra=None):
     except Exception as e:
         errors.append(f"datalab: {e}")
     hot = 0
-    for s in top:
-        cnt = fetch_news_count(s["name"], keys)
-        if cnt is not None:
-            s["news_24h"] = cnt
-            hot += 1 if cnt >= CONFIG["senti_news_hot"] else 0
+    for s in stocks:                          # 뉴스는 전 종목 (데뷔 감지 재료)
+        d = fetch_news_detail(s["name"], keys)
+        if d is not None:
+            s["news_24h"] = d["count"]
+            s["news_pos"], s["news_neg"] = d["pos"], d["neg"]
+            s["news_heads"] = d["heads"]
+            hot += 1 if d["count"] >= CONFIG["senti_news_hot"] else 0
         time.sleep(REQUEST_DELAY)
-    print(f"  → 심리 조회 {len(top)}종목 (뉴스 급증 {hot}건)")
+    print(f"  → 트렌드 {len(top)}종목 + 뉴스 {len(stocks)}종목 (뉴스 급증 {hot}건)")
     return stocks, True
 
 
@@ -939,6 +946,172 @@ def build_strategy_race(hist_dir, today_stub, max_days=60):
     rank = sorted(({"name": k, "total_pct": round(vals[k] - 100, 2)}
                    for k in STRATEGY_PRESETS), key=lambda r: -r["total_pct"])
     return {"curves": curves, "rank": rank}
+
+
+# ---------------------------------------------------------------------------
+# 뉴스 나침반: 테마 점화 + 뉴스 데뷔 + 뉴스x수급 4분면 발굴
+# ---------------------------------------------------------------------------
+
+POS_NEWS_KW = ["수주", "계약 체결", "공급 계약", "승인", "허가", "특허", "흑자",
+               "최대 실적", "호실적", "돌파", "상향", "인수", "협력", "선정"]
+NEG_NEWS_KW = ["소송", "적자", "리콜", "유출", "중단", "하향", "취소",
+               "압수수색", "횡령", "파산", "경고", "연기", "결함"]
+
+THEME_PATH = ROOT / "theme_map.json"
+
+
+def load_themes():
+    try:
+        return json.loads(THEME_PATH.read_text(encoding="utf-8")).get("themes", [])
+    except Exception:
+        return []
+
+
+def analyze_news_items(data, now):
+    """뉴스 API 응답 → {count, pos, neg, heads}: 24시간 내 기사 수·톤·대표 헤드라인."""
+    from email.utils import parsedate_to_datetime
+    import html as _html
+    count = pos = neg = 0
+    heads, seen = [], set()
+    for it in (data or {}).get("items", []):
+        try:
+            dt = parsedate_to_datetime(it.get("pubDate", ""))
+            if (now - dt).total_seconds() > 86400:
+                continue
+        except Exception:
+            continue
+        title = _html.unescape(re.sub(r"<[^>]+>", "", it.get("title", ""))).strip()
+        key = title[:25]
+        if key in seen:                # 보도자료 중복 압축
+            continue
+        seen.add(key)
+        count += 1
+        if any(k in title for k in POS_NEWS_KW):
+            pos += 1
+        if any(k in title for k in NEG_NEWS_KW):
+            neg += 1
+        if len(heads) < 3:
+            heads.append(title[:60])
+    return {"count": count, "pos": pos, "neg": neg, "heads": heads}
+
+
+def fetch_news_detail(query, keys, now=None):
+    """뉴스 검색 → analyze_news_items 결과. 실패 시 None."""
+    cid, sec = keys
+    now = now or datetime.now(KST)
+    try:
+        r = requests.get("https://openapi.naver.com/v1/search/news.json",
+                         params={"query": query, "display": 100, "sort": "date"},
+                         timeout=TIMEOUT,
+                         headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec})
+        if r.status_code != 200:
+            return None
+        return analyze_news_items(r.json(), now)
+    except Exception:
+        return None
+
+
+def news_baselines(hist_dir, days=7):
+    """히스토리에서 종목별 뉴스 수 평균 → {code: avg}. (데뷔 판정 기준선)"""
+    acc = {}
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-days:]
+    except Exception:
+        return {}
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for s in d.get("all_stocks") or []:
+            if s.get("news_24h") is not None:
+                acc.setdefault(s["code"], []).append(s["news_24h"])
+    return {c: sum(v) / len(v) for c, v in acc.items() if len(v) >= 3}
+
+
+def detect_debuts(stocks, baselines):
+    """뉴스 데뷔: 평소 조용하던 종목이 오늘 기사화 시작 (보수적 기준)."""
+    out = []
+    for s in stocks:
+        n = s.get("news_24h")
+        base = baselines.get(s["code"])
+        if n is None or base is None:
+            continue
+        if base <= CONFIG["compass_debut_prev_max"] and n >= CONFIG["compass_debut_today_min"]:
+            out.append({"code": s["code"], "name": s["name"], "news_24h": n,
+                        "news_pos": s.get("news_pos"), "news_neg": s.get("news_neg"),
+                        "heads": s.get("news_heads") or [],
+                        "price": s.get("price"), "change_pct": s.get("change_pct"),
+                        "f_streak": s.get("f_streak")})
+    out.sort(key=lambda x: -(x["news_24h"] or 0))
+    return out[:8]
+
+
+def theme_baselines(hist_dir, days=7):
+    """히스토리의 테마별 언급량 평균 → {테마명: avg}"""
+    acc = {}
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-days:]
+    except Exception:
+        return {}
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for t in ((d.get("news_compass") or {}).get("theme_counts") or {}).items():
+            acc.setdefault(t[0], []).append(t[1])
+    return {k: sum(v) / len(v) for k, v in acc.items() if len(v) >= 3}
+
+
+def quadrant_verdict(s):
+    """뉴스x수급 4분면 판정문."""
+    reacted = (s.get("change_pct") or 0) >= CONFIG["compass_react_chg"]
+    flow_ok = (s.get("f_streak") or 0) >= 3 or (s.get("f_5d_amt_100m") or 0) > 0
+    if flow_ok and not reacted:
+        return "🎯 발굴 후보 — 수급 유입 + 아직 미반응"
+    if flow_ok and reacted:
+        return "주도주 — 추격은 신중"
+    if not flow_ok and reacted:
+        return "테마 편승 급등 — 위험"
+    return "관망 — 뉴스뿐, 자금 유입 없음"
+
+
+def build_news_compass(stocks, hist_dir, keys):
+    """테마 점화 감지 + 데뷔 + 4분면. 키 없으면 None."""
+    if not keys:
+        return None
+    themes = load_themes()
+    by_name = {s["name"]: s for s in stocks}
+    theme_counts, hot = {}, []
+    t_base = theme_baselines(hist_dir)
+    for t in themes:
+        kw = (t.get("keywords") or [None])[0]
+        if not kw:
+            continue
+        d = fetch_news_detail(kw, keys)
+        time.sleep(REQUEST_DELAY)
+        if d is None:
+            continue
+        theme_counts[t["name"]] = d["count"]
+        base = t_base.get(t["name"])
+        mult = round(d["count"] / base, 1) if base and base >= 1 else None
+        is_hot = (mult is not None and mult >= CONFIG["compass_theme_hot_mult"]
+                  and d["count"] >= 5)
+        if is_hot:
+            quad = []
+            for nm in t.get("kr", []):
+                s = by_name.get(nm)
+                if s:
+                    quad.append({"name": nm, "code": s["code"],
+                                 "change_pct": s.get("change_pct"),
+                                 "f_streak": s.get("f_streak"),
+                                 "verdict": quadrant_verdict(s)})
+            hot.append({"name": t["name"], "count": d["count"], "mult": mult,
+                        "heads": d["heads"], "stocks": quad})
+    debuts = detect_debuts(stocks, news_baselines(hist_dir))
+    return {"theme_counts": theme_counts, "hot_themes": hot, "debuts": debuts,
+            "themes_total": len(themes)}
 
 
 # ---------------------------------------------------------------------------
@@ -1275,6 +1448,22 @@ def build_sample():
                 "news_24h": random.randint(0, 2), "trend_ratio": round(random.uniform(0.2, 0.8), 2),
                 "f_streak": s.get("f_streak"), "sector": s.get("sector"), "score": s.get("score")}
                for s in stocks[14:20]]
+    news_compass = {
+        "theme_counts": {"원전·SMR": 14, "반도체·HBM": 22, "조선": 6},
+        "hot_themes": [{
+            "name": "원전·SMR", "count": 14, "mult": 4.7,
+            "heads": ["체코 이어 폴란드 원전 수주 근접…한국형 원전 경쟁력 부각",
+                      "SMR 상용화 로드맵 발표…두산에너빌리티 수혜 전망"],
+            "stocks": [
+                {"name": "두산에너빌리티", "code": "034020", "change_pct": 4.19,
+                 "f_streak": 5, "verdict": "주도주 — 추격은 신중"},
+                {"name": "한전기술", "code": "052690", "change_pct": 0.8,
+                 "f_streak": 4, "verdict": "🎯 발굴 후보 — 수급 유입 + 아직 미반응"}]}],
+        "debuts": [{"code": "035760", "name": "CJ ENM", "news_24h": 5,
+                    "news_pos": 3, "news_neg": 0, "price": 71200, "change_pct": 0.71,
+                    "f_streak": 4,
+                    "heads": ["CJ ENM, 글로벌 OTT와 대형 콘텐츠 공급 계약 체결"]}],
+        "themes_total": 15}
     strategies = build_strategies(stocks)
     race_curves, race_vals = {}, {}
     for k in ("기본형", "수급형", "가치형", "모멘텀형"):
@@ -1303,7 +1492,8 @@ def build_sample():
                     now, sample=True, errors=[], performance=performance,
                     kospi_trend=trend, sentiment_enabled=True, perf_curve=curve,
                     scan_review=scan_review, strategies=strategies,
-                    strategy_race=strategy_race, silence=silence)
+                    strategy_race=strategy_race, silence=silence,
+                    news_compass=news_compass)
 
 
 # ---------------------------------------------------------------------------
@@ -1313,7 +1503,7 @@ def build_sample():
 def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None,
              market_date=None, performance=None, kospi_trend=None,
              sentiment_enabled=False, perf_curve=None, scan_review=None,
-             strategies=None, strategy_race=None, silence=None):
+             strategies=None, strategy_race=None, silence=None, news_compass=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -1355,6 +1545,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "strategies": strategies or {},
         "strategy_race": strategy_race,
         "silence": silence or [],
+        "news_compass": news_compass,
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1447,6 +1638,10 @@ def run_full(max_universe=None, out_path=None):
     kospi_trend = build_index_trend(hist_dir, indices, market_date)
     scan_review = build_scan_review(ROOT / "scans.json", stocks, market_date)
     silence = build_silence(sil_cands)
+    print("[4.7/5] 뉴스 나침반 (테마 점화·데뷔)...")
+    news_compass = build_news_compass(stocks, hist_dir_early, naver_api_keys())
+    if news_compass:
+        print(f"  → 점화 테마 {len(news_compass['hot_themes'])} · 데뷔 {len(news_compass['debuts'])}")
     strategies = build_strategies(stocks)
     strategy_race = build_strategy_race(
         hist_dir, {"market_date": market_date,
@@ -1463,7 +1658,7 @@ def run_full(max_universe=None, out_path=None):
                     kospi_trend=kospi_trend, sentiment_enabled=senti_on,
                     perf_curve=perf_curve, scan_review=scan_review,
                     strategies=strategies, strategy_race=strategy_race,
-                    silence=silence)
+                    silence=silence, news_compass=news_compass)
 
 
 def main():

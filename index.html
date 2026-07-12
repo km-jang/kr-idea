@@ -209,6 +209,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <a href="#watch">관심종목</a>
     <a href="#ideas">오늘의 아이디어</a>
     <a href="#perf">성과</a>
+    <a href="#compass">뉴스 나침반</a>
     <a href="#silence">침묵 레이더</a>
     <a href="#senti">심리 히트</a>
     <a href="#sector">업종 흐름</a>
@@ -294,6 +295,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
       <div id="raceRank" style="font-size:13px;color:var(--ink-2);margin-top:8px"></div>
     </div>
     <div id="perfBody"></div>
+  </section>
+
+  <section id="compass">
+    <h2>🧭 뉴스 나침반</h2>
+    <p class="sub">테마 점화(기사 급증)와 뉴스 데뷔 — 뉴스가 가리키는 방향을 수급과 교차해 발굴합니다</p>
+    <div id="compassBody"></div>
   </section>
 
   <section id="silence">
@@ -997,6 +1004,47 @@ function initPort(d){
 }
 
 
+
+/* ---------- 뉴스 나침반 ---------- */
+function compassSection(d){
+  const el = document.getElementById("compassBody");
+  const nc = d.news_compass;
+  if(!nc){
+    el.innerHTML = '<div class="empty">네이버 키 등록 + 뉴스 기준선(3영업일) 축적 후 자동 활성화됩니다.</div>';
+    return;
+  }
+  const hot = nc.hot_themes || [], debuts = nc.debuts || [];
+  let out = "";
+  if(hot.length){
+    out += hot.map(t=>`<div class="bars" style="margin-bottom:10px">
+      <h3>🔥 ${esc(t.name)} 점화 — 기사 ${t.count}건 <span style="color:var(--up)">(평소 ${t.mult}배)</span></h3>
+      ${(t.heads||[]).slice(0,2).map(h=>`<div style="font-size:12px;color:var(--ink-3);margin-bottom:4px">“${esc(h)}”</div>`).join("")}
+      <div style="font-size:13px;line-height:2;color:var(--ink-2);margin-top:6px">
+        ${(t.stocks||[]).map(s=>{
+          const chg = s.change_pct==null?"":` <span class="${cls(s.change_pct)}">${s.change_pct>0?"+":""}${s.change_pct.toFixed(1)}%</span>`;
+          const hl = s.verdict.startsWith("🎯") ? "font-weight:700;color:var(--ink-1)" : "";
+          return `<div style="${hl}">${starHtml(s.code)}${esc(s.name)}${chg} — ${esc(s.verdict)}
+            <button class="xlink devilbtn" data-code="${s.code}">😈</button></div>`;
+        }).join("")}
+      </div></div>`).join("");
+  }
+  if(debuts.length){
+    out += `<div class="bars"><h3>🐣 뉴스 데뷔 — 평소 조용하다 오늘 기사화 시작</h3>
+      <div style="font-size:13px;line-height:2;color:var(--ink-2)">
+      ${debuts.map(x=>{
+        const tone = (x.news_pos||0)>(x.news_neg||0) ? '<span style="color:var(--good-text)">호재성</span>'
+                   : (x.news_neg||0)>(x.news_pos||0) ? '<span style="color:var(--crit)">악재성</span>' : "중립";
+        const chg = x.change_pct==null?"":` <span class="${cls(x.change_pct)}">${x.change_pct>0?"+":""}${x.change_pct.toFixed(1)}%</span>`;
+        const head = (x.heads&&x.heads[0]) ? `<div style="font-size:11.5px;color:var(--ink-3);margin-left:22px">“${esc(x.heads[0])}”</div>` : "";
+        return `<div>${starHtml(x.code)}<b>${esc(x.name)}</b>${chg} · 기사 ${x.news_24h}건 (${tone}) · 외인 ${x.f_streak||0}일
+          <button class="xlink devilbtn" data-code="${x.code}">😈</button></div>${head}`;
+      }).join("")}
+      </div></div>`;
+  }
+  if(!out) out = '<div class="empty">오늘은 점화된 테마와 뉴스 데뷔가 없습니다 — 조용한 날입니다.</div>';
+  el.innerHTML = out;
+}
+
 /* ---------- 침묵 레이더 ---------- */
 function silenceSection(d){
   const wrap = document.getElementById("silWrap");
@@ -1128,7 +1176,7 @@ function renderAll(d, isHistory){
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
   sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
-  curveChart(d); raceChart(d); portSection(d); silenceSection(d);
+  curveChart(d); raceChart(d); portSection(d); silenceSection(d); compassSection(d);
   if(!isHistory){
     TODAY_DATA = d;
     initSliders(d); initSearch(d); initHistory(d); initPort(d);

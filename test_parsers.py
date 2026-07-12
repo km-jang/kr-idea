@@ -797,6 +797,70 @@ def test_silence_radar():
         assert len(collect.build_silence(cands)) == 0
     assert collect.volume_baselines("/없는폴더") == {}
 
+
+def test_news_tone_analysis():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 7, 11, 18, 0, tzinfo=timezone(timedelta(hours=9)))
+    data = {"items": [
+        {"title": "A사, 대규모 <b>수주</b> 계약 체결", "pubDate": "Sat, 11 Jul 2026 10:00:00 +0900"},
+        {"title": "A사 소송 리스크 부각", "pubDate": "Sat, 11 Jul 2026 09:00:00 +0900"},
+        {"title": "A사, 대규모 수주 계약 체결", "pubDate": "Sat, 11 Jul 2026 08:00:00 +0900"},  # 중복
+        {"title": "옛날 기사", "pubDate": "Wed, 08 Jul 2026 08:00:00 +0900"}]}
+    r = collect.analyze_news_items(data, now)
+    assert r["count"] == 2            # 중복·옛 기사 제외
+    assert r["pos"] == 1 and r["neg"] == 1
+    assert "수주" in r["heads"][0]
+
+
+def test_debut_detection():
+    baselines = {"A": 0.5, "B": 8.0}
+    stocks = [
+        {"code": "A", "name": "데뷔주", "news_24h": 4, "price": 10000, "change_pct": 1.0,
+         "news_pos": 3, "news_neg": 0, "news_heads": ["계약 체결"], "f_streak": 2},
+        {"code": "B", "name": "원래유명", "news_24h": 12},   # 평소에도 많음 → 제외
+        {"code": "C", "name": "기준없음", "news_24h": 5},    # 기준선 없음 → 제외
+        {"code": "D", "name": "여전히조용", "news_24h": 1},  # 오늘도 조용 → 제외
+    ]
+    baselines["D"] = 0.3
+    out = collect.detect_debuts(stocks, baselines)
+    assert [d["name"] for d in out] == ["데뷔주"]
+    assert out[0]["heads"] == ["계약 체결"]
+
+
+def test_quadrant_verdict():
+    assert "🎯" in collect.quadrant_verdict({"change_pct": 1.0, "f_streak": 5})
+    assert "주도주" in collect.quadrant_verdict({"change_pct": 5.0, "f_streak": 5})
+    assert "편승" in collect.quadrant_verdict({"change_pct": 6.0, "f_streak": 0})
+    assert "관망" in collect.quadrant_verdict({"change_pct": 0.5, "f_streak": 0})
+
+
+def test_theme_map_and_baselines():
+    themes = collect.load_themes()
+    assert len(themes) >= 15
+    assert all(t.get("keywords") and t.get("kr") for t in themes)
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        for i, day in enumerate(("2026-07-07", "2026-07-08", "2026-07-09")):
+            open(os.path.join(td, day+".json"), "w").write(json.dumps({
+                "news_compass": {"theme_counts": {"원전·SMR": 3 + i}},
+                "all_stocks": [{"code": "A", "news_24h": i}]}))
+        tb = collect.theme_baselines(td)
+        assert abs(tb["원전·SMR"] - 4.0) < 0.01
+        nb = collect.news_baselines(td)
+        assert abs(nb["A"] - 1.0) < 0.01
+
+
+def test_compass_message_lines():
+    import notify
+    data = json.load(open("data.json"))
+    lines = notify.compass_lines(data)
+    joined = "\n".join(lines)
+    assert "뉴스 나침반" in joined and "점화" in joined and "데뷔" in joined
+    brief = "\n".join(notify.compass_lines(data, brief=True))
+    assert "대시보드 확인" in brief
+    assert notify.compass_lines({"news_compass": None}) == []
+    assert notify.compass_lines({"news_compass": {"hot_themes": [], "debuts": []}}) == []
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

@@ -244,6 +244,7 @@ def build_message(data):
     lines = [f"📊 <b>국내장 아이디어 브리핑</b>  <i>({e(md)} 장 마감 기준)</i>", ""]
 
     lines.extend(us_market_block())   # 🌎 밤사이 미국장 (실패 시 자동 생략)
+    lines.extend(compass_lines(data))  # 🧭 뉴스 나침반 (테마 점화·데뷔)
 
     idx = data.get("indices") or {}
     k, q = idx.get("KOSPI") or {}, idx.get("KOSDAQ") or {}
@@ -342,6 +343,36 @@ def watchlist_events(data, codes):
     return out[:6]
 
 
+
+
+def compass_lines(data, brief=False):
+    """뉴스 나침반 블록 (아침·저녁 공용). brief=True면 압축판."""
+    e = lambda s: html.escape(str(s or ""))
+    nc = data.get("news_compass")
+    if not nc:
+        return []
+    lines = []
+    hot = nc.get("hot_themes") or []
+    debuts = nc.get("debuts") or []
+    if not hot and not debuts:
+        return []
+    lines.append("🧭 <b>뉴스 나침반</b>")
+    for t in hot[:3]:
+        lines.append(f"🔥 {e(t['name'])} 점화 — 기사 {t['count']}건 (평소 {t['mult']}배)")
+        for s in (t.get("stocks") or [])[:3]:
+            chg = s.get("change_pct")
+            chg_s = "" if chg is None else f" {'+' if chg > 0 else ''}{chg:.1f}%"
+            lines.append(f"   {e(s['name'])}{chg_s} · {e(s['verdict'])}")
+    if debuts and not brief:
+        names = " · ".join(
+            f"{e(d['name'])}({d['news_24h']}건{'·호재' if (d.get('news_pos') or 0) > (d.get('news_neg') or 0) else ''})"
+            for d in debuts[:4])
+        lines.append(f"🐣 뉴스 데뷔: {names}")
+    elif debuts:
+        lines.append(f"🐣 뉴스 데뷔 {len(debuts)}종목 (대시보드 확인)")
+    lines.append("")
+    return lines
+
 def build_evening_message(data):
     """저녁 마감 요약 - 짧은 버전."""
     e = lambda s: html.escape(str(s or ""))
@@ -360,6 +391,8 @@ def build_evening_message(data):
         names = " · ".join(
             f"{e(s['name'])}{' 🆕' if s.get('idea_days') == 1 else ''}" for s in ideas)
         lines.append(f"오늘의 5선: {names}")
+    lines.extend([""] if compass_lines(data, brief=True) else [])
+    lines.extend(compass_lines(data, brief=True))
     movers = sorted([s for s in (data.get("all_stocks") or [])
                      if abs(s.get("change_pct") or 0) >= 8],
                     key=lambda s: -abs(s.get("change_pct") or 0))[:3]
