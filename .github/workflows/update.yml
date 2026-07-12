@@ -83,4 +83,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python closing_scan.py
+        run: |
+          python closing_scan.py
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add scans.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "scan: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && git push) 
