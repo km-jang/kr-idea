@@ -650,6 +650,123 @@ def test_turnover_filter():
     names = [s["name"] for s in ideas]
     assert "대금충분" in names and "대금미달" not in names
 
+
+def test_perf_curve():
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        # d0: A를 10000원에 5선 선정, KOSPI 7000
+        open(os.path.join(td, "2026-07-08.json"), "w").write(json.dumps({
+            "market_date": "2026-07-08",
+            "ideas": [{"code": "A", "name": "가", "price": 10000}],
+            "all_stocks": [{"code": "A", "price": 10000}],
+            "indices": {"KOSPI": {"value": 7000.0}}}))
+        # d1: A가 10500 (+5%), KOSPI 7070 (+1%)
+        open(os.path.join(td, "2026-07-09.json"), "w").write(json.dumps({
+            "market_date": "2026-07-09",
+            "ideas": [{"code": "A", "name": "가", "price": 10500}],
+            "all_stocks": [{"code": "A", "price": 10500}],
+            "indices": {"KOSPI": {"value": 7070.0}}}))
+        # 오늘: A가 10500 → 11550 (+10%), KOSPI 7070→7423.5 (+5%)
+        today = {"market_date": "2026-07-10", "ideas": [],
+                 "all_stocks": [{"code": "A", "price": 11550}],
+                 "indices": {"KOSPI": {"value": 7423.5}}}
+        curve = collect.build_perf_curve(td, today)
+        assert len(curve) == 3
+        assert curve[0]["port"] == 100.0
+        assert abs(curve[1]["port"] - 105.0) < 0.01     # +5%
+        assert abs(curve[2]["port"] - 115.5) < 0.01     # x1.10 누적
+        assert abs(curve[2]["kospi"] - 106.05) < 0.01   # 1.01 x 1.05
+    assert collect.build_perf_curve("/없는폴더", None) == []
+
+
+def test_watchlist_events():
+    import notify
+    data = {
+        "all_stocks": [
+            {"code": "005930", "name": "삼성전자", "change_pct": 6.2},
+            {"code": "000660", "name": "SK하이닉스", "change_pct": 0.5}],
+        "ideas": [{"code": "005930", "name": "삼성전자", "idea_days": 1}],
+        "disclosures": [{"company": "SK하이닉스", "tag": "자사주 매입",
+                         "sentiment": "positive"}]}
+    ev = notify.watchlist_events(data, ["005930", "000660"])
+    assert any("5선 진입" in x for x in ev)
+    assert any("급등" in x and "+6.2%" in x for x in ev)
+    assert any("호재성 공시" in x for x in ev)
+    assert notify.watchlist_events(data, []) == []
+
+
+def test_scan_record_and_review():
+    import tempfile, os
+    import closing_scan as cs
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "scans.json")
+        cands = [{"code": "A", "name": "가", "price": 10000, "chg": 5.0, "notes": []},
+                 {"code": "B", "name": "나", "price": 20000, "chg": 7.0, "notes": []}]
+        cs.save_scan_record(cands, path=p)
+        rec = json.loads(open(p).read())
+        assert len(rec) == 1 and len(rec[0]["candidates"]) == 2
+        # 같은 날 재실행 → 덮어쓰기 (중복 없음)
+        cs.save_scan_record(cands[:1], path=p)
+        rec = json.loads(open(p).read())
+        assert len(rec) == 1 and len(rec[0]["candidates"]) == 1
+
+        # 채점: 스캔일을 과거로 조작 후 오늘 가격으로 평가
+        rec[0]["date"] = "2026-07-10"
+        open(p, "w").write(json.dumps(rec))
+        stocks = [{"code": "A", "price": 10800}]      # +8%
+        rv = collect.build_scan_review(p, stocks, "2026-07-11")
+        assert rv and rv["date"] == "2026-07-10"
+        assert abs(rv["avg_ret_pct"] - 8.0) < 0.01
+        # 오늘 날짜 스캔은 채점 제외
+        rv2 = collect.build_scan_review(p, stocks, "2026-07-10")
+        assert rv2 is None
+    assert collect.build_scan_review("/없는파일.json", [], "2026-07-11") is None
+
+
+def test_strategy_lab():
+    stocks = [
+        _mk("S00001", "수급왕", f_streak=9, i_streak=5),
+        _mk("S00002", "가치왕", pbr=0.3, per=3.5, dvr=6.0),
+        _mk("S00003", "모멘텀왕", h52=10100),
+        _mk("S00004", "평범이"),
+        _mk("S00005", "평범이2"),
+        _mk("S00006", "평범이3"),
+    ]
+    scored = collect.score_stocks(stocks, [])
+    strat = collect.build_strategies(scored)
+    assert set(strat.keys()) == {"기본형", "수급형", "가치형", "모멘텀형"}
+    assert all(len(v) == 5 for v in strat.values())
+    # 각 전략의 1위가 성향과 일치하는지
+    assert strat["수급형"][0]["name"] == "수급왕"
+    assert strat["가치형"][0]["name"] == "가치왕"
+    # 프리셋은 순위를 "기울인다": 모멘텀형에서 모멘텀왕의 순위가 수급형에서보다 높아야 함
+    def pos(k, nm):
+        return [x["name"] for x in strat[k]].index(nm)
+    assert pos("모멘텀형", "모멘텀왕") <= pos("수급형", "모멘텀왕")
+
+
+def test_strategy_race():
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        open(os.path.join(td, "2026-07-09.json"), "w").write(json.dumps({
+            "market_date": "2026-07-09",
+            "strategies": {"기본형": [{"code": "A", "price": 10000}],
+                           "수급형": [{"code": "B", "price": 20000}],
+                           "가치형": [{"code": "A", "price": 10000}],
+                           "모멘텀형": [{"code": "B", "price": 20000}]},
+            "all_stocks": [{"code": "A", "price": 10000}, {"code": "B", "price": 20000}]}))
+        today = {"market_date": "2026-07-10",
+                 "all_stocks": [{"code": "A", "price": 11000},    # +10%
+                                {"code": "B", "price": 19000}]}   # -5%
+        race = collect.build_strategy_race(td, today)
+        assert race is not None
+        vals = {r["name"]: r["total_pct"] for r in race["rank"]}
+        assert abs(vals["기본형"] - 10.0) < 0.01
+        assert abs(vals["수급형"] - (-5.0)) < 0.01
+        assert race["rank"][0]["name"] in ("기본형", "가치형")   # +10% 전략이 1위
+        assert len(race["curves"]["기본형"]) == 2
+    assert collect.build_strategy_race("/없는폴더", None) is None
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

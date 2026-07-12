@@ -192,8 +192,34 @@ def main():
     if args.dry_run:
         print(msg)
         return
+    save_scan_record(cands)               # 다음날 성적 채점용 기록
     if not send_telegram(msg):
         sys.exit(1)
+
+
+SCANS_PATH = ROOT / "scans.json"
+
+
+def save_scan_record(cands, path=None, keep=30):
+    """스캔 결과를 scans.json에 누적 저장 (성과 검증 루프의 재료)."""
+    path = Path(path or SCANS_PATH)
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(records, list):
+            records = []
+    except Exception:
+        records = []
+    now = datetime.now(KST)
+    records = [r for r in records if r.get("date") != now.strftime("%Y-%m-%d")]
+    records.append({
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "candidates": [{"code": c["code"], "name": c["name"],
+                        "price": c["price"], "chg": c["chg"]} for c in cands],
+    })
+    path.write_text(json.dumps(records[-keep:], ensure_ascii=False, indent=1),
+                    encoding="utf-8")
+    print(f"스캔 기록 저장: {len(cands)}건")
 
 
 if __name__ == "__main__":

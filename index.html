@@ -152,6 +152,7 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 .slpreset{font-size:12px;color:var(--ink-2);background:var(--chip-bg);border:none;
   border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit}
 .slpreset:hover{color:var(--ink-1)}
+.mktchip.on{background:var(--series-1);color:#fff;font-weight:700}
 
 /* 업종 바: 순매수(+)는 상승색, 순매도(-)는 하락색 */
 .brow .bfill.neg{background:var(--down);border-radius:4px 0 0 4px}
@@ -191,11 +192,20 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <h1>국내장 아이디어 대시보드</h1>
     <span class="stamp" id="stamp">불러오는 중…</span>
     <span class="badge-sample" id="sampleBadge" style="display:none">샘플 데이터</span>
+    <select id="histSel" title="과거 날짜의 대시보드 보기" style="margin-left:auto;font-size:12px;
+      padding:4px 8px;border:1px solid var(--ring);border-radius:8px;
+      background:var(--surface-1);color:var(--ink-2);font-family:inherit"></select>
   </header>
+  <div id="histBanner" style="display:none;margin-bottom:12px;padding:9px 14px;font-size:13px;
+    border-radius:10px;background:#fdedc3;color:#7a5200;font-weight:600">
+    📅 <span id="histBannerTxt"></span> 기록을 보는 중 —
+    <a href="#" id="histBack" style="color:inherit">오늘 데이터로 돌아가기</a>
+  </div>
 
   <div class="tiles" id="tiles"></div>
 
   <nav class="chips">
+    <a href="#port">포트폴리오</a>
     <a href="#watch">관심종목</a>
     <a href="#ideas">오늘의 아이디어</a>
     <a href="#perf">성과</a>
@@ -217,6 +227,34 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
       아직 관심종목이 없습니다. 아래 표에서 ☆를 눌러 추가하세요.</div>
   </section>
 
+  <section id="port">
+    <h2>💼 내 포트폴리오</h2>
+    <p class="sub">보유 종목과 매수가를 등록하면 수익률·비중·위험을 자동 진단 · <b>이 브라우저에만 저장</b>되며 서버로 전송되지 않습니다</p>
+    <div class="tiles" id="portTiles" style="display:none"></div>
+    <div class="tblwrap" id="portWrap" style="display:none"><table id="portTbl"></table></div>
+    <div id="portRisk" style="display:none"></div>
+    <div class="sliders" style="margin-top:10px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <input type="search" id="portSearch" placeholder="종목명 또는 코드" autocomplete="off"
+          style="flex:2;min-width:140px;padding:8px 12px;font-size:14px;border:1px solid var(--ring);
+          border-radius:8px;background:var(--surface-1);color:var(--ink-1);font-family:inherit;outline:none">
+        <input type="number" id="portQty" placeholder="수량" min="1"
+          style="flex:1;min-width:80px;padding:8px 12px;font-size:14px;border:1px solid var(--ring);
+          border-radius:8px;background:var(--surface-1);color:var(--ink-1);font-family:inherit;outline:none">
+        <input type="number" id="portAvg" placeholder="매수단가(원)" min="1"
+          style="flex:1;min-width:110px;padding:8px 12px;font-size:14px;border:1px solid var(--ring);
+          border-radius:8px;background:var(--surface-1);color:var(--ink-1);font-family:inherit;outline:none">
+        <button id="portAdd" class="slreset" style="margin-left:0">담기</button>
+      </div>
+      <div id="portHint" style="font-size:11.5px;color:var(--ink-3);padding:6px 2px 2px"></div>
+      <div class="slfoot" style="padding-top:8px">
+        <button class="slpreset" id="portExport">백업(CSV)</button>
+        <label class="slpreset" style="cursor:pointer">복원<input type="file" id="portImport" accept=".csv" style="display:none"></label>
+        <span class="slstate" style="margin-left:auto">브라우저 저장 · 백업 권장</span>
+      </div>
+    </div>
+  </section>
+
   <section id="ideas">
     <h2>오늘의 아이디어 5선</h2>
     <p class="sub">수급(40) + 밸류(40) + 모멘텀(10) + 공시(±20) 종합점수 상위 · 시총 3,000억 이상 · 악재 공시 종목 제외</p>
@@ -225,6 +263,8 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
       <div class="slrow"><span class="sllbl">밸류</span><input type="range" id="wValue" min="0" max="200" value="100"><span class="slval" id="wValueV">100%</span></div>
       <div class="slrow"><span class="sllbl">모멘텀</span><input type="range" id="wMom" min="0" max="200" value="100"><span class="slval" id="wMomV">100%</span></div>
       <div class="slrow"><span class="sllbl">공시</span><input type="range" id="wDisc" min="0" max="200" value="100"><span class="slval" id="wDiscV">100%</span></div>
+      <div class="slrow"><span class="sllbl">최소 대금</span><input type="range" id="fTurn" min="0" max="500" step="10" value="30"><span class="slval" id="fTurnV">30억</span></div>
+      <div class="slrow"><span class="sllbl">최소 시총</span><input type="range" id="fCap" min="0" max="20000" step="500" value="3000"><span class="slval" id="fCapV">3,000억</span></div>
       <div class="slfoot">
         <button class="slpreset" data-w="150,70,120,100">수급형</button>
         <button class="slpreset" data-w="70,160,60,120">가치형</button>
@@ -239,6 +279,19 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   <section id="perf">
     <h2>성과 트래킹</h2>
     <p class="sub">과거 "아이디어 5선"이 오늘까지 실제로 낸 수익률 · 같은 기간 KOSPI와 비교</p>
+    <div class="bars" id="curveBox" style="display:none">
+      <h3>누적 수익률 (매일 5선 교체 가정, 100 시작)</h3>
+      <div id="curveChart"></div>
+      <div class="legend" style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--ink-2)">
+        <span><i style="display:inline-block;width:14px;height:3px;background:var(--series-1);border-radius:2px;vertical-align:3px"></i> 내 5선</span>
+        <span><i style="display:inline-block;width:14px;height:3px;background:var(--ink-3);border-radius:2px;vertical-align:3px"></i> KOSPI</span>
+      </div>
+    </div>
+    <div class="bars" id="raceBox" style="display:none">
+      <h3>🏁 전략 리그전 (4개 가중치 전략의 가상 운용 대결, 100 시작)</h3>
+      <div id="raceChart"></div>
+      <div id="raceRank" style="font-size:13px;color:var(--ink-2);margin-top:8px"></div>
+    </div>
     <div id="perfBody"></div>
   </section>
 
@@ -258,6 +311,11 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   <section id="flow">
     <h2>수급 스캐너 <button class="csvbtn" data-csv="flow">CSV 저장</button></h2>
     <p class="sub">외국인·기관 연속 순매수와 5/20일 누적 순매수 금액 (억원) · 열 제목 클릭 시 정렬</p>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="slpreset mktchip on" data-mkt="">전체</button>
+      <button class="slpreset mktchip" data-mkt="KOSPI">코스피</button>
+      <button class="slpreset mktchip" data-mkt="KOSDAQ">코스닥</button>
+    </div>
     <div class="bars" id="flowBars"></div>
     <div class="tblwrap"><table id="flowTbl"></table></div>
   </section>
@@ -406,6 +464,22 @@ function sparkline(pts){
      stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
+function priceSpark(closes){
+  if(!closes || closes.length < 5) return "";
+  const mn = Math.min(...closes), mx = Math.max(...closes);
+  const W=100, H=22, pad=2;
+  const up = closes[closes.length-1] >= closes[0];
+  const xy = closes.map((v,i)=>{
+    const x = pad + i*(W-2*pad)/(closes.length-1);
+    const y = mx===mn ? H/2 : pad + (1-(v-mn)/(mx-mn))*(H-2*pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `<svg class="spark" style="height:20px;margin:7px 0 0" viewBox="0 0 ${W} ${H}"
+    preserveAspectRatio="none" aria-hidden="true" title="최근 20일 종가 추이">
+    <polyline points="${xy}" fill="none" stroke="var(--${up?"up":"down"})" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
 function tiles(d){
   const k = d.indices?.KOSPI||{}, q = d.indices?.KOSDAQ||{};
   const t = (lbl,o,extra)=>`<div class="tile"><div class="lbl">${lbl}</div>
@@ -421,9 +495,11 @@ function tiles(d){
 
 /* ---------- 가중치 슬라이더 ---------- */
 const WGKEY = "kr_idea_weights";
-const getW = () => { try { return JSON.parse(localStorage.getItem(WGKEY)) || {f:100,v:100,m:100,d:100}; } catch(e){ return {f:100,v:100,m:100,d:100}; } };
+const DEF_W = {f:100, v:100, m:100, d:100, turn:30, cap:3000};
+const getW = () => { try { return {...DEF_W, ...(JSON.parse(localStorage.getItem(WGKEY))||{})}; } catch(e){ return {...DEF_W}; } };
 const setW = w => { try { localStorage.setItem(WGKEY, JSON.stringify(w)); } catch(e){} };
-const isDefaultW = w => w.f===100 && w.v===100 && w.m===100 && w.d===100;
+const isDefaultW = w => Object.keys(DEF_W).every(k=>w[k]===DEF_W[k]);
+const turnoverOf = s => (s.price && s.volume) ? s.price*s.volume/1e8 : null;
 
 function adjustedIdeas(d, w){
   const pool = allStocks(d);
@@ -437,22 +513,29 @@ function adjustedIdeas(d, w){
               reasons: s.reasons || (orig?orig.reasons:[]),
               idea_days: orig ? orig.idea_days : undefined};
     })
-    .filter(s=>(s.mktcap_100m||0)>=3000 && (s.disc_score||0)>=0 && s.score>0)
+    .filter(s=>{
+      const to = turnoverOf(s);
+      return (s.mktcap_100m||0)>=w.cap
+        && (to===null || to>=w.turn)          // 구데이터(거래량 없음)는 통과
+        && (s.disc_score||0)>=0 && s.score>0;
+    })
     .sort((a,b)=>b.score-a.score).slice(0,5);
 }
 
 function initSliders(d){
-  const w = getW();
-  const map = {f:"wFlow", v:"wValue", m:"wMom", d:"wDisc"};
+  const map = {f:"wFlow", v:"wValue", m:"wMom", d:"wDisc", turn:"fTurn", cap:"fCap"};
   const state = document.getElementById("slState");
   function paint(){
     const cur = getW();
     for(const k in map){
       document.getElementById(map[k]).value = cur[k];
-      document.getElementById(map[k]+"V").textContent = cur[k]+"%";
+      const label = k==="turn" ? fmt(cur[k])+"억"
+                  : k==="cap" ? fmt(cur[k])+"억"
+                  : cur[k]+"%";
+      document.getElementById(map[k]+"V").textContent = label;
     }
     const extra = d.all_stocks ? "" : " (전체 종목 반영은 다음 갱신부터)";
-    state.textContent = isDefaultW(cur) ? "기본 가중치"+extra : "커스텀 가중치 적용 중"+extra;
+    state.textContent = isDefaultW(cur) ? "기본 설정"+extra : "커스텀 설정 적용 중"+extra;
   }
   function apply(){
     const cur = getW();
@@ -464,12 +547,13 @@ function initSliders(d){
     });
   }
   document.getElementById("slReset").addEventListener("click", ()=>{
-    setW({f:100,v:100,m:100,d:100}); paint(); apply();
+    setW({...DEF_W}); paint(); apply();
   });
   document.querySelectorAll(".slpreset").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const [f,v,m,dd] = btn.dataset.w.split(",").map(Number);
-      setW({f, v, m, d: dd}); paint(); apply();
+      const cur = getW();
+      setW({...cur, f, v, m, d: dd}); paint(); apply();
     });
   });
   paint(); apply();
@@ -489,6 +573,7 @@ function ideaCards(d, override){
       ${(s.news_24h||0)>=10?`<span class="badge-days" title="24시간 기사 ${s.news_24h}건">📰${s.news_24h}</span>`:""}
       <span class="px ${cls(s.change_pct)}">${fmt(s.price)} ${arrow(s.change_pct)}${s.change_pct==null?"":Math.abs(s.change_pct).toFixed(2)+"%"}</span>
     </div>
+    ${priceSpark(s.closes)}
     <div class="scorebar"><i style="width:${Math.min(100,s.score)}%"></i></div>
     <div class="sc">종합 <b>${s.score}</b> · 수급 ${s.flow_score} · 밸류 ${s.value_score}${s.mom_score!=null?` · 모멘텀 ${s.mom_score}`:""} · 공시 ${s.disc_score>=0?"+":""}${s.disc_score}</div>
     <div class="tags">${(s.reasons||[]).slice(0,4).map(r=>`<span class="tag">${esc(r)}</span>`).join("")}</div>
@@ -591,8 +676,18 @@ const streakCell = (n,hi)=>`<span class="streak${(n||0)>=hi?" hi":""}">${n||0}�
 const pctCell = s=>`<span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span>`;
 const signAmt = v=>v==null?"–":`<span class="${cls(v)}">${fmt(v)}</span>`;
 
+let MKT = "";   // 시장 필터: "" | KOSPI | KOSDAQ
+const mktFilter = rows => MKT ? (rows||[]).filter(s=>s.market===MKT) : (rows||[]);
+document.addEventListener("click", e=>{
+  const chip = e.target.closest(".mktchip");
+  if(!chip || !DATA) return;
+  MKT = chip.dataset.mkt;
+  document.querySelectorAll(".mktchip").forEach(c=>c.classList.toggle("on", c===chip));
+  flowTable(DATA); valueTable(DATA);
+});
+
 function flowTable(d){
-  makeTable("flowTbl", d.flow_scan||[], [
+  makeTable("flowTbl", mktFilter(d.flow_scan), [
     {k:"name",h:"종목",f:nameCell},
     {k:"price",h:"현재가",f:s=>fmt(s.price)},
     {k:"change_pct",h:"등락률",f:pctCell},
@@ -609,7 +704,7 @@ function flowTable(d){
 }
 
 function valueTable(d){
-  makeTable("valueTbl", d.value_screen||[], [
+  makeTable("valueTbl", mktFilter(d.value_screen), [
     {k:"name",h:"종목",f:nameCell},
     {k:"price",h:"현재가",f:s=>fmt(s.price)},
     {k:"pbr",h:"PBR",f:s=>s.pbr==null?"–":s.pbr.toFixed(2)},
@@ -661,12 +756,235 @@ document.addEventListener("change", e=>{
   try { localStorage.setItem(NKEY, JSON.stringify(notes)); } catch(err){}
 });
 
+/* ---------- 누적 수익률 곡선 (내 5선 vs KOSPI) ---------- */
+function curveChart(d){
+  const box = document.getElementById("curveBox");
+  const el = document.getElementById("curveChart");
+  const c = d.perf_curve || [];
+  if(c.length < 3){ box.style.display="none"; return; }
+  box.style.display="";
+  const W=600, H=150, pad=8;
+  const all = c.flatMap(p=>[p.port, p.kospi]);
+  const mn = Math.min(...all), mx = Math.max(...all);
+  const X = i => pad + i*(W-2*pad)/(c.length-1);
+  const Y = v => mx===mn ? H/2 : pad + (1-(v-mn)/(mx-mn))*(H-2*pad);
+  const line = key => c.map((p,i)=>`${X(i).toFixed(1)},${Y(p[key]).toFixed(1)}`).join(" ");
+  const last = c[c.length-1];
+  const lbl = (v)=> (v-100>=0?"+":"")+(v-100).toFixed(1)+"%";
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:150px" role="img"
+     aria-label="누적 수익률: 내 5선 ${lbl(last.port)}, KOSPI ${lbl(last.kospi)}">
+    <line x1="${pad}" y1="${Y(100)}" x2="${W-pad}" y2="${Y(100)}"
+      stroke="var(--grid)" stroke-width="1" stroke-dasharray="3,3"/>
+    <polyline points="${line('kospi')}" fill="none" stroke="var(--ink-3)" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="${line('port')}" fill="none" stroke="var(--series-1)" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${X(c.length-1)}" cy="${Y(last.port)}" r="3.5" fill="var(--series-1)"/>
+    <text x="${X(c.length-1)-4}" y="${Y(last.port)-8}" text-anchor="end"
+      font-size="12" font-weight="700" fill="var(--ink-1)">${lbl(last.port)}</text>
+    <text x="${X(c.length-1)-4}" y="${Y(last.kospi)+16}" text-anchor="end"
+      font-size="11" fill="var(--ink-3)">KOSPI ${lbl(last.kospi)}</text>
+  </svg>
+  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3)">
+    <span>${esc(c[0].d.slice(5).replace("-","/"))}</span>
+    <span>${esc(last.d.slice(5).replace("-","/"))}</span>
+  </div>`;
+}
+
+/* ---------- 종가매매 스캔 성적 ---------- */
+function scanReview(d){
+  const r = d.scan_review;
+  if(!r || !r.items) return "";
+  const pn = v => `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
+  return `<div class="bars" style="margin-bottom:12px">
+    <h3>🔔 종가매매 스캔 성적 (${esc(r.date.slice(5).replace("-","/"))} 14:50 후보 → 다음 종가)</h3>
+    <div style="font-size:13.5px;color:var(--ink-2);line-height:1.9">
+      평균 ${pn(r.avg_ret_pct)} · ${r.items.map(i=>
+        `${esc(i.name)} ${pn(i.ret_pct)}`).join(" · ")}
+    </div></div>`;
+}
+
+
+/* ---------- 전략 리그전 차트 ---------- */
+const RACE_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#4a3aa7"];  // 검증된 카테고리 팔레트 1-4
+function raceChart(d){
+  const box = document.getElementById("raceBox");
+  const r = d.strategy_race;
+  if(!r || !r.curves){ box.style.display="none"; return; }
+  const names = Object.keys(r.curves);
+  const first = r.curves[names[0]] || [];
+  if(first.length < 3){ box.style.display="none"; return; }
+  box.style.display="";
+  const W=600, H=170, pad=8, padR=70;
+  const all = names.flatMap(k=>r.curves[k].map(p=>p.v));
+  const mn = Math.min(...all), mx = Math.max(...all);
+  const N = first.length;
+  const X = i => pad + i*(W-pad-padR)/(N-1);
+  const Y = v => mx===mn ? H/2 : pad + (1-(v-mn)/(mx-mn))*(H-2*pad);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:170px" role="img"
+    aria-label="전략 리그전 누적 수익률">`;
+  svg += `<line x1="${pad}" y1="${Y(100)}" x2="${W-padR}" y2="${Y(100)}"
+    stroke="var(--grid)" stroke-width="1" stroke-dasharray="3,3"/>`;
+  names.forEach((k,idx)=>{
+    const c = r.curves[k];
+    const pts = c.map((p,i)=>`${X(i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ");
+    const last = c[c.length-1];
+    svg += `<polyline points="${pts}" fill="none" stroke="${RACE_COLORS[idx%4]}"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    svg += `<text x="${W-padR+5}" y="${Y(last.v)+4}" font-size="11" font-weight="700"
+      fill="${RACE_COLORS[idx%4]}">${esc(k)}</text>`;
+  });
+  svg += "</svg>";
+  document.getElementById("raceChart").innerHTML = svg;
+  const pn = v => `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
+  document.getElementById("raceRank").innerHTML =
+    "현재 순위: " + (r.rank||[]).map((x,i)=>
+      `<b>${i+1}위</b> ${esc(x.name)} ${pn(x.total_pct)}`).join(" · ") +
+    ` <span style="color:var(--ink-3)">— 우승 전략의 가중치를 CONFIG에 반영하면 튜닝 완성</span>`;
+}
+
+/* ---------- 내 포트폴리오 (브라우저 저장) ---------- */
+const PKEY = "kr_idea_port";
+const getPort = () => { try { return JSON.parse(localStorage.getItem(PKEY)) || []; } catch(e){ return []; } };
+const setPort = a => { try { localStorage.setItem(PKEY, JSON.stringify(a)); } catch(e){} };
+
+function portSection(d){
+  const tiles = document.getElementById("portTiles");
+  const wrap = document.getElementById("portWrap");
+  const tbl = document.getElementById("portTbl");
+  const risk = document.getElementById("portRisk");
+  const port = getPort();
+  const pool = {}; allStocks(d).forEach(s=>pool[s.code]=s);
+  const ideaSet = {}; (d.ideas||[]).forEach(s=>ideaSet[s.code]=1);
+  const discSet = {}; (d.disclosures||[]).forEach(x=>discSet[x.company]=x.sentiment);
+
+  if(!port.length){
+    tiles.style.display="none"; wrap.style.display="none"; risk.style.display="none";
+    document.getElementById("portHint").textContent =
+      "예: 삼성전자 검색 → 수량 10, 매수단가 85000 입력 → 담기";
+    return;
+  }
+  let totVal=0, totCost=0, totDay=0;
+  const rows = port.map(h=>{
+    const s = pool[h.code] || {};
+    const price = s.price || h.avg;
+    const val = price*h.qty, cost = h.avg*h.qty;
+    totVal += val; totCost += cost;
+    if(s.change_pct!=null) totDay += val - val/(1+s.change_pct/100);
+    const badges = [
+      ideaSet[h.code] ? '<span class="badge-new">5선</span>' : "",
+      Math.abs(s.change_pct||0)>=5 ? `<span class="badge-days">${s.change_pct>0?"급등":"급락"}</span>` : "",
+      discSet[h.name||s.name] ? '<span class="badge-days">공시</span>' : "",
+    ].join(" ");
+    return {...h, name: h.name||s.name||h.code, price, val, cost,
+            ret: cost? (val/cost-1)*100 : 0, chg: s.change_pct, badges, sector: s.sector};
+  });
+  const pn = (v,d=1) => v==null?"–":`<span class="${cls(v)}">${v>0?"+":""}${v.toFixed(d)}%</span>`;
+  const won = v => (v>=1e8) ? (v/1e8).toFixed(2)+"억" : fmt(Math.round(v/1e4))+"만";
+
+  tiles.style.display="";
+  const totRet = totCost? (totVal/totCost-1)*100 : 0;
+  tiles.innerHTML =
+    `<div class="tile"><div class="lbl">총 평가액</div><div class="val">${won(totVal)}</div></div>`+
+    `<div class="tile"><div class="lbl">총 손익</div><div class="val">${pn(totRet)}</div>
+      <div class="lbl">${won(Math.abs(totVal-totCost))} ${totVal>=totCost?"이익":"손실"}</div></div>`+
+    `<div class="tile"><div class="lbl">오늘 변동</div><div class="val">${pn(totVal? totDay/totVal*100:0)}</div></div>`+
+    `<div class="tile"><div class="lbl">보유 종목</div><div class="val">${port.length}<span class="delta flat">개</span></div></div>`;
+
+  wrap.style.display="";
+  tbl.innerHTML = "<thead><tr><th>종목</th><th>보유</th><th>매수가</th><th>현재가</th>"+
+    "<th>수익률</th><th>평가액</th><th>비중</th><th>시그널</th><th></th></tr></thead><tbody>"+
+    rows.map((h,i)=>`<tr>
+      <td><span class="nm2">${esc(h.name)}</span><span class="cd2">${h.code}</span></td>
+      <td>${fmt(h.qty)}주</td><td>${fmt(h.avg)}</td><td>${fmt(h.price)}</td>
+      <td>${pn(h.ret,2)}</td><td>${won(h.val)}</td>
+      <td>${totVal? (h.val/totVal*100).toFixed(0):0}%</td>
+      <td style="text-align:left">${h.badges||"–"}</td>
+      <td><span class="star" data-pdel="${i}" title="삭제" style="color:var(--crit)">✕</span></td>
+    </tr>`).join("")+"</tbody>";
+
+  // 리스크 진단 (규칙 기반)
+  const notes = [];
+  rows.forEach(h=>{ if(totVal && h.val/totVal > 0.3)
+    notes.push(`⚠️ <b>${esc(h.name)}</b> 단일 비중 ${(h.val/totVal*100).toFixed(0)}% — 분산 고려`); });
+  const bySec = {};
+  rows.forEach(h=>{ if(h.sector) bySec[h.sector]=(bySec[h.sector]||0)+h.val; });
+  Object.entries(bySec).forEach(([k,v])=>{ if(totVal && v/totVal > 0.5)
+    notes.push(`⚠️ <b>${esc(k)}</b> 업종에 ${(v/totVal*100).toFixed(0)}% 집중`); });
+  const secFlow = {};
+  allStocks(d).forEach(s=>{ if(s.sector && s.f_5d_amt_100m!=null)
+    secFlow[s.sector]=(secFlow[s.sector]||0)+s.f_5d_amt_100m; });
+  Object.keys(bySec).forEach(k=>{ if((secFlow[k]||0) < -500)
+    notes.push(`📉 보유 업종 <b>${esc(k)}</b>에서 외국인 자금 이탈 중 (5일 ${fmt(Math.round(secFlow[k]))}억)`); });
+  risk.style.display = notes.length ? "" : "none";
+  risk.innerHTML = notes.length ? `<div class="bars" style="margin-top:10px">
+    <h3>리스크 진단</h3><div style="font-size:13px;line-height:2;color:var(--ink-2)">${notes.join("<br>")}</div></div>` : "";
+  document.getElementById("portHint").textContent = "";
+}
+
+function initPort(d){
+  const search = document.getElementById("portSearch");
+  const hint = document.getElementById("portHint");
+  let picked = null;
+  search.addEventListener("input", ()=>{
+    const q = search.value.trim().toLowerCase();
+    picked = null;
+    if(!q){ hint.textContent=""; return; }
+    const hit = allStocks(d).find(s=>s.name.toLowerCase()===q || s.code===q) ||
+                allStocks(d).find(s=>s.name.toLowerCase().includes(q));
+    if(hit){ picked = hit; hint.textContent = `선택됨: ${hit.name} (${hit.code}) · 현재가 ${fmt(hit.price)}원`; }
+    else hint.textContent = "검색 결과 없음";
+  });
+  document.getElementById("portAdd").addEventListener("click", ()=>{
+    const qty = +document.getElementById("portQty").value;
+    const avg = +document.getElementById("portAvg").value;
+    if(!picked || !qty || !avg){ hint.textContent = "종목·수량·매수단가를 모두 입력해주세요"; return; }
+    const port = getPort();
+    const ex = port.find(h=>h.code===picked.code);
+    if(ex){ // 물타기/불타기: 평균 단가 재계산
+      ex.avg = Math.round((ex.avg*ex.qty + avg*qty)/(ex.qty+qty));
+      ex.qty += qty;
+    } else port.push({code:picked.code, name:picked.name, qty, avg});
+    setPort(port);
+    search.value=""; document.getElementById("portQty").value="";
+    document.getElementById("portAvg").value=""; picked=null;
+    portSection(DATA);
+  });
+  document.addEventListener("click", e=>{
+    const del = e.target.closest("[data-pdel]");
+    if(!del) return;
+    const port = getPort(); port.splice(+del.dataset.pdel, 1);
+    setPort(port); portSection(DATA);
+  });
+  document.getElementById("portExport").addEventListener("click", ()=>{
+    const rows = getPort().map(h=>`${h.code},${h.name},${h.qty},${h.avg}`).join("\n");
+    const blob = new Blob(["\ufeff코드,종목명,수량,매수단가\n"+rows], {type:"text/csv;charset=utf-8"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "내포트폴리오.csv"; a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  document.getElementById("portImport").addEventListener("change", e=>{
+    const f = e.target.files[0]; if(!f) return;
+    const rd = new FileReader();
+    rd.onload = ()=>{
+      const port = [];
+      String(rd.result).split(/\r?\n/).slice(1).forEach(ln=>{
+        const [code,name,qty,avg] = ln.split(",");
+        if(/^\d{6}$/.test((code||"").trim()) && +qty && +avg)
+          port.push({code:code.trim(), name:(name||"").trim(), qty:+qty, avg:+avg});
+      });
+      if(port.length){ setPort(port); portSection(DATA); }
+    };
+    rd.readAsText(f);
+  });
+}
+
 /* ---------- 성과 트래킹 ---------- */
 function perfSection(d){
   const el = document.getElementById("perfBody");
   const p = d.performance;
   if(!p || !p.days){
-    el.innerHTML = `<div class="perf-note">📈 데이터 축적 중입니다.<br>
+    el.innerHTML = scanReview(d) + `<div class="perf-note">📈 데이터 축적 중입니다.<br>
       히스토리가 쌓이면 "과거 5선의 실제 수익률"이 여기 자동으로 표시됩니다 (선정 다음 영업일부터).</div>`;
     return;
   }
@@ -674,7 +992,7 @@ function perfSection(d){
   const pn = v => v==null ? "–" : `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
   const tile = (lbl, val, sub) => `<div class="tile"><div class="lbl">${lbl}</div>
     <div class="val">${val}</div>${sub?`<div class="lbl">${sub}</div>`:""}</div>`;
-  el.innerHTML =
+  el.innerHTML = scanReview(d) +
     `<div class="perf-tiles">`+
     tile("평균 수익률", pn(s.avg_ret_pct), "선정일 → 현재") +
     tile("승률", s.win_rate_pct!=null ? s.win_rate_pct+"%" : "–", "플러스로 끝난 날 비율") +
@@ -706,14 +1024,54 @@ function discList(d){
     </div>`).join("");
 }
 
-function renderAll(d){
+let TODAY_DATA = null;
+function renderAll(d, isHistory){
   DATA = d;
   document.getElementById("stamp").textContent =
     (d.market_date ? d.market_date.replace(/-/g,".")+" 장 마감 기준" : "") +
     (d.generated_at ? " · "+d.generated_at.replace(/^\d{4}-\d{2}-\d{2} /,"")+" 수집" : "");
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
-  tiles(d); watchSection(d); initSliders(d); perfSection(d); sentiSection(d);
-  sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d); initSearch(d);
+  tiles(d); watchSection(d); perfSection(d); sentiSection(d);
+  sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
+  curveChart(d); raceChart(d); portSection(d);
+  if(!isHistory){
+    TODAY_DATA = d;
+    initSliders(d); initSearch(d); initHistory(d); initPort(d);
+  } else {
+    ideaCards(d);   // 과거 보기에선 슬라이더 미적용 원본 5선
+  }
+}
+
+/* ---------- 히스토리 브라우저 ---------- */
+function initHistory(d){
+  const sel = document.getElementById("histSel");
+  const banner = document.getElementById("histBanner");
+  const dates = [...new Set((d.kospi_trend||[]).map(p=>p.d))]
+    .filter(x=>x && x !== d.market_date).reverse().slice(0,30);
+  if(!dates.length){ sel.style.display="none"; return; }
+  sel.style.display="";
+  sel.innerHTML = `<option value="">📅 지난 기록 보기</option>` +
+    dates.map(x=>`<option value="${x}">${x.replace(/-/g,".")}</option>`).join("");
+  sel.onchange = async ()=>{
+    if(!sel.value){ back(); return; }
+    try{
+      const r = await fetch(`history/${sel.value}.json?t=`+Date.now());
+      if(!r.ok) throw new Error(r.status);
+      renderAll(await r.json(), true);
+      banner.style.display="";
+      document.getElementById("histBannerTxt").textContent = sel.value.replace(/-/g,".");
+    }catch(e){
+      banner.style.display="";
+      document.getElementById("histBannerTxt").textContent =
+        sel.value.replace(/-/g,".") + " 기록이 없습니다 (해당일 미수집)";
+      sel.value = "";
+    }
+  };
+  function back(){
+    banner.style.display="none"; sel.value="";
+    if(TODAY_DATA) renderAll(TODAY_DATA, false);
+  }
+  document.getElementById("histBack").onclick = e=>{ e.preventDefault(); back(); };
 }
 
 if("serviceWorker" in navigator){

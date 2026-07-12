@@ -281,6 +281,13 @@ def build_message(data):
     if pos or neg:
         lines.append("")
 
+    sr = data.get("scan_review")
+    if sr and sr.get("items"):
+        avg = sr["avg_ret_pct"]
+        lines.append(f"🔔 어제 종가스캔 성적: 평균 {'+' if avg>0 else ''}{avg}% "
+                     f"({len(sr['items'])}종목)")
+        lines.append("")
+
     hot = [s for s in (data.get("all_stocks") or [])
            if (s.get("trend_ratio") or 0) >= 3 or (s.get("news_24h") or 0) >= 10]
     if hot:
@@ -289,8 +296,14 @@ def build_message(data):
         lines.append(f"🔥 관심 급증: {names}")
         lines.append("")
 
-    wl = watchlist_lines(data, parse_watchlist(
-        WATCHLIST_PATH.read_text(encoding="utf-8") if WATCHLIST_PATH.exists() else ""))
+    codes = parse_watchlist(
+        WATCHLIST_PATH.read_text(encoding="utf-8") if WATCHLIST_PATH.exists() else "")
+    events = watchlist_events(data, codes)
+    if events:
+        lines.append("<b>🚨 관심종목 이벤트</b>")
+        lines.extend(e(x) for x in events)
+        lines.append("")
+    wl = watchlist_lines(data, codes)
     if wl:
         lines.append("<b>⭐ 내 관심종목</b>")
         lines.extend(e(x) for x in wl)
@@ -299,6 +312,34 @@ def build_message(data):
     lines.append(f'📈 <a href="{SITE_URL}">대시보드 전체 보기</a>')
     lines.append("<i>투자 참고 자료이며 매수·매도 추천이 아닙니다.</i>")
     return "\n".join(lines)
+
+
+def watchlist_events(data, codes):
+    """관심종목에 생긴 주목 이벤트: 5선 진입 / 급등락 / 공시 발생."""
+    if not codes:
+        return []
+    out = []
+    pool = {s["code"]: s for s in (data.get("all_stocks") or [])}
+    names = {c: pool[c]["name"] for c in codes if c in pool}
+    idea_codes = {s["code"]: s for s in (data.get("ideas") or [])}
+    for c in codes:
+        nm = names.get(c)
+        if not nm:
+            continue
+        if c in idea_codes:
+            days = idea_codes[c].get("idea_days")
+            tag = "오늘의 5선 진입!" if days == 1 else f"5선 {days}일째 선정"
+            out.append(f"· {nm} — {tag}")
+        chg = pool[c].get("change_pct")
+        if chg is not None and abs(chg) >= 5:
+            out.append(f"· {nm} — {'급등' if chg > 0 else '급락'} "
+                       f"{'+' if chg > 0 else ''}{chg:.1f}%")
+    watch_names = set(names.values())
+    for d in (data.get("disclosures") or []):
+        if d.get("company") in watch_names:
+            mark = {"positive": "호재성", "negative": "악재성"}.get(d.get("sentiment"), "")
+            out.append(f"· {d['company']} — {mark} 공시: {d.get('tag')}")
+    return out[:6]
 
 
 def build_evening_message(data):
@@ -319,6 +360,13 @@ def build_evening_message(data):
         names = " · ".join(
             f"{e(s['name'])}{' 🆕' if s.get('idea_days') == 1 else ''}" for s in ideas)
         lines.append(f"오늘의 5선: {names}")
+    movers = sorted([s for s in (data.get("all_stocks") or [])
+                     if abs(s.get("change_pct") or 0) >= 8],
+                    key=lambda s: -abs(s.get("change_pct") or 0))[:3]
+    if movers:
+        lines.append("🚀 오늘 급등락: " + " · ".join(
+            f"{e(s['name'])} {'+' if s['change_pct']>0 else ''}{s['change_pct']:.1f}%"
+            for s in movers))
     wl = watchlist_lines(data, parse_watchlist(
         WATCHLIST_PATH.read_text(encoding="utf-8") if WATCHLIST_PATH.exists() else ""))
     if wl:
@@ -372,6 +420,14 @@ def build_weekly_message(data):
                              ", ".join(f"{e(n)}({c}회)" for n, c in top))
     else:
         lines.append("아직 성과 데이터가 쌓이는 중입니다. 다음 주부터 성적표가 나옵니다.")
+
+    race = (data.get("strategy_race") or {}).get("rank") or []
+    if race:
+        lines.append("")
+        lines.append("<b>🏁 전략 리그 순위</b>")
+        for i, x in enumerate(race, 1):
+            v = x["total_pct"]
+            lines.append(f"{i}위 {e(x['name'])} {'+' if v > 0 else ''}{v}%")
     lines.append("")
     lines.append(f'📈 <a href="{SITE_URL}">대시보드에서 상세 보기</a>')
     lines.append("<i>투자 참고 자료이며 매수·매도 추천이 아닙니다.</i>")

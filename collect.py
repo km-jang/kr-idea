@@ -805,6 +805,159 @@ def build_index_trend(hist_dir, indices, market_date, key="KOSPI", days=20):
     return pts[-days:]
 
 
+def build_perf_curve(hist_dir, data_today, max_days=60):
+    """일별 리밸런싱 누적 수익률 곡선: 전일 5선을 다음날 가격으로 평가해 체인.
+
+    반환: [{d, port, kospi}] - 100에서 시작하는 누적 지수 (데이터 부족 구간은 건너뜀)
+    """
+    days = []
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-max_days:]
+        for f in files:
+            try:
+                days.append((f.stem, json.loads(f.read_text(encoding="utf-8"))))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    if data_today and data_today.get("market_date"):
+        if not days or days[-1][0] != data_today["market_date"]:
+            days.append((data_today["market_date"], data_today))
+    if len(days) < 2:
+        return []
+
+    def price_map(d):
+        pool = d.get("all_stocks") or (d.get("flow_scan") or []) + (d.get("ideas") or [])
+        return {s["code"]: s.get("price") for s in pool if s.get("price")}
+
+    curve = [{"d": days[0][0], "port": 100.0, "kospi": 100.0}]
+    port, kospi = 100.0, 100.0
+    for (d0, prev), (d1, cur) in zip(days, days[1:]):
+        ideas = prev.get("ideas") or []
+        pm = price_map(cur)
+        rets = []
+        for s in ideas:
+            p0, p1 = s.get("price"), pm.get(s.get("code"))
+            if p0 and p1:
+                rets.append(p1 / p0 - 1)
+        k0 = ((prev.get("indices") or {}).get("KOSPI") or {}).get("value")
+        k1 = ((cur.get("indices") or {}).get("KOSPI") or {}).get("value")
+        if not rets or not k0 or not k1:
+            continue                      # 매칭 불가한 날은 건너뜀 (구버전 히스토리)
+        port *= 1 + sum(rets) / len(rets)
+        kospi *= k1 / k0
+        curve.append({"d": d1, "port": round(port, 2), "kospi": round(kospi, 2)})
+    return curve if len(curve) >= 2 else []
+
+
+# ---------------------------------------------------------------------------
+# 전략 실험실: 4개 가중치 프리셋의 가상 리그전
+# ---------------------------------------------------------------------------
+
+STRATEGY_PRESETS = {
+    "기본형":   {"f": 1.0, "v": 1.0, "m": 1.0, "d": 1.0},
+    "수급형":   {"f": 1.5, "v": 0.7, "m": 1.2, "d": 1.0},
+    "가치형":   {"f": 0.7, "v": 1.6, "m": 0.6, "d": 1.2},
+    "모멘텀형": {"f": 1.1, "v": 0.6, "m": 2.0, "d": 0.8},
+}
+
+
+def pick_ideas_weighted(stocks, w, n=None):
+    """가중치 프리셋으로 5선 선정 (대시보드 슬라이더와 같은 산식)."""
+    n = n or CONFIG["idea_count"]
+    min_mc = CONFIG["idea_min_mktcap"]
+    min_to = CONFIG.get("min_turnover_100m", 0)
+    cands = []
+    for s in stocks:
+        if (s.get("mktcap_100m") or 0) < min_mc or (s.get("disc_score") or 0) < 0:
+            continue
+        to = turnover_100m(s)
+        if to is not None and to < min_to:
+            continue
+        adj = ((s.get("flow_score") or 0) * w["f"] + (s.get("value_score") or 0) * w["v"]
+               + (s.get("mom_score") or 0) * w["m"] + (s.get("disc_score") or 0) * w["d"])
+        if adj > 0:
+            cands.append((adj, s))
+    cands.sort(key=lambda x: -x[0])
+    return [{"code": s["code"], "name": s["name"], "price": s.get("price")}
+            for _, s in cands[:n]]
+
+
+def build_strategies(stocks):
+    """전략별 오늘의 가상 5선 (히스토리에 저장돼 리그전의 재료가 됨)."""
+    return {k: pick_ideas_weighted(stocks, w) for k, w in STRATEGY_PRESETS.items()}
+
+
+def build_strategy_race(hist_dir, today_stub, max_days=60):
+    """전략 리그전: 각 전략의 일별 리밸런싱 누적 수익률 곡선 + 순위."""
+    days = []
+    try:
+        for f in sorted(Path(hist_dir).glob("*.json"))[-max_days:]:
+            try:
+                days.append((f.stem, json.loads(f.read_text(encoding="utf-8"))))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    if today_stub and today_stub.get("market_date"):
+        if not days or days[-1][0] != today_stub["market_date"]:
+            days.append((today_stub["market_date"], today_stub))
+    if len(days) < 2:
+        return None
+
+    def pmap(d):
+        pool = d.get("all_stocks") or []
+        return {s["code"]: s.get("price") for s in pool if s.get("price")}
+
+    curves = {k: [{"d": days[0][0], "v": 100.0}] for k in STRATEGY_PRESETS}
+    vals = {k: 100.0 for k in STRATEGY_PRESETS}
+    moved = False
+    for (d0, prev), (d1, cur) in zip(days, days[1:]):
+        strat = prev.get("strategies") or {}
+        pm = pmap(cur)
+        for k in STRATEGY_PRESETS:
+            rets = []
+            for s in strat.get(k) or []:
+                p0, p1 = s.get("price"), pm.get(s.get("code"))
+                if p0 and p1:
+                    rets.append(p1 / p0 - 1)
+            if rets:
+                vals[k] *= 1 + sum(rets) / len(rets)
+                moved = True
+            curves[k].append({"d": d1, "v": round(vals[k], 2)})
+    if not moved:
+        return None
+    rank = sorted(({"name": k, "total_pct": round(vals[k] - 100, 2)}
+                   for k in STRATEGY_PRESETS), key=lambda r: -r["total_pct"])
+    return {"curves": curves, "rank": rank}
+
+
+def build_scan_review(scans_path, stocks, market_date):
+    """종가매매 스캔 성적 채점: 직전 스캔 후보를 오늘 종가로 평가."""
+    try:
+        records = json.loads(Path(scans_path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    past = [r for r in records
+            if r.get("date") and (not market_date or r["date"] < market_date)
+            and r.get("candidates")]
+    if not past:
+        return None
+    last = past[-1]
+    price_map = {s["code"]: s.get("price") for s in stocks if s.get("price")}
+    items = []
+    for c in last["candidates"]:
+        p0, p1 = c.get("price"), price_map.get(c.get("code"))
+        if p0 and p1:
+            items.append({"name": c["name"], "scan_price": p0,
+                          "ret_pct": round((p1 / p0 - 1) * 100, 2)})
+    if not items:
+        return None
+    return {"date": last["date"],
+            "avg_ret_pct": round(sum(i["ret_pct"] for i in items) / len(items), 2),
+            "items": items}
+
+
 def apply_idea_streaks(ideas, past_idea_sets):
     """아이디어 종목별 연속 선정일수(idea_days) 계산. 오늘 포함 1부터 시작."""
     for s in ideas:
@@ -1031,6 +1184,36 @@ def build_sample():
                    "summary": {"avg_ret_pct": round(sum(r["avg_ret_pct"] for r in perf_records) / len(perf_records), 2),
                                "win_rate_pct": round(wins / len(perf_records) * 100),
                                "beat_kospi_pct": round(beat / len(perf_records) * 100)}}
+    for s in ideas:                        # 미리보기용 20일 종가 (완만한 상승 랜덤워크)
+        base = s["price"] / random.uniform(1.02, 1.15)
+        closes, v = [], base
+        for _ in range(20):
+            v *= random.uniform(0.985, 1.02)
+            closes.append(round(v))
+        closes[-1] = s["price"]
+        s["closes"] = closes
+    # 미리보기용 누적 수익률 곡선
+    curve, port, kospi = [], 100.0, 100.0
+    for i in range(10):
+        port *= random.uniform(0.995, 1.025)
+        kospi *= random.uniform(0.995, 1.015)
+        curve.append({"d": f"2026-06-{20+i:02d}", "port": round(port, 2),
+                      "kospi": round(kospi, 2)})
+    strategies = build_strategies(stocks)
+    race_curves, race_vals = {}, {}
+    for k in ("기본형", "수급형", "가치형", "모멘텀형"):
+        v, pts = 100.0, []
+        for i in range(10):
+            v *= random.uniform(0.99, 1.028)
+            pts.append({"d": f"2026-06-{20+i:02d}", "v": round(v, 2)})
+        race_curves[k] = pts; race_vals[k] = v
+    strategy_race = {"curves": race_curves,
+                     "rank": sorted(({"name": k, "total_pct": round(race_vals[k]-100, 2)}
+                                     for k in race_vals), key=lambda r: -r["total_pct"])}
+    scan_review = {"date": "2026-07-10", "avg_ret_pct": 1.85, "items": [
+        {"name": "두산에너빌리티", "scan_price": 43000, "ret_pct": 4.19},
+        {"name": "한화에어로스페이스", "scan_price": 890000, "ret_pct": 2.47},
+        {"name": "HD한국조선해양", "scan_price": 263500, "ret_pct": -1.12}]}
     # 미리보기용 지수 추이 (완만한 랜덤워크)
     trend, v = [], 3280.0
     for i in range(20):
@@ -1042,7 +1225,9 @@ def build_sample():
                     {"KOSPI": {"value": 3412.68, "change_pct": 0.87},
                      "KOSDAQ": {"value": 812.45, "change_pct": -0.21}},
                     now, sample=True, errors=[], performance=performance,
-                    kospi_trend=trend, sentiment_enabled=True)
+                    kospi_trend=trend, sentiment_enabled=True, perf_curve=curve,
+                    scan_review=scan_review, strategies=strategies,
+                    strategy_race=strategy_race)
 
 
 # ---------------------------------------------------------------------------
@@ -1051,9 +1236,10 @@ def build_sample():
 
 def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None,
              market_date=None, performance=None, kospi_trend=None,
-             sentiment_enabled=False):
-    def slim(s):
-        return {k: s.get(k) for k in (
+             sentiment_enabled=False, perf_curve=None, scan_review=None,
+             strategies=None, strategy_race=None):
+    def slim(s, with_closes=False):
+        out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
             "pbr", "per", "dvr", "f_streak", "i_streak",
             "f_5d_amt_100m", "i_5d_amt_100m", "f_20d_amt_100m", "i_20d_amt_100m",
@@ -1061,6 +1247,9 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
             "reasons", "flow_delta", "idea_days", "near_52w_pct", "sector",
             "trend_ratio", "news_24h",
             "disclosures")}
+        if with_closes:
+            out["closes"] = s.get("closes")
+        return out
 
     def compact(s):
         """전체 종목 목록용 축약 레코드 (검색·워치리스트에 사용)."""
@@ -1078,13 +1267,17 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "market_date": market_date or now.strftime("%Y-%m-%d"),
         "sample": sample,
         "indices": indices,
-        "ideas": [slim(s) for s in ideas],
+        "ideas": [slim(s, with_closes=True) for s in ideas],
         "flow_scan": [slim(s) for s in flow_rank],
         "value_screen": [slim(s) for s in value_rank],
         "disclosures": disclosures[:60],
         "performance": performance or {"days": 0, "records": []},
         "kospi_trend": kospi_trend or [],
         "sentiment_enabled": sentiment_enabled,
+        "perf_curve": perf_curve or [],
+        "scan_review": scan_review,
+        "strategies": strategies or {},
+        "strategy_race": strategy_race,
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1128,6 +1321,7 @@ def run_full(max_universe=None, out_path=None):
             m = flow_metrics(rows, s.get("price"))
             if m:
                 s.update(m)
+                s["closes"] = [r["close"] for r in reversed(rows[:20])]  # 과거→현재
         except Exception as e:
             errors.append(f"flow {s['code']}: {e}")
         if i % 50 == 0:
@@ -1172,12 +1366,23 @@ def run_full(max_universe=None, out_path=None):
     ideas = apply_idea_streaks(ideas, load_history_idea_codes(hist_dir, market_date))
     performance = build_performance(hist_dir, stocks, indices, market_date)
     kospi_trend = build_index_trend(hist_dir, indices, market_date)
+    scan_review = build_scan_review(ROOT / "scans.json", stocks, market_date)
+    strategies = build_strategies(stocks)
+    strategy_race = build_strategy_race(
+        hist_dir, {"market_date": market_date,
+                   "all_stocks": [{"code": s["code"], "price": s.get("price")} for s in stocks]})
+    perf_curve = build_perf_curve(
+        hist_dir, {"market_date": market_date, "ideas": [],
+                   "all_stocks": [{"code": s["code"], "price": s.get("price")} for s in stocks],
+                   "indices": indices})
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")
     return assemble(stocks, disclosures, ideas, indices, now, errors=errors[:20],
                     market_date=market_date, performance=performance,
-                    kospi_trend=kospi_trend, sentiment_enabled=senti_on)
+                    kospi_trend=kospi_trend, sentiment_enabled=senti_on,
+                    perf_curve=perf_curve, scan_review=scan_review,
+                    strategies=strategies, strategy_race=strategy_race)
 
 
 def main():
