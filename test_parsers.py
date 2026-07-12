@@ -767,6 +767,36 @@ def test_strategy_race():
         assert len(race["curves"]["기본형"]) == 2
     assert collect.build_strategy_race("/없는폴더", None) is None
 
+
+def test_silence_radar():
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        # 3일치 히스토리: A는 평소 100만주(대금 100억), B는 평소 1만주(대금 1억=유동성 미달)
+        for day in ("2026-07-07", "2026-07-08", "2026-07-09"):
+            open(os.path.join(td, day+".json"), "w").write(json.dumps({
+                "all_stocks": [
+                    {"code": "A", "price": 10000, "volume": 1000000},
+                    {"code": "B", "price": 10000, "volume": 10000}]}))
+        base = collect.volume_baselines(td)
+        assert "A" in base and "B" in base
+        stocks = [
+            {"code": "A", "name": "조용주", "price": 10000, "volume": 300000,   # 평소의 30%
+             "change_pct": 0.5, "mktcap_100m": 9000},
+            {"code": "B", "name": "원래한산", "price": 10000, "volume": 3000,
+             "change_pct": 0.1, "mktcap_100m": 9000},                          # 유동성 미달 제외
+            {"code": "C", "name": "기준없음", "price": 10000, "volume": 500000,
+             "change_pct": 0.2, "mktcap_100m": 9000},                          # 히스토리 없음 제외
+        ]
+        cands = collect.silence_candidates(stocks, base)
+        assert [c["name"] for c in cands] == ["조용주"]
+        assert cands[0]["vol_ratio"] == 0.3
+        # 뉴스·검색 조용 → 확정 / 뉴스 많으면 탈락
+        cands[0]["news_24h"], cands[0]["trend_ratio"] = 1, 0.4
+        assert len(collect.build_silence(cands)) == 1
+        cands[0]["news_24h"] = 15
+        assert len(collect.build_silence(cands)) == 0
+    assert collect.volume_baselines("/없는폴더") == {}
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

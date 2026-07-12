@@ -209,6 +209,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <a href="#watch">관심종목</a>
     <a href="#ideas">오늘의 아이디어</a>
     <a href="#perf">성과</a>
+    <a href="#silence">침묵 레이더</a>
     <a href="#senti">심리 히트</a>
     <a href="#sector">업종 흐름</a>
     <a href="#flow">수급 스캐너</a>
@@ -295,6 +296,13 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <div id="perfBody"></div>
   </section>
 
+  <section id="silence">
+    <h2>🤫 침묵 레이더</h2>
+    <p class="sub">거래량·뉴스·검색이 동시에 조용해진 종목 — 완전한 무관심은 종종 바닥에서 나타납니다 (역발상 관찰용)</p>
+    <div class="tblwrap" id="silWrap" style="display:none"><table id="silTbl"></table></div>
+    <div class="empty" id="silEmpty" style="display:none"></div>
+  </section>
+
   <section id="senti">
     <h2>심리 히트</h2>
     <p class="sub">검색량·뉴스가 급증한 종목 — 군중의 관심이 몰리기 시작한 곳 (수급과 교차 확인 권장)</p>
@@ -325,6 +333,8 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <p class="sub">저PBR · 저PER · 고배당 조합 점수 상위 · 열 제목 클릭 시 정렬</p>
     <div class="tblwrap"><table id="valueTbl"></table></div>
   </section>
+
+  <div id="devilPanel" style="display:none"></div>
 
   <section id="search">
     <h2>종목 검색 <button class="csvbtn" data-csv="all">전체 CSV 저장</button></h2>
@@ -437,7 +447,8 @@ function initSearch(d){
     tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>PBR</th>"+
       "<th>PER</th><th>배당률</th><th>외인 연속</th><th>종합점수</th><th>바로가기</th></tr></thead><tbody>"+
       (hits.length ? hits.map(s=>`<tr>
-        <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
+        <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>
+          <button class="xlink devilbtn" data-code="${s.code}" title="반론 보기">😈</button></td>
         <td>${fmt(s.price)}</td>
         <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
         <td>${s.pbr==null?"–":s.pbr.toFixed(2)}</td>
@@ -932,7 +943,13 @@ function initPort(d){
     if(!q){ hint.textContent=""; return; }
     const hit = allStocks(d).find(s=>s.name.toLowerCase()===q || s.code===q) ||
                 allStocks(d).find(s=>s.name.toLowerCase().includes(q));
-    if(hit){ picked = hit; hint.textContent = `선택됨: ${hit.name} (${hit.code}) · 현재가 ${fmt(hit.price)}원`; }
+    if(hit){
+      picked = hit;
+      const devils = devilNotes(hit.code, d);
+      const warn = devils.length && !devils[0].startsWith("뚜렷한")
+        ? ` — 😈 반론 ${devils.length}건: ${devils[0]}` : "";
+      hint.textContent = `선택됨: ${hit.name} (${hit.code}) · 현재가 ${fmt(hit.price)}원${warn}`;
+    }
     else hint.textContent = "검색 결과 없음";
   });
   document.getElementById("portAdd").addEventListener("click", ()=>{
@@ -978,6 +995,84 @@ function initPort(d){
     rd.readAsText(f);
   });
 }
+
+
+/* ---------- 침묵 레이더 ---------- */
+function silenceSection(d){
+  const wrap = document.getElementById("silWrap");
+  const empty = document.getElementById("silEmpty");
+  const tbl = document.getElementById("silTbl");
+  const rows = d.silence || [];
+  if(!rows.length){
+    wrap.style.display="none"; empty.style.display="";
+    empty.textContent = "거래량 기준선이 쌓이는 중입니다 (3영업일 이후 자동 표시) — 또는 오늘은 조용한 종목이 없습니다.";
+    return;
+  }
+  wrap.style.display=""; empty.style.display="none";
+  tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th>"+
+    "<th>거래량 (평소比)</th><th>뉴스 24h</th><th>검색 배수</th><th>PBR</th><th>배당률</th></tr></thead><tbody>"+
+    rows.map(s=>`<tr>
+      <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>
+        <button class="xlink devilbtn" data-code="${s.code}" title="반론 보기">😈</button></td>
+      <td>${fmt(s.price)}</td>
+      <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
+      <td><b>${s.vol_ratio!=null? Math.round(s.vol_ratio*100)+"%" : "–"}</b></td>
+      <td>${s.news_24h!=null? s.news_24h+"건" : "–"}</td>
+      <td>${s.trend_ratio!=null? s.trend_ratio+"배" : "–"}</td>
+      <td>${s.pbr==null?"–":s.pbr.toFixed(2)}</td>
+      <td>${s.dvr==null?"–":s.dvr.toFixed(1)+"%"}</td></tr>`).join("")+"</tbody>";
+}
+
+/* ---------- 악마의 변호인: 종목 반론 자동 생성 ---------- */
+function devilNotes(code, d){
+  const pool = allStocks(d);
+  const s = pool.find(x=>x.code===code);
+  if(!s) return ["데이터 없음"];
+  const notes = [];
+  const pers = pool.map(x=>x.per).filter(v=>v>0).sort((a,b)=>a-b);
+  if(s.per && pers.length > 20){
+    const rank = pers.filter(v=>v<=s.per).length / pers.length;
+    if(rank >= 0.9) notes.push(`PER ${s.per.toFixed(1)}배 — 유니버스 상위 ${Math.round((1-rank)*100)||1}% 고평가 구간`);
+  }
+  if(s.per != null && s.per <= 0) notes.push("적자 기업 (PER 산출 불가)");
+  if(s.pbr >= 4) notes.push(`PBR ${s.pbr.toFixed(1)}배 — 장부가의 ${s.pbr.toFixed(0)}배 가격`);
+  if((s.trend_ratio||0) >= 3) notes.push(`검색량 이미 ${s.trend_ratio}배 과열 — 대중이 이미 알고 있음`);
+  if((s.news_24h||0) >= 10) notes.push(`24시간 기사 ${s.news_24h}건 — 뉴스가 가장 뜨거울 때가 종종 단기 고점`);
+  if((s.change_pct||0) >= 5) notes.push(`오늘 +${s.change_pct.toFixed(1)}% 급등 — 추격 매수 구간`);
+  if((s.f_5d_amt_100m||0) < 0) notes.push(`외국인 5일 순매도 ${fmt(Math.abs(s.f_5d_amt_100m))}억 — 수급 이탈 중`);
+  if((s.flow_delta||0) <= -8) notes.push(`수급 점수 전일 대비 ${s.flow_delta} 급락`);
+  if(s.near_52w_pct != null && s.near_52w_pct <= 60)
+    notes.push(`52주 고점 대비 ${(100-s.near_52w_pct).toFixed(0)}% 하락 — 추세 훼손 상태`);
+  const to = turnoverOf(s);
+  if(to != null && to < 30) notes.push(`일 거래대금 ${to.toFixed(0)}억 — 저유동성 (진입·이탈 슬리피지 위험)`);
+  if((s.dvr||0) === 0 && s.per == null) notes.push("배당 없음 + 이익 지표 부재 — 기대감만으로 지탱");
+  if((DATA.disclosures||[]).some(x=>x.company===s.name && x.sentiment==="negative"))
+    notes.push("최근 악재성 공시 존재 (공시 시그널 섹션 확인)");
+  if(!notes.length) notes.push("뚜렷한 반론 없음 — 그래도 '내가 모르는 악재가 있다면 무엇일까'는 자문해볼 것");
+  return notes;
+}
+
+function showDevil(code){
+  const s = allStocks(DATA).find(x=>x.code===code);
+  const panel = document.getElementById("devilPanel");
+  const notes = devilNotes(code, DATA);
+  panel.style.display="";
+  panel.innerHTML = `<div class="bars" style="border-left:3px solid var(--crit)">
+    <h3>😈 악마의 변호인 — ${esc(s?s.name:code)}에 대한 반론</h3>
+    <div style="font-size:13px;line-height:2;color:var(--ink-2)">
+      ${notes.map(n=>"· "+esc(n)).join("<br>")}
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-3);margin-top:8px">
+      매수를 말리는 게 아니라, 알고 사는 것과 모르고 사는 것의 차이를 만드는 도구입니다.
+      <a href="#" onclick="document.getElementById('devilPanel').style.display='none';return false"
+         style="color:var(--series-1-deep)">닫기</a>
+    </div></div>`;
+  panel.scrollIntoView({behavior:"smooth", block:"center"});
+}
+document.addEventListener("click", e=>{
+  const btn = e.target.closest(".devilbtn");
+  if(btn && DATA){ e.preventDefault(); showDevil(btn.dataset.code); }
+});
 
 /* ---------- 성과 트래킹 ---------- */
 function perfSection(d){
@@ -1033,7 +1128,7 @@ function renderAll(d, isHistory){
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
   sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
-  curveChart(d); raceChart(d); portSection(d);
+  curveChart(d); raceChart(d); portSection(d); silenceSection(d);
   if(!isHistory){
     TODAY_DATA = d;
     initSliders(d); initSearch(d); initHistory(d); initPort(d);

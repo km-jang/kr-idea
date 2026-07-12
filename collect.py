@@ -62,6 +62,12 @@ CONFIG = {
     "value_per_max": 12,        # PER 이 값 미만이면 +10
     # 모멘텀 점수 (최대 10): 52주 최고가 대비 현재가 비율 구간
     "mom_tiers": [(0.95, 10.0), (0.90, 7.0), (0.85, 4.0)],
+    # 침묵 레이더 (무관심 바닥 탐지)
+    "silence_vol_max": 0.5,     # 거래량이 평소 평균의 이 비율 이하
+    "silence_chg_max": 1.5,     # 당일 등락률 절대값 상한 (횡보 조건)
+    "silence_news_max": 2,      # 24시간 기사 수 상한
+    "silence_trend_max": 0.8,   # 검색량 배수 상한 (평소보다 조용)
+    "silence_min_turnover": 30, # 평소 거래대금 하한 (억) - 원래 유동성 있던 종목만
     # 품질 가드
     "guard_min_universe": 150,
     "guard_min_flow_ratio": 0.5,
@@ -599,13 +605,16 @@ def count_recent_news(data, now):
     return n
 
 
-def apply_sentiment(stocks, errors):
-    """점수 상위 종목에 검색 트렌드·뉴스 빈도 부여. 키 없으면 no-op."""
+def apply_sentiment(stocks, errors, extra=None):
+    """점수 상위 + 지정 종목에 검색 트렌드·뉴스 빈도 부여. 키 없으면 no-op."""
     keys = naver_api_keys()
     if not keys:
         print("  → 네이버 개발자 키 없음 - 심리 시그널 생략")
         return stocks, False
     top = sorted(stocks, key=lambda s: -(s.get("score") or 0))[:CONFIG["senti_top_n"]]
+    if extra:
+        seen = {s["code"] for s in top}
+        top += [s for s in extra if s["code"] not in seen]
     names = [s["name"] for s in top]
     try:
         ratios = fetch_trend_ratios(names, keys)
@@ -932,6 +941,66 @@ def build_strategy_race(hist_dir, today_stub, max_days=60):
     return {"curves": curves, "rank": rank}
 
 
+# ---------------------------------------------------------------------------
+# 침묵 레이더: 거래량·뉴스·검색이 동시에 조용해진 "무관심 바닥" 탐지
+# ---------------------------------------------------------------------------
+
+def volume_baselines(hist_dir, days=10):
+    """히스토리에서 종목별 평소 거래량·가격 평균 → {code: (avg_vol, avg_price)}"""
+    acc = {}
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-days:]
+    except Exception:
+        return {}
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for s in d.get("all_stocks") or []:
+            if s.get("volume") and s.get("price"):
+                acc.setdefault(s["code"], []).append((s["volume"], s["price"]))
+    return {c: (sum(v for v, _ in xs) / len(xs), sum(p for _, p in xs) / len(xs))
+            for c, xs in acc.items() if len(xs) >= 3}
+
+
+def silence_candidates(stocks, baselines):
+    """거래량 급감 + 횡보 조건을 만족하는 1차 후보 (심리 조회 대상에 포함시키기 위함)."""
+    out = []
+    for s in stocks:
+        base = baselines.get(s["code"])
+        if not base or not s.get("volume"):
+            continue
+        avg_vol, avg_price = base
+        if avg_vol * avg_price / 1e8 < CONFIG["silence_min_turnover"]:
+            continue                                   # 원래부터 유동성 없던 종목 제외
+        vr = s["volume"] / avg_vol
+        if vr > CONFIG["silence_vol_max"]:
+            continue
+        if abs(s.get("change_pct") or 0) > CONFIG["silence_chg_max"]:
+            continue
+        s["vol_ratio"] = round(vr, 2)
+        out.append(s)
+    out.sort(key=lambda x: x["vol_ratio"])
+    return out[:30]
+
+
+def build_silence(candidates, top_n=10):
+    """후보 중 뉴스·검색까지 조용한 종목 확정 → 침묵 랭킹."""
+    out = []
+    for s in candidates:
+        news, tr = s.get("news_24h"), s.get("trend_ratio")
+        if news is not None and news > CONFIG["silence_news_max"]:
+            continue
+        if tr is not None and tr > CONFIG["silence_trend_max"]:
+            continue
+        out.append({k: s.get(k) for k in (
+            "code", "name", "market", "price", "change_pct", "mktcap_100m",
+            "pbr", "per", "dvr", "vol_ratio", "news_24h", "trend_ratio",
+            "f_streak", "sector", "score")})
+    return out[:top_n]
+
+
 def build_scan_review(scans_path, stocks, market_date):
     """종가매매 스캔 성적 채점: 직전 스캔 후보를 오늘 종가로 평가."""
     try:
@@ -1199,6 +1268,13 @@ def build_sample():
         kospi *= random.uniform(0.995, 1.015)
         curve.append({"d": f"2026-06-{20+i:02d}", "port": round(port, 2),
                       "kospi": round(kospi, 2)})
+    silence = [{"code": s["code"], "name": s["name"], "market": s["market"],
+                "price": s["price"], "change_pct": round(random.uniform(-1.2, 1.2), 2),
+                "mktcap_100m": s["mktcap_100m"], "pbr": s.get("pbr"), "per": s.get("per"),
+                "dvr": s.get("dvr"), "vol_ratio": round(random.uniform(0.15, 0.5), 2),
+                "news_24h": random.randint(0, 2), "trend_ratio": round(random.uniform(0.2, 0.8), 2),
+                "f_streak": s.get("f_streak"), "sector": s.get("sector"), "score": s.get("score")}
+               for s in stocks[14:20]]
     strategies = build_strategies(stocks)
     race_curves, race_vals = {}, {}
     for k in ("기본형", "수급형", "가치형", "모멘텀형"):
@@ -1227,7 +1303,7 @@ def build_sample():
                     now, sample=True, errors=[], performance=performance,
                     kospi_trend=trend, sentiment_enabled=True, perf_curve=curve,
                     scan_review=scan_review, strategies=strategies,
-                    strategy_race=strategy_race)
+                    strategy_race=strategy_race, silence=silence)
 
 
 # ---------------------------------------------------------------------------
@@ -1237,7 +1313,7 @@ def build_sample():
 def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None,
              market_date=None, performance=None, kospi_trend=None,
              sentiment_enabled=False, perf_curve=None, scan_review=None,
-             strategies=None, strategy_race=None):
+             strategies=None, strategy_race=None, silence=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -1278,6 +1354,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "scan_review": scan_review,
         "strategies": strategies or {},
         "strategy_race": strategy_race,
+        "silence": silence or [],
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1358,8 +1435,10 @@ def run_full(max_universe=None, out_path=None):
         sys.exit(2)
 
     stocks = score_stocks(stocks, disclosures)
-    print("[4.5/5] 심리 시그널 (검색 트렌드·뉴스)...")
-    stocks, senti_on = apply_sentiment(stocks, errors)
+    hist_dir_early = Path(out_path or OUT_PATH).parent / "history"
+    sil_cands = silence_candidates(stocks, volume_baselines(hist_dir_early))
+    print(f"[4.5/5] 심리 시그널 (검색 트렌드·뉴스)... (침묵 후보 {len(sil_cands)}건 포함)")
+    stocks, senti_on = apply_sentiment(stocks, errors, extra=sil_cands)
     stocks = apply_flow_delta(stocks, prev)
     ideas = pick_ideas(stocks, 5)
     hist_dir = Path(out_path or OUT_PATH).parent / "history"
@@ -1367,6 +1446,7 @@ def run_full(max_universe=None, out_path=None):
     performance = build_performance(hist_dir, stocks, indices, market_date)
     kospi_trend = build_index_trend(hist_dir, indices, market_date)
     scan_review = build_scan_review(ROOT / "scans.json", stocks, market_date)
+    silence = build_silence(sil_cands)
     strategies = build_strategies(stocks)
     strategy_race = build_strategy_race(
         hist_dir, {"market_date": market_date,
@@ -1382,7 +1462,8 @@ def run_full(max_universe=None, out_path=None):
                     market_date=market_date, performance=performance,
                     kospi_trend=kospi_trend, sentiment_enabled=senti_on,
                     perf_curve=perf_curve, scan_review=scan_review,
-                    strategies=strategies, strategy_race=strategy_race)
+                    strategies=strategies, strategy_race=strategy_race,
+                    silence=silence)
 
 
 def main():
