@@ -6,6 +6,7 @@ on:
     - cron: "0 23 * * 0-4"    # 매 영업일 08:00 KST - 아침 브리핑 발송
     - cron: "0 9 * * 0"       # 일요일 18:00 KST - 주간 결산 발송
     - cron: "50 5 * * 1-5"    # 매 영업일 14:50 KST - 종가매매 스캔
+    - cron: "40 10 * * 1-5"   # 매 영업일 19:40 KST - 예비 알람 (본 수집 누락 시에만 작동)
   workflow_dispatch: {}
 
 permissions:
@@ -77,6 +78,41 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python notify.py --weekly
 
+      - name: 예비 수집·발송 (19:40, 본 수집 누락 시에만)
+        if: github.event.schedule == '40 10 * * 1-5'
+        continue-on-error: true
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          HAVE=$(python -c "import json;print(json.load(open('data.json')).get('market_date',''))" 2>/dev/null || echo "")
+          if [ "$HAVE" = "$TODAY" ]; then
+            echo "본 수집 완료 확인($HAVE) — 예비 알람 조용히 종료"
+            exit 0
+          fi
+          echo "본 수집 누락 감지(현재 데이터: $HAVE) — 예비 수집 시작"
+          python test_parsers.py
+          python collect.py
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add data.json history/ 2>/dev/null || git add data.json
+          if git diff --cached --quiet; then
+            echo "변경 없음"
+          else
+            git commit -m "data(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')"
+            git push
+          fi
+          NEWDATE=$(python -c "import json;print(json.load(open('data.json')).get('market_date',''))" 2>/dev/null || echo "")
+          if [ "$NEWDATE" = "$TODAY" ]; then
+            python notify.py --evening
+          else
+            echo "휴장일 등으로 새 데이터 없음 — 발송 생략"
+          fi
+
       - name: 종가매매 스캔
         if: github.event.schedule == '50 5 * * 1-5'
         continue-on-error: true
@@ -88,4 +124,4 @@ jobs:
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
           git add scans.json 2>/dev/null || true
-          git diff --cached --quiet || (git commit -m "scan: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && git push) 
+          git diff --cached --quiet || (git commit -m "scan: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && git push)
