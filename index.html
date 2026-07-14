@@ -154,9 +154,11 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 .slpreset:hover{color:var(--ink-1)}
 .mktchip.on{background:var(--series-1);color:#fff;font-weight:700}
 
-/* 업종 바: 순매수(+)는 상승색, 순매도(-)는 하락색 */
-.brow .bfill.neg{background:var(--down);border-radius:4px 0 0 4px}
-.brow .bfill.pos{background:var(--up)}
+/* 업종 바: 가운데 0축 기준 · 순매수(+)는 빨강으로 오른쪽, 순매도(-)는 파랑으로 왼쪽 */
+.btrack.diverge::before{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;
+  width:1px;background:var(--grid)}
+.brow .bfill.neg{background:var(--down);border-radius:4px 0 0 4px;left:auto;right:50%}
+.brow .bfill.pos{background:var(--up);border-radius:0 4px 4px 0;left:50%}
 
 /* 성과 트래킹 */
 .perf-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}
@@ -184,6 +186,54 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   font-size:11.5px;color:var(--ink-3);line-height:1.7}
 #loaderr{display:none;margin:30px 0;padding:16px;border:1px solid var(--ring);
   border-radius:10px;background:var(--surface-1);color:var(--ink-2);font-size:13.5px}
+
+/* ---------- 섹션 접기 + 요약 뱃지 ---------- */
+section[id] > h2{cursor:pointer;user-select:none}
+section[id] > h2::before{content:"▾";display:inline-block;width:15px;
+  font-size:10.5px;color:var(--ink-3);vertical-align:2px}
+section.folded > h2::before{content:"▸"}
+section.folded > *:not(h2){display:none}
+.secbadge{font-size:11px;font-weight:600;color:var(--ink-2);background:var(--chip-bg);
+  border-radius:5px;padding:2px 8px;margin-left:8px;vertical-align:2px;white-space:nowrap}
+.secbadge.warn{color:#8a2a2a;background:rgba(214,75,75,.13)}
+@media (prefers-color-scheme: dark){.secbadge.warn{color:#ff9c9c}}
+
+/* ---------- 오늘의 3줄 요약 ---------- */
+#brief3{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;
+  padding:13px 16px;margin-bottom:14px;font-size:13.5px;line-height:1.8;display:none}
+#brief3 b{font-weight:700}
+
+.colmore{display:block;width:100%;font-size:12px;font-weight:600;color:var(--ink-2);
+  background:var(--chip-bg);border:none;border-top:1px solid var(--ring);padding:9px;
+  cursor:pointer;font-family:inherit}
+table.slim{min-width:0}
+
+/* ---------- 모바일 최적화 (좁은 화면) ---------- */
+@media (max-width:520px){
+  body{font-size:14px}
+  .wrap{padding:10px 10px 50px}
+  header.top{margin:4px 0 10px}
+  header.top h1{font-size:17px}
+  .stamp{font-size:11.5px}
+  section{margin:20px 0}
+  h2{font-size:15.5px}
+  .sub{font-size:12px}
+  .tiles{grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+  .tile{padding:10px 12px}
+  .tile .val{font-size:18px}
+  .tile .delta{font-size:12px}
+  .cards{grid-template-columns:1fr}
+  .bars{padding:12px 12px 8px}
+  .brow{grid-template-columns:74px 1fr 58px;gap:6px;padding:4px 0}
+  .brow .bl{font-size:11.5px}
+  .brow .bv{font-size:11px}
+  table{font-size:12px;min-width:560px}
+  th,td{padding:6px 8px}
+  input.memo{width:96px}
+  .perf-tiles{grid-template-columns:repeat(2,1fr);gap:8px}
+  nav.chips a{font-size:12.5px;padding:6px 12px}
+  .csvbtn,.slpreset,.slreset,.mktchip{padding:6px 11px}
+}
 </style>
 </head>
 <body>
@@ -198,36 +248,30 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   </header>
   <div id="histBanner" style="display:none;margin-bottom:12px;padding:9px 14px;font-size:13px;
     border-radius:10px;background:#fdedc3;color:#7a5200;font-weight:600">
-    📅 <span id="histBannerTxt"></span> 기록을 보는 중 —
+    📅 <span id="histBannerTxt"></span> 기록을 보는 중 ·
     <a href="#" id="histBack" style="color:inherit">오늘 데이터로 돌아가기</a>
   </div>
 
   <div class="tiles" id="tiles"></div>
 
+  <div id="brief3"></div>
+
   <nav class="chips">
     <a href="#port">포트폴리오</a>
     <a href="#watch">관심종목</a>
     <a href="#ideas">오늘의 아이디어</a>
-    <a href="#perf">성과</a>
     <a href="#compass">뉴스 나침반</a>
-    <a href="#silence">침묵 레이더</a>
     <a href="#senti">심리 히트</a>
-    <a href="#sector">업종 흐름</a>
+    <a href="#silence">침묵 레이더</a>
     <a href="#flow">수급 스캐너</a>
+    <a href="#sector">업종 흐름</a>
     <a href="#value">밸류업 스크리너</a>
+    <a href="#perf">성과</a>
     <a href="#disc">공시 시그널</a>
     <a href="#search">종목 검색</a>
   </nav>
 
   <div id="loaderr"></div>
-
-  <section id="watch">
-    <h2>⭐ 관심종목</h2>
-    <p class="sub">표의 별표(☆)를 눌러 추가·제거 · 이 브라우저에만 저장됩니다</p>
-    <div class="tblwrap"><table id="watchTbl"></table></div>
-    <div class="empty" id="watchEmpty" style="display:none">
-      아직 관심종목이 없습니다. 아래 표에서 ☆를 눌러 추가하세요.</div>
-  </section>
 
   <section id="port">
     <h2>💼 내 포트폴리오</h2>
@@ -256,7 +300,13 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
       </div>
     </div>
   </section>
-
+  <section id="watch">
+    <h2>⭐ 관심종목</h2>
+    <p class="sub">표의 별표(☆)를 눌러 추가·제거 · 이 브라우저에만 저장됩니다</p>
+    <div class="tblwrap"><table id="watchTbl"></table></div>
+    <div class="empty" id="watchEmpty" style="display:none">
+      아직 관심종목이 없습니다. 아래 표에서 ☆를 눌러 추가하세요.</div>
+  </section>
   <section id="ideas">
     <h2>오늘의 아이디어 5선</h2>
     <p class="sub">수급(40) + 밸류(40) + 모멘텀(10) + 공시(±20) 종합점수 상위 · 시총 3,000억 이상 · 악재 공시 종목 제외</p>
@@ -277,7 +327,49 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     </div>
     <div class="cards" id="ideaCards"></div>
   </section>
-
+  <section id="compass">
+    <h2>🧭 뉴스 나침반</h2>
+    <p class="sub">테마 점화(기사 급증)와 뉴스 데뷔 · 뉴스가 가리키는 방향을 수급과 교차해 발굴합니다</p>
+    <div id="compassBody"></div>
+  </section>
+  <section id="senti">
+    <h2>심리 히트</h2>
+    <p class="sub">검색량·뉴스가 급증한 종목 · 군중의 관심이 몰리기 시작한 곳 (수급과 교차 확인 권장)</p>
+    <div class="tblwrap"><table id="sentiTbl"></table></div>
+    <div class="empty" id="sentiEmpty" style="display:none"></div>
+  </section>
+  <section id="silence">
+    <h2>🤫 침묵 레이더</h2>
+    <p class="sub">거래량·뉴스·검색이 동시에 조용해진 종목 · 완전한 무관심은 종종 바닥에서 나타납니다 (역발상 관찰용)</p>
+    <div class="tblwrap" id="silWrap" style="display:none"><table id="silTbl"></table></div>
+    <div class="empty" id="silEmpty" style="display:none"></div>
+  </section>
+  <section id="flow">
+    <h2>수급 스캐너 <button class="csvbtn" data-csv="flow">CSV 저장</button></h2>
+    <p class="sub">외국인·기관 연속 순매수와 5/20일 누적 순매수 금액 (억원) · 열 제목 클릭 시 정렬</p>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="slpreset mktchip on" data-mkt="">전체</button>
+      <button class="slpreset mktchip" data-mkt="KOSPI">코스피</button>
+      <button class="slpreset mktchip" data-mkt="KOSDAQ">코스닥</button>
+    </div>
+    <div class="bars" id="flowBars"></div>
+    <div class="tblwrap"><table id="flowTbl"></table></div>
+  </section>
+  <section id="sector">
+    <h2>업종 자금 흐름</h2>
+    <p class="sub">업종별 5일 누적 순매수 금액 합계 (억원) · 돈이 어느 섹터로 흐르는지
+      <span style="white-space:nowrap">(빨강=순매수→ · ←파랑=순매도)</span></p>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="slpreset mktchip on" id="secInvF" onclick="setSectorInv('f')">외국인</button>
+      <button class="slpreset mktchip" id="secInvI" onclick="setSectorInv('i')">기관</button>
+    </div>
+    <div class="bars" id="sectorBars"></div>
+  </section>
+  <section id="value">
+    <h2>밸류업 스크리너 <button class="csvbtn" data-csv="value">CSV 저장</button></h2>
+    <p class="sub">저PBR · 저PER · 고배당 조합 점수 상위 · 열 제목 클릭 시 정렬</p>
+    <div class="tblwrap"><table id="valueTbl"></table></div>
+  </section>
   <section id="perf">
     <h2>성과 트래킹</h2>
     <p class="sub">과거 "아이디어 5선"이 오늘까지 실제로 낸 수익률 · 같은 기간 KOSPI와 비교</p>
@@ -296,53 +388,11 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     </div>
     <div id="perfBody"></div>
   </section>
-
-  <section id="compass">
-    <h2>🧭 뉴스 나침반</h2>
-    <p class="sub">테마 점화(기사 급증)와 뉴스 데뷔 — 뉴스가 가리키는 방향을 수급과 교차해 발굴합니다</p>
-    <div id="compassBody"></div>
+  <section id="disc">
+    <h2>DART 공시 시그널</h2>
+    <p class="sub">자사주·소각·무상증자 등 주가 관련성 높은 공시만 필터링 (▲ 호재성 · ▼ 악재성 · · 관찰)</p>
+    <div class="disc" id="discList"></div>
   </section>
-
-  <section id="silence">
-    <h2>🤫 침묵 레이더</h2>
-    <p class="sub">거래량·뉴스·검색이 동시에 조용해진 종목 — 완전한 무관심은 종종 바닥에서 나타납니다 (역발상 관찰용)</p>
-    <div class="tblwrap" id="silWrap" style="display:none"><table id="silTbl"></table></div>
-    <div class="empty" id="silEmpty" style="display:none"></div>
-  </section>
-
-  <section id="senti">
-    <h2>심리 히트</h2>
-    <p class="sub">검색량·뉴스가 급증한 종목 — 군중의 관심이 몰리기 시작한 곳 (수급과 교차 확인 권장)</p>
-    <div class="tblwrap"><table id="sentiTbl"></table></div>
-    <div class="empty" id="sentiEmpty" style="display:none"></div>
-  </section>
-
-  <section id="sector">
-    <h2>업종 자금 흐름</h2>
-    <p class="sub">업종별 외국인 5일 누적 순매수 금액 합계 (억원) · 돈이 어느 섹터로 흐르는지</p>
-    <div class="bars" id="sectorBars"></div>
-  </section>
-
-  <section id="flow">
-    <h2>수급 스캐너 <button class="csvbtn" data-csv="flow">CSV 저장</button></h2>
-    <p class="sub">외국인·기관 연속 순매수와 5/20일 누적 순매수 금액 (억원) · 열 제목 클릭 시 정렬</p>
-    <div style="display:flex;gap:6px;margin-bottom:10px">
-      <button class="slpreset mktchip on" data-mkt="">전체</button>
-      <button class="slpreset mktchip" data-mkt="KOSPI">코스피</button>
-      <button class="slpreset mktchip" data-mkt="KOSDAQ">코스닥</button>
-    </div>
-    <div class="bars" id="flowBars"></div>
-    <div class="tblwrap"><table id="flowTbl"></table></div>
-  </section>
-
-  <section id="value">
-    <h2>밸류업 스크리너 <button class="csvbtn" data-csv="value">CSV 저장</button></h2>
-    <p class="sub">저PBR · 저PER · 고배당 조합 점수 상위 · 열 제목 클릭 시 정렬</p>
-    <div class="tblwrap"><table id="valueTbl"></table></div>
-  </section>
-
-  <div id="devilPanel" style="display:none"></div>
-
   <section id="search">
     <h2>종목 검색 <button class="csvbtn" data-csv="all">전체 CSV 저장</button></h2>
     <p class="sub">수집된 전체 종목에서 이름·코드로 검색</p>
@@ -350,12 +400,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <div class="tblwrap" id="searchWrap" style="display:none"><table id="searchTbl"></table></div>
     <div class="empty" id="searchHint">검색어를 입력하세요.</div>
   </section>
-
-  <section id="disc">
-    <h2>DART 공시 시그널</h2>
-    <p class="sub">자사주·소각·무상증자 등 주가 관련성 높은 공시만 필터링 (▲ 호재성 · ▼ 악재성 · · 관찰)</p>
-    <div class="disc" id="discList"></div>
-  </section>
+  <div id="devilPanel" style="display:none"></div>
 
   <footer>
     본 페이지는 공개 데이터(네이버 증권, DART 전자공시)를 자동 수집·요약한 <b>투자 참고 자료</b>이며,
@@ -644,47 +689,74 @@ function sentiSection(d){
 }
 
 /* ---------- 업종 자금 흐름 ---------- */
+let sectorInv = "f";   // 'f'=외국인, 'i'=기관
+function setSectorInv(v){
+  sectorInv = v;
+  document.getElementById("secInvF").classList.toggle("on", v==="f");
+  document.getElementById("secInvI").classList.toggle("on", v==="i");
+  if(window.__data) sectorBars(window.__data);
+}
 function sectorBars(d){
+  window.__data = d;
   const el = document.getElementById("sectorBars");
-  const pool = allStocks(d).filter(s=>s.sector && s.f_5d_amt_100m!=null);
+  const key = sectorInv === "i" ? "i_5d_amt_100m" : "f_5d_amt_100m";
+  const who = sectorInv === "i" ? "기관" : "외국인";
+  const pool = allStocks(d).filter(s=>s.sector && s[key]!=null);
   if(!pool.length){
-    el.innerHTML = '<div class="empty" style="padding:18px">업종 데이터는 다음 갱신부터 표시됩니다.</div>';
+    el.innerHTML = `<div class="empty" style="padding:18px">${who} 업종 데이터는 다음 갱신부터 표시됩니다.</div>`;
     return;
   }
   const agg = {};
-  pool.forEach(s=>{ agg[s.sector] = (agg[s.sector]||0) + s.f_5d_amt_100m; });
+  pool.forEach(s=>{ agg[s.sector] = (agg[s.sector]||0) + s[key]; });
   const rows = Object.entries(agg).map(([k,v])=>({sector:k, amt:Math.round(v)}))
     .sort((a,b)=>b.amt-a.amt);
   const max = Math.max(...rows.map(r=>Math.abs(r.amt)), 1);
   el.innerHTML = rows.map(r=>{
-    const w = (Math.abs(r.amt)/max*100).toFixed(1);
-    return `<div class="brow" title="${esc(r.sector)} 외국인 5일 순매수 ${fmt(r.amt)}억">
+    const w = (Math.abs(r.amt)/max*50).toFixed(1);   // 가운데 0축 기준, 한쪽 최대 50%
+    return `<div class="brow" title="${esc(r.sector)} ${who} 5일 순매수 ${fmt(r.amt)}억">
       <span class="bl">${esc(r.sector)}</span>
-      <span class="btrack"><span class="bfill ${r.amt>=0?"pos":"neg"}" style="width:${w}%"></span></span>
+      <span class="btrack diverge"><span class="bfill ${r.amt>=0?"pos":"neg"}" style="width:${w}%"></span></span>
       <span class="bv ${cls(r.amt)}">${r.amt>0?"+":""}${fmt(r.amt)}</span></div>`;
   }).join("");
 }
 
 /* 정렬 가능한 테이블 렌더러 */
+const isNarrow = () => window.matchMedia("(max-width:520px)").matches;
 function makeTable(elId, rows, cols, defaultKey){
   const el = document.getElementById(elId);
   let key = defaultKey, dir = -1;
+  const hasCore = cols.some(c=>c.core);
+  let full = !(hasCore && isNarrow());   // 좁은 화면 + 핵심 열 지정 시 다이어트 모드로 시작
   function render(){
+    const ac = full ? cols : cols.filter(c=>c.core);
+    if(!ac.some(c=>c.k===key)){ key = defaultKey; dir = -1; }
     const sorted = [...rows].sort((a,b)=>{
       const x=a[key], y=b[key];
       if(x==null) return 1; if(y==null) return -1;
       return (x<y?-1:x>y?1:0)*dir;
     });
-    el.innerHTML = "<thead><tr>" + cols.map(c=>
+    el.classList.toggle("slim", !full);
+    el.innerHTML = "<thead><tr>" + ac.map(c=>
       `<th data-k="${c.k}" class="${c.k===key?"sorted":""}">${c.h}${c.k===key?(dir<0?" ↓":" ↑"):""}</th>`
     ).join("") + "</tr></thead><tbody>" +
-    sorted.map(s=>"<tr>"+cols.map(c=>`<td>${c.f(s)}</td>`).join("")+"</tr>").join("") +
+    sorted.map(s=>"<tr>"+ac.map(c=>`<td>${c.f(s)}</td>`).join("")+"</tr>").join("") +
     "</tbody>";
     el.querySelectorAll("th").forEach(th=>th.onclick=()=>{
       const k=th.dataset.k;
       if(k===key) dir=-dir; else {key=k;dir=-1;}
       render();
     });
+    // 좁은 화면: 열 더보기/줄이기 토글
+    let btn = el.parentNode.querySelector(".colmore");
+    if(hasCore && isNarrow()){
+      if(!btn){
+        btn = document.createElement("button");
+        btn.className = "colmore";
+        el.parentNode.appendChild(btn);
+      }
+      btn.textContent = full ? "▴ 핵심 열만 보기" : `▾ 열 더보기 (+${cols.length - ac.length}개)`;
+      btn.onclick = ()=>{ full = !full; render(); };
+    } else if(btn) btn.remove();
   }
   render();
 }
@@ -706,15 +778,15 @@ document.addEventListener("click", e=>{
 
 function flowTable(d){
   makeTable("flowTbl", mktFilter(d.flow_scan), [
-    {k:"name",h:"종목",f:nameCell},
+    {k:"name",h:"종목",f:nameCell,core:true},
     {k:"price",h:"현재가",f:s=>fmt(s.price)},
-    {k:"change_pct",h:"등락률",f:pctCell},
+    {k:"change_pct",h:"등락률",f:pctCell,core:true},
     {k:"f_streak",h:"외인 연속",f:s=>streakCell(s.f_streak,5)},
     {k:"i_streak",h:"기관 연속",f:s=>streakCell(s.i_streak,3)},
-    {k:"f_5d_amt_100m",h:"외인 5일(억)",f:s=>signAmt(s.f_5d_amt_100m)},
+    {k:"f_5d_amt_100m",h:"외인 5일(억)",f:s=>signAmt(s.f_5d_amt_100m),core:true},
     {k:"i_5d_amt_100m",h:"기관 5일(억)",f:s=>signAmt(s.i_5d_amt_100m)},
     {k:"f_20d_amt_100m",h:"외인 20일(억)",f:s=>signAmt(s.f_20d_amt_100m)},
-    {k:"flow_score",h:"수급점수",f:s=>`<b>${s.flow_score??"–"}</b>`},
+    {k:"flow_score",h:"수급점수",f:s=>`<b>${s.flow_score??"–"}</b>`,core:true},
     {k:"flow_delta",h:"Δ전일",f:s=>s.flow_delta==null?"–":
       `<span class="${cls(s.flow_delta)}">${s.flow_delta>0?"+":""}${s.flow_delta}</span>`+
       (s.flow_delta>=8?' <span class="badge-new">급등</span>':"")},
@@ -723,14 +795,14 @@ function flowTable(d){
 
 function valueTable(d){
   makeTable("valueTbl", mktFilter(d.value_screen), [
-    {k:"name",h:"종목",f:nameCell},
+    {k:"name",h:"종목",f:nameCell,core:true},
     {k:"price",h:"현재가",f:s=>fmt(s.price)},
-    {k:"pbr",h:"PBR",f:s=>s.pbr==null?"–":s.pbr.toFixed(2)},
+    {k:"pbr",h:"PBR",f:s=>s.pbr==null?"–":s.pbr.toFixed(2),core:true},
     {k:"per",h:"PER",f:s=>s.per==null?"–":s.per.toFixed(1)},
-    {k:"dvr",h:"배당률",f:s=>s.dvr==null?"–":s.dvr.toFixed(1)+"%"},
+    {k:"dvr",h:"배당률",f:s=>s.dvr==null?"–":s.dvr.toFixed(1)+"%",core:true},
     {k:"mktcap_100m",h:"시총(억)",f:s=>fmt(s.mktcap_100m)},
     {k:"f_streak",h:"외인 연속",f:s=>streakCell(s.f_streak,5)},
-    {k:"value_score",h:"밸류점수",f:s=>`<b>${s.value_score??"–"}</b>`},
+    {k:"value_score",h:"밸류점수",f:s=>`<b>${s.value_score??"–"}</b>`,core:true},
     {k:"score",h:"종합",f:s=>`<b>${s.score??"–"}</b>`},
   ], "value_score");
 }
@@ -858,7 +930,7 @@ function raceChart(d){
   document.getElementById("raceRank").innerHTML =
     "현재 순위: " + (r.rank||[]).map((x,i)=>
       `<b>${i+1}위</b> ${esc(x.name)} ${pn(x.total_pct)}`).join(" · ") +
-    ` <span style="color:var(--ink-3)">— 우승 전략의 가중치를 CONFIG에 반영하면 튜닝 완성</span>`;
+    ` <span style="color:var(--ink-3)">· 우승 전략의 가중치를 CONFIG에 반영하면 튜닝 완성</span>`;
 }
 
 /* ---------- 내 포트폴리오 (브라우저 저장) ---------- */
@@ -924,7 +996,7 @@ function portSection(d){
   // 리스크 진단 (규칙 기반)
   const notes = [];
   rows.forEach(h=>{ if(totVal && h.val/totVal > 0.3)
-    notes.push(`⚠️ <b>${esc(h.name)}</b> 단일 비중 ${(h.val/totVal*100).toFixed(0)}% — 분산 고려`); });
+    notes.push(`⚠️ <b>${esc(h.name)}</b> 단일 비중 ${(h.val/totVal*100).toFixed(0)}% · 분산 고려`); });
   const bySec = {};
   rows.forEach(h=>{ if(h.sector) bySec[h.sector]=(bySec[h.sector]||0)+h.val; });
   Object.entries(bySec).forEach(([k,v])=>{ if(totVal && v/totVal > 0.5)
@@ -954,7 +1026,7 @@ function initPort(d){
       picked = hit;
       const devils = devilNotes(hit.code, d);
       const warn = devils.length && !devils[0].startsWith("뚜렷한")
-        ? ` — 😈 반론 ${devils.length}건: ${devils[0]}` : "";
+        ? ` · 😈 반론 ${devils.length}건: ${devils[0]}` : "";
       hint.textContent = `선택됨: ${hit.name} (${hit.code}) · 현재가 ${fmt(hit.price)}원${warn}`;
     }
     else hint.textContent = "검색 결과 없음";
@@ -1017,19 +1089,19 @@ function compassSection(d){
   let out = "";
   if(hot.length){
     out += hot.map(t=>`<div class="bars" style="margin-bottom:10px">
-      <h3>🔥 ${esc(t.name)} 점화 — 기사 ${t.count}건 <span style="color:var(--up)">(평소 ${t.mult}배)</span></h3>
+      <h3>🔥 ${esc(t.name)} 점화 · 기사 ${t.count}건 <span style="color:var(--up)">(평소 ${t.mult}배)</span></h3>
       ${(t.heads||[]).slice(0,2).map(h=>`<div style="font-size:12px;color:var(--ink-3);margin-bottom:4px">“${esc(h)}”</div>`).join("")}
       <div style="font-size:13px;line-height:2;color:var(--ink-2);margin-top:6px">
         ${(t.stocks||[]).map(s=>{
           const chg = s.change_pct==null?"":` <span class="${cls(s.change_pct)}">${s.change_pct>0?"+":""}${s.change_pct.toFixed(1)}%</span>`;
           const hl = s.verdict.startsWith("🎯") ? "font-weight:700;color:var(--ink-1)" : "";
-          return `<div style="${hl}">${starHtml(s.code)}${esc(s.name)}${chg} — ${esc(s.verdict)}
+          return `<div style="${hl}">${starHtml(s.code)}${esc(s.name)}${chg} · ${esc(s.verdict)}
             <button class="xlink devilbtn" data-code="${s.code}">😈</button></div>`;
         }).join("")}
       </div></div>`).join("");
   }
   if(debuts.length){
-    out += `<div class="bars"><h3>🐣 뉴스 데뷔 — 평소 조용하다 오늘 기사화 시작</h3>
+    out += `<div class="bars"><h3>🐣 뉴스 데뷔 · 평소 조용하다 오늘 기사화 시작</h3>
       <div style="font-size:13px;line-height:2;color:var(--ink-2)">
       ${debuts.map(x=>{
         const tone = (x.news_pos||0)>(x.news_neg||0) ? '<span style="color:var(--good-text)">호재성</span>'
@@ -1041,7 +1113,7 @@ function compassSection(d){
       }).join("")}
       </div></div>`;
   }
-  if(!out) out = '<div class="empty">오늘은 점화된 테마와 뉴스 데뷔가 없습니다 — 조용한 날입니다.</div>';
+  if(!out) out = '<div class="empty">오늘은 점화된 테마와 뉴스 데뷔가 없습니다 · 조용한 날입니다.</div>';
   el.innerHTML = out;
 }
 
@@ -1053,7 +1125,7 @@ function silenceSection(d){
   const rows = d.silence || [];
   if(!rows.length){
     wrap.style.display="none"; empty.style.display="";
-    empty.textContent = "거래량 기준선이 쌓이는 중입니다 (3영업일 이후 자동 표시) — 또는 오늘은 조용한 종목이 없습니다.";
+    empty.textContent = "거래량 기준선이 쌓이는 중입니다 (3영업일 이후 자동 표시) · 또는 오늘은 조용한 종목이 없습니다.";
     return;
   }
   wrap.style.display=""; empty.style.display="none";
@@ -1080,23 +1152,23 @@ function devilNotes(code, d){
   const pers = pool.map(x=>x.per).filter(v=>v>0).sort((a,b)=>a-b);
   if(s.per && pers.length > 20){
     const rank = pers.filter(v=>v<=s.per).length / pers.length;
-    if(rank >= 0.9) notes.push(`PER ${s.per.toFixed(1)}배 — 유니버스 상위 ${Math.round((1-rank)*100)||1}% 고평가 구간`);
+    if(rank >= 0.9) notes.push(`PER ${s.per.toFixed(1)}배 · 유니버스 상위 ${Math.round((1-rank)*100)||1}% 고평가 구간`);
   }
   if(s.per != null && s.per <= 0) notes.push("적자 기업 (PER 산출 불가)");
-  if(s.pbr >= 4) notes.push(`PBR ${s.pbr.toFixed(1)}배 — 장부가의 ${s.pbr.toFixed(0)}배 가격`);
-  if((s.trend_ratio||0) >= 3) notes.push(`검색량 이미 ${s.trend_ratio}배 과열 — 대중이 이미 알고 있음`);
-  if((s.news_24h||0) >= 10) notes.push(`24시간 기사 ${s.news_24h}건 — 뉴스가 가장 뜨거울 때가 종종 단기 고점`);
-  if((s.change_pct||0) >= 5) notes.push(`오늘 +${s.change_pct.toFixed(1)}% 급등 — 추격 매수 구간`);
-  if((s.f_5d_amt_100m||0) < 0) notes.push(`외국인 5일 순매도 ${fmt(Math.abs(s.f_5d_amt_100m))}억 — 수급 이탈 중`);
+  if(s.pbr >= 4) notes.push(`PBR ${s.pbr.toFixed(1)}배 · 장부가의 ${s.pbr.toFixed(0)}배 가격`);
+  if((s.trend_ratio||0) >= 3) notes.push(`검색량 이미 ${s.trend_ratio}배 과열 · 대중이 이미 알고 있음`);
+  if((s.news_24h||0) >= 10) notes.push(`24시간 기사 ${s.news_24h}건 · 뉴스가 가장 뜨거울 때가 종종 단기 고점`);
+  if((s.change_pct||0) >= 5) notes.push(`오늘 +${s.change_pct.toFixed(1)}% 급등 · 추격 매수 구간`);
+  if((s.f_5d_amt_100m||0) < 0) notes.push(`외국인 5일 순매도 ${fmt(Math.abs(s.f_5d_amt_100m))}억 · 수급 이탈 중`);
   if((s.flow_delta||0) <= -8) notes.push(`수급 점수 전일 대비 ${s.flow_delta} 급락`);
   if(s.near_52w_pct != null && s.near_52w_pct <= 60)
-    notes.push(`52주 고점 대비 ${(100-s.near_52w_pct).toFixed(0)}% 하락 — 추세 훼손 상태`);
+    notes.push(`52주 고점 대비 ${(100-s.near_52w_pct).toFixed(0)}% 하락 · 추세 훼손 상태`);
   const to = turnoverOf(s);
-  if(to != null && to < 30) notes.push(`일 거래대금 ${to.toFixed(0)}억 — 저유동성 (진입·이탈 슬리피지 위험)`);
-  if((s.dvr||0) === 0 && s.per == null) notes.push("배당 없음 + 이익 지표 부재 — 기대감만으로 지탱");
+  if(to != null && to < 30) notes.push(`일 거래대금 ${to.toFixed(0)}억 · 저유동성 (진입·이탈 슬리피지 위험)`);
+  if((s.dvr||0) === 0 && s.per == null) notes.push("배당 없음 + 이익 지표 부재 · 기대감만으로 지탱");
   if((DATA.disclosures||[]).some(x=>x.company===s.name && x.sentiment==="negative"))
     notes.push("최근 악재성 공시 존재 (공시 시그널 섹션 확인)");
-  if(!notes.length) notes.push("뚜렷한 반론 없음 — 그래도 '내가 모르는 악재가 있다면 무엇일까'는 자문해볼 것");
+  if(!notes.length) notes.push("뚜렷한 반론 없음 · 그래도 '내가 모르는 악재가 있다면 무엇일까'는 자문해볼 것");
   return notes;
 }
 
@@ -1106,7 +1178,7 @@ function showDevil(code){
   const notes = devilNotes(code, DATA);
   panel.style.display="";
   panel.innerHTML = `<div class="bars" style="border-left:3px solid var(--crit)">
-    <h3>😈 악마의 변호인 — ${esc(s?s.name:code)}에 대한 반론</h3>
+    <h3>😈 악마의 변호인 · ${esc(s?s.name:code)}에 대한 반론</h3>
     <div style="font-size:13px;line-height:2;color:var(--ink-2)">
       ${notes.map(n=>"· "+esc(n)).join("<br>")}
     </div>
@@ -1168,6 +1240,122 @@ function discList(d){
 }
 
 let TODAY_DATA = null;
+/* ---------- 섹션 접기/펼치기 (상태 기억) ---------- */
+const FOLD_KEY = "kr_idea_fold";
+function initFold(){
+  let saved = {};
+  try{ saved = JSON.parse(localStorage.getItem(FOLD_KEY) || "{}"); }catch(e){}
+  const save = ()=>{ try{ localStorage.setItem(FOLD_KEY, JSON.stringify(saved)); }catch(e){} };
+  document.querySelectorAll("section[id]").forEach(sec=>{
+    const h2 = sec.querySelector(":scope > h2");
+    if(!h2) return;
+    if(saved[sec.id]) sec.classList.add("folded");
+    h2.addEventListener("click", e=>{
+      if(e.target.closest("button,select,input,a")) return;   // CSV 버튼 등은 제외
+      sec.classList.toggle("folded");
+      saved[sec.id] = sec.classList.contains("folded");
+      save();
+    });
+  });
+  document.querySelectorAll("nav.chips a").forEach(a=>{
+    a.addEventListener("click", ()=>{
+      const sec = document.getElementById((a.getAttribute("href")||"").slice(1));
+      if(sec && sec.classList.contains("folded")){
+        sec.classList.remove("folded"); saved[sec.id] = false; save();
+      }
+    });
+  });
+}
+
+/* ---------- 섹션 요약 뱃지 ---------- */
+function setBadge(id, txt, warn){
+  const h2 = document.querySelector(`#${id} > h2`);
+  if(!h2) return;
+  let b = h2.querySelector(".secbadge");
+  if(!txt){ if(b) b.remove(); return; }
+  if(!b){ b = document.createElement("span"); b.className = "secbadge"; h2.appendChild(b); }
+  b.textContent = txt;
+  b.classList.toggle("warn", !!warn);
+}
+function sectionBadges(d){
+  const all = allStocks(d);
+  // 오늘의 5선: 1위 종목
+  const top = (d.ideas||[])[0];
+  setBadge("ideas", top ? `1위 ${top.name}` : "");
+  // 뉴스 나침반: 점화·데뷔 수
+  const nc = d.news_compass || {};
+  const hot = (nc.hot_themes||[]).length, deb = (nc.debuts||[]).length;
+  setBadge("compass", (hot||deb) ? `점화 ${hot} · 데뷔 ${deb}` : (d.news_compass ? "조용" : ""));
+  // 침묵 레이더
+  setBadge("silence", (d.silence||[]).length ? `${d.silence.length}종목` : "");
+  // 심리 히트: 검색 급증 수
+  const heat = all.filter(s=>(s.trend_ratio||0) >= 3).length;
+  setBadge("senti", heat ? `급증 ${heat}` : "");
+  // 업종: 1위 유입 업종
+  const agg = {};
+  all.forEach(s=>{ if(s.sector && s.f_5d_amt_100m!=null) agg[s.sector]=(agg[s.sector]||0)+s.f_5d_amt_100m; });
+  const secs = Object.entries(agg).sort((a,b)=>b[1]-a[1]);
+  setBadge("sector", secs.length ? `${secs[0][0]} ${secs[0][1]>=0?"+":""}${fmt(Math.round(secs[0][1]))}억` : "");
+  // 수급: 외인 순매수 1위
+  const f1 = (d.flow_scan||[])[0];
+  setBadge("flow", f1 ? `1위 ${f1.name}` : "");
+  // 밸류: 1위
+  const v1 = (d.value_screen||[])[0];
+  setBadge("value", v1 ? `1위 ${v1.name}` : "");
+  // 공시: 부정 경고 수
+  const discs = d.disclosures || [];
+  const neg = discs.filter(x=>(x.score||0) < 0).length;
+  const pos = discs.filter(x=>(x.score||0) > 0).length;
+  setBadge("disc", discs.length ? (neg ? `⚠️${neg} · 호재${pos}` : `호재${pos}`) : "", neg > 0);
+  // 성과: 5선 누적 vs KOSPI
+  const pc = d.perf_curve || [];
+  if(pc.length){
+    const last = pc[pc.length-1];
+    const diff = (last.port||100) - (last.kospi||100);
+    setBadge("perf", `5선 ${last.port>=100?"+":""}${(last.port-100).toFixed(1)}% (KOSPI 대비 ${diff>=0?"+":""}${diff.toFixed(1)}p)`);
+  } else setBadge("perf", "");
+  // 포트폴리오·관심종목: 저장된 개수
+  try{
+    const pn = (JSON.parse(localStorage.getItem("kr_idea_port")||"[]")).length;
+    setBadge("port", pn ? `${pn}종목` : "");
+  }catch(e){}
+}
+
+/* ---------- 오늘의 3줄 요약 ---------- */
+function brief3(d){
+  const el = document.getElementById("brief3");
+  if(!el) return;
+  const ix = d.indices || {};
+  const k = ix.KOSPI || {}, q = ix.KOSDAQ || {};
+  if(k.change_pct == null){ el.style.display = "none"; return; }
+  const arrow = p => p > 0 ? `<span class="up">▲${p.toFixed(2)}%</span>`
+                 : p < 0 ? `<span class="down">▼${Math.abs(p).toFixed(2)}%</span>` : "보합";
+  const mood = (k.change_pct>0 && q.change_pct>0) ? "동반 상승"
+             : (k.change_pct<0 && q.change_pct<0) ? "동반 하락" : "혼조";
+  const l1 = `📍 코스피 ${arrow(k.change_pct||0)} · 코스닥 ${arrow(q.change_pct||0)} · ${mood}`;
+  // 가장 강한 신호
+  let l2 = "";
+  const hot = ((d.news_compass||{}).hot_themes||[])[0];
+  if(hot) l2 = `🔥 <b>${esc(hot.name)}</b> 테마 점화 · 기사 평소 ${hot.mult}배`;
+  else{
+    const all = allStocks(d), agg = {};
+    all.forEach(s=>{ if(s.sector && s.f_5d_amt_100m!=null) agg[s.sector]=(agg[s.sector]||0)+s.f_5d_amt_100m; });
+    const t = Object.entries(agg).sort((a,b)=>b[1]-a[1])[0];
+    if(t && t[1] > 0) l2 = `💰 외국인 자금, <b>${esc(t[0])}</b> 업종에 +${fmt(Math.round(t[1]))}억`;
+    else if((d.ideas||[])[0]) l2 = `⭐ 오늘 5선 1위 <b>${esc(d.ideas[0].name)}</b> (${d.ideas[0].score}점)`;
+  }
+  // 주의할 것
+  let l3 = "";
+  const negs = (d.disclosures||[]).filter(x=>(x.score||0) < 0);
+  if(negs.length) l3 = `⚠️ 부정 공시 ${negs.length}건 · <b>${esc(negs[0].company)}</b>(${esc(negs[0].tag||"")}) 등 확인`;
+  else{
+    const fever = allStocks(d).filter(s=>(s.trend_ratio||0)>=5 && (s.change_pct||0)>=5).length;
+    l3 = fever ? `🌡 검색·주가 동반 과열 ${fever}종목 · 추격 주의` : `✅ 특별한 경고 신호 없음`;
+  }
+  el.innerHTML = [l1, l2, l3].filter(Boolean).join("<br>");
+  el.style.display = "block";
+}
+
 function renderAll(d, isHistory){
   DATA = d;
   document.getElementById("stamp").textContent =
@@ -1177,6 +1365,7 @@ function renderAll(d, isHistory){
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
   sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
   curveChart(d); raceChart(d); portSection(d); silenceSection(d); compassSection(d);
+  brief3(d); sectionBadges(d);
   if(!isHistory){
     TODAY_DATA = d;
     initSliders(d); initSearch(d); initHistory(d); initPort(d);
@@ -1220,6 +1409,8 @@ function initHistory(d){
 if("serviceWorker" in navigator){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
+
+initFold();
 
 fetch("data.json?t="+Date.now())
   .then(r=>{if(!r.ok) throw new Error(r.status); return r.json();})

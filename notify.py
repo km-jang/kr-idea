@@ -167,16 +167,16 @@ def us_mood_line(chg_map):
     lines = []
     if ndq is not None:
         if ndq >= 1.5:
-            lines.append("미국 기술주 강세 마감 — 성장주 우호적 출발 기대")
+            lines.append("미국 기술주 강세 마감 · 성장주 우호적 출발 기대")
         elif ndq <= -1.5:
-            lines.append("미국 기술주 약세 마감 — 보수적 접근 권장")
+            lines.append("미국 기술주 약세 마감 · 보수적 접근 권장")
     if sox is not None and abs(sox) >= 2 and (ndq is None or abs(sox) > abs(ndq)):
-        lines.append("반도체지수 변동 큼 — 반도체 대형주 갭 주의"
-                     if sox < 0 else "반도체지수 강세 — 반도체 대형주 주목")
+        lines.append("반도체지수 변동 큼 · 반도체 대형주 갭 주의"
+                     if sox < 0 else "반도체지수 강세 · 반도체 대형주 주목")
     if fx is not None and fx >= 0.5:
-        lines.append("환율 상승(원화 약세) — 외국인 수급에 부담 가능")
+        lines.append("환율 상승(원화 약세) · 외국인 수급에 부담 가능")
     elif fx is not None and fx <= -0.5:
-        lines.append("환율 하락(원화 강세) — 외국인 수급 우호적")
+        lines.append("환율 하락(원화 강세) · 외국인 수급 우호적")
     return " · ".join(lines[:2])
 
 
@@ -330,16 +330,16 @@ def watchlist_events(data, codes):
         if c in idea_codes:
             days = idea_codes[c].get("idea_days")
             tag = "오늘의 5선 진입!" if days == 1 else f"5선 {days}일째 선정"
-            out.append(f"· {nm} — {tag}")
+            out.append(f"· {nm} · {tag}")
         chg = pool[c].get("change_pct")
         if chg is not None and abs(chg) >= 5:
-            out.append(f"· {nm} — {'급등' if chg > 0 else '급락'} "
+            out.append(f"· {nm} · {'급등' if chg > 0 else '급락'} "
                        f"{'+' if chg > 0 else ''}{chg:.1f}%")
     watch_names = set(names.values())
     for d in (data.get("disclosures") or []):
         if d.get("company") in watch_names:
             mark = {"positive": "호재성", "negative": "악재성"}.get(d.get("sentiment"), "")
-            out.append(f"· {d['company']} — {mark} 공시: {d.get('tag')}")
+            out.append(f"· {d['company']} · {mark} 공시: {d.get('tag')}")
     return out[:6]
 
 
@@ -358,7 +358,7 @@ def compass_lines(data, brief=False):
         return []
     lines.append("🧭 <b>뉴스 나침반</b>")
     for t in hot[:3]:
-        lines.append(f"🔥 {e(t['name'])} 점화 — 기사 {t['count']}건 (평소 {t['mult']}배)")
+        lines.append(f"🔥 {e(t['name'])} 점화 · 기사 {t['count']}건 (평소 {t['mult']}배)")
         for s in (t.get("stocks") or [])[:3]:
             chg = s.get("change_pct")
             chg_s = "" if chg is None else f" {'+' if chg > 0 else ''}{chg:.1f}%"
