@@ -953,6 +953,72 @@ def test_weekly_extra_lines():
     assert all("백업의 날" not in x for x in out3)
 
 
+def test_insider_watch():
+    """K1 경량판: 내부자/5%룰 보고 몰림 감지."""
+    discs = [
+        {"company": "CJ ENM", "tag": "내부자 지분변동"},
+        {"company": "CJ ENM", "tag": "내부자 지분변동"},
+        {"company": "CJ ENM", "tag": "5%룰 보고"},
+        {"company": "한미반도체", "tag": "내부자 지분변동"},   # 1건 → 제외
+        {"company": "KB금융", "tag": "자사주 매입"},          # 다른 태그 → 무관
+    ]
+    out = collect.build_insider_watch(discs, min_count=2)
+    assert len(out) == 1
+    assert out[0]["company"] == "CJ ENM" and out[0]["count"] == 3
+
+
+def test_graduates():
+    """S12: 5선 졸업생의 이후 성과 복기."""
+    import tempfile, os
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as td:
+        # 이틀 전 5선에 있었고 지금은 없는 종목 2개
+        Path(td, "2026-07-08.json").write_text(json.dumps({
+            "ideas": [{"code": "AAA111", "name": "졸업A", "price": 10000},
+                      {"code": "BBB222", "name": "졸업B", "price": 20000},
+                      {"code": "CCC333", "name": "현역C", "price": 5000}]},
+            ensure_ascii=False), encoding="utf-8")
+        stocks = [{"code": "AAA111", "price": 11000},   # +10% → 아쉬움
+                  {"code": "BBB222", "price": 18000},   # -10% → 잘 내보냄
+                  {"code": "CCC333", "price": 5100}]
+        out = collect.build_graduates(td, stocks, {"CCC333"}, "2026-07-14")
+        assert len(out) == 2
+        assert out[0]["code"] == "AAA111" and abs(out[0]["ret_pct"] - 10.0) < 0.01
+        assert out[1]["code"] == "BBB222" and abs(out[1]["ret_pct"] + 10.0) < 0.01
+        # 현역은 제외
+        assert all(g["code"] != "CCC333" for g in out)
+
+
+def test_weekly_graduates_and_tuning():
+    """S12·S13: 주간 결산에 졸업생 복기·튜닝 제안 라인."""
+    import notify
+    data = {
+        "graduates": [{"code": "A", "name": "졸업A", "exit_date": "2026-07-08", "ret_pct": 6.8},
+                      {"code": "B", "name": "졸업B", "exit_date": "2026-07-09", "ret_pct": -4.2}],
+        "strategy_race": {"rank": [{"name": "가치형", "total_pct": 12.0},
+                                   {"name": "기본형", "total_pct": 9.0}]},
+    }
+    out = "\n".join(notify.weekly_extra_lines(data, today="2026-07-12"))
+    assert "졸업생 복기" in out and "졸업A" in out and "졸업B" in out
+    assert "튜닝 제안" in out and "가치형" in out and "3.0%p" in out
+    # 격차가 작으면 제안 없음
+    data2 = {"strategy_race": {"rank": [{"name": "가치형", "total_pct": 10.0},
+                                        {"name": "기본형", "total_pct": 9.5}]}}
+    out2 = "\n".join(notify.weekly_extra_lines(data2, today="2026-07-12"))
+    assert "튜닝 제안" not in out2
+
+
+def test_insider_briefing_line():
+    """내부자 몰림이 있으면 아침 브리핑에 조건부 한 줄."""
+    import notify
+    d = json.load(open("data.json"))
+    d["insider_watch"] = [{"company": "CJ ENM", "count": 3}]
+    msg = notify.build_message(d)
+    assert "내부자·대주주 신고 몰림" in msg and "CJ ENM(3건)" in msg
+    d["insider_watch"] = []
+    assert "내부자·대주주" not in notify.build_message(d)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

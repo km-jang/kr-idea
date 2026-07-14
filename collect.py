@@ -68,6 +68,7 @@ CONFIG = {
     "compass_theme_hot_mult": 3.0,   # 테마 점화: 7일 평균 대비 배수
     "compass_react_chg": 3.0,        # '주가 반응' 판정 등락률(%)
     # 침묵 레이더 (무관심 바닥 탐지)
+    "insider_min_count": 2,     # 내부자/5%룰 보고 몇 건 이상이면 "몰림"으로 표시
     "silence_vol_max": 0.5,     # 거래량이 평소 평균의 이 비율 이하
     "silence_chg_max": 1.5,     # 당일 등락률 절대값 상한 (횡보 조건)
     "silence_news_max": 2,      # 24시간 기사 수 상한
@@ -1493,17 +1494,73 @@ def build_sample():
                     kospi_trend=trend, sentiment_enabled=True, perf_curve=curve,
                     scan_review=scan_review, strategies=strategies,
                     strategy_race=strategy_race, silence=silence,
-                    news_compass=news_compass)
+                    news_compass=news_compass,
+                    insider_watch=[{"company": "CJ ENM", "count": 3},
+                                   {"company": "한미반도체", "count": 2}],
+                    graduates=[{"code": "005490", "name": "POSCO홀딩스",
+                                "exit_date": "2026-07-06", "ret_pct": 6.8},
+                               {"code": "035720", "name": "카카오",
+                                "exit_date": "2026-07-08", "ret_pct": -4.2}])
 
 
 # ---------------------------------------------------------------------------
 # 조립 & 메인
 # ---------------------------------------------------------------------------
 
+def build_insider_watch(disclosures, min_count=None):
+    """K1 경량판: 임원·주요주주/5%룰 보고가 짧은 기간에 몰린 회사 감지.
+    보고의 매수/매도 방향까지는 구분하지 않으므로 '주목' 신호로만 사용한다.
+    (방향 판별 포함 풀버전은 ROADMAP 마일스톤 M3)"""
+    if min_count is None:
+        min_count = CONFIG.get("insider_min_count", 2)
+    tags = {"내부자 지분변동", "5%룰 보고"}
+    cnt = {}
+    for d in disclosures or []:
+        if d.get("tag") in tags and d.get("company"):
+            cnt[d["company"]] = cnt.get(d["company"], 0) + 1
+    out = [{"company": c, "count": n} for c, n in cnt.items() if n >= min_count]
+    out.sort(key=lambda x: (-x["count"], x["company"]))
+    return out[:8]
+
+
+def build_graduates(hist_dir, stocks, current_codes, market_date, lookback=21):
+    """S12: 5선에서 제외된(졸업한) 종목의 이후 성과 복기.
+    반환: [{code,name,exit_date,ret_pct}] · ret 내림차순 (양수=내보낸 뒤 올라서 아쉬움)."""
+    price_map = {s["code"]: s.get("price") for s in stocks if s.get("price")}
+    hist = Path(hist_dir)
+    if not hist.exists():
+        return []
+    last_seen = {}
+    for f in sorted(hist.glob("*.json"))[-lookback:]:
+        day = f.stem
+        if market_date and day >= market_date:
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for s in d.get("ideas") or []:
+            if s.get("code") and s.get("price"):
+                last_seen[s["code"]] = {"name": s.get("name"), "date": day,
+                                        "price": s["price"]}
+    out = []
+    for code, info in last_seen.items():
+        if code in (current_codes or set()):
+            continue
+        p1 = price_map.get(code)
+        if not p1 or not info["price"]:
+            continue
+        out.append({"code": code, "name": info["name"], "exit_date": info["date"],
+                    "ret_pct": round((p1 / info["price"] - 1) * 100, 2)})
+    out.sort(key=lambda x: -x["ret_pct"])
+    return out
+
+
 def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None,
              market_date=None, performance=None, kospi_trend=None,
              sentiment_enabled=False, perf_curve=None, scan_review=None,
-             strategies=None, strategy_race=None, silence=None, news_compass=None):
+             strategies=None, strategy_race=None, silence=None, news_compass=None,
+             insider_watch=None, graduates=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -1547,6 +1604,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "strategy_race": strategy_race,
         "silence": silence or [],
         "news_compass": news_compass,
+        "insider_watch": insider_watch or [],
+        "graduates": graduates or [],
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1652,6 +1711,12 @@ def run_full(max_universe=None, out_path=None):
                    "all_stocks": [{"code": s["code"], "price": s.get("price")} for s in stocks],
                    "indices": indices})
 
+    insider_watch = build_insider_watch(disclosures)
+    if insider_watch:
+        print(f"  → 내부자 신고 몰림 {len(insider_watch)}곳")
+    graduates = build_graduates(hist_dir, stocks,
+                                {s["code"] for s in ideas}, market_date)
+
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")
     return assemble(stocks, disclosures, ideas, indices, now, errors=errors[:20],
@@ -1659,7 +1724,8 @@ def run_full(max_universe=None, out_path=None):
                     kospi_trend=kospi_trend, sentiment_enabled=senti_on,
                     perf_curve=perf_curve, scan_review=scan_review,
                     strategies=strategies, strategy_race=strategy_race,
-                    silence=silence, news_compass=news_compass)
+                    silence=silence, news_compass=news_compass,
+                    insider_watch=insider_watch, graduates=graduates)
 
 
 def main():

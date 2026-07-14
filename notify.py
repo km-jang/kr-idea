@@ -281,6 +281,11 @@ def build_message(data):
         more = f" 외 {len(neg)-3}건" if len(neg) > 3 else ""
         lines.append(f"🔴 악재성 공시: {head}{more}")
 
+    iw = data.get("insider_watch") or []
+    if iw:
+        head = " · ".join(f"{e(x['company'])}({x['count']}건)" for x in iw[:4])
+        lines.append(f"👤 내부자·대주주 신고 몰림: {head} · 매수/매도 방향은 공시 원문 확인")
+
     if pos or neg:
         lines.append("")
 
@@ -471,9 +476,34 @@ def build_weekly_message(data):
 
 
 def weekly_extra_lines(data, today=None):
-    """주간 결산 끝의 시스템 건강 체크 + (매월 첫 일요일) 백업 리마인더."""
+    """주간 결산 끝: 졸업생 복기(S12) + 튜닝 제안(S13) + 시스템 건강 체크
+    + (매월 첫 일요일) 백업 리마인더."""
     today = today or kst_today()
     out = []
+    # S12: 5선 졸업생 복기 · 내보낸 판단이 옳았나
+    grads = data.get("graduates") or []
+    if grads:
+        best, worst = grads[0], grads[-1]
+        parts = []
+        if best.get("ret_pct", 0) >= 3:
+            parts.append(f"아쉬움 <b>{html.escape(best['name'])}</b> "
+                         f"제외 후 +{best['ret_pct']}%")
+        if worst.get("ret_pct", 0) <= -3 and worst is not best:
+            parts.append(f"잘 내보냄 <b>{html.escape(worst['name'])}</b> "
+                         f"{worst['ret_pct']}%")
+        if parts:
+            out.append("🎓 졸업생 복기: " + " · ".join(parts))
+    # S13: 전략 리그 기반 튜닝 제안
+    rank = (data.get("strategy_race") or {}).get("rank") or []
+    if len(rank) >= 2:
+        leader = rank[0]
+        base = next((x for x in rank if "기본" in x.get("name", "")), None)
+        if base and leader is not base:
+            margin = round(leader["total_pct"] - base["total_pct"], 1)
+            if margin >= 2.0:
+                out.append(f"💡 튜닝 제안: <b>{html.escape(leader['name'])}</b>이 "
+                           f"기본형을 {margin}%p 앞서는 중 · 2~3주 지속되면 "
+                           f"CONFIG 가중치 반영 검토 (README 튜닝 가이드)")
     # 시스템 건강: 최근 7일간 수집된 거래일 수
     trend = data.get("kospi_trend") or []
     try:
