@@ -487,7 +487,7 @@ def parse_dart_rss(xml_text):
 
 
 def fetch_dart_openapi(api_key, days=3):
-    """OpenDART list.json — 키가 있으면 최근 N일 공시로 확장."""
+    """OpenDART list.json · 키가 있으면 최근 N일 공시로 확장."""
     end = datetime.now(KST)
     bgn = end - timedelta(days=days)
     out, page = [], 1
@@ -1069,12 +1069,12 @@ def quadrant_verdict(s):
     reacted = (s.get("change_pct") or 0) >= CONFIG["compass_react_chg"]
     flow_ok = (s.get("f_streak") or 0) >= 3 or (s.get("f_5d_amt_100m") or 0) > 0
     if flow_ok and not reacted:
-        return "🎯 발굴 후보 — 수급 유입 + 아직 미반응"
+        return "🎯 발굴 후보 · 수급 유입 + 아직 미반응"
     if flow_ok and reacted:
-        return "주도주 — 추격은 신중"
+        return "주도주 · 추격은 신중"
     if not flow_ok and reacted:
-        return "테마 편승 급등 — 위험"
-    return "관망 — 뉴스뿐, 자금 유입 없음"
+        return "테마 편승 급등 · 위험"
+    return "관망 · 뉴스뿐, 자금 유입 없음"
 
 
 def build_news_compass(stocks, hist_dir, keys):
@@ -1456,9 +1456,9 @@ def build_sample():
                       "SMR 상용화 로드맵 발표…두산에너빌리티 수혜 전망"],
             "stocks": [
                 {"name": "두산에너빌리티", "code": "034020", "change_pct": 4.19,
-                 "f_streak": 5, "verdict": "주도주 — 추격은 신중"},
+                 "f_streak": 5, "verdict": "주도주 · 추격은 신중"},
                 {"name": "한전기술", "code": "052690", "change_pct": 0.8,
-                 "f_streak": 4, "verdict": "🎯 발굴 후보 — 수급 유입 + 아직 미반응"}]}],
+                 "f_streak": 4, "verdict": "🎯 발굴 후보 · 수급 유입 + 아직 미반응"}]}],
         "debuts": [{"code": "035760", "name": "CJ ENM", "news_24h": 5,
                     "news_pos": 3, "news_neg": 0, "price": 71200, "change_pct": 0.71,
                     "f_streak": 4,
@@ -1522,6 +1522,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         return {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
             "pbr", "per", "dvr", "f_streak", "i_streak", "f_5d_amt_100m",
+            "i_5d_amt_100m",
             "flow_score", "value_score", "mom_score", "disc_score", "score",
             "flow_delta", "near_52w_pct", "reasons", "sector",
             "volume", "trend_ratio", "news_24h")}
