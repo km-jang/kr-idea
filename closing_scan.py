@@ -160,9 +160,70 @@ def send_telegram(text):
     return ok
 
 
+def build_pulse_message(data, quotes, now=None):
+    """☀️ 장중 시황 요약 (12시대 점심 맥박) - 저장 없이 메시지만."""
+    now = now or datetime.now(KST)
+    lines = [f"☀️ <b>장중 시황</b>  <i>({now.strftime('%H:%M')})</i>", ""]
+    # 지수 (실시간 API의 지수 코드 시도, 실패하면 생략)
+    try:
+        idx = fetch_realtime(["KOSPI", "KOSDAQ"])
+        parts = []
+        for name in ("KOSPI", "KOSDAQ"):
+            q = idx.get(name)
+            if q and q.get("chg") is not None:
+                arrow = "▲" if q["chg"] > 0 else ("▼" if q["chg"] < 0 else "-")
+                parts.append(f"{name} {arrow}{abs(q['chg']):.2f}%")
+        if parts:
+            lines.append(" · ".join(parts))
+            lines.append("")
+    except Exception:
+        pass
+    # 오늘 5선 장중 성적
+    ideas = data.get("ideas") or []
+    perf = []
+    for s in ideas:
+        q = quotes.get(s.get("code"))
+        if q and q.get("chg") is not None:
+            perf.append((s["name"], q["chg"]))
+    if perf:
+        avg = sum(p[1] for p in perf) / len(perf)
+        head = " · ".join(f"{n} {'+' if c > 0 else ''}{c:.1f}%" for n, c in perf[:5])
+        lines.append(f"5선 장중 평균 {'+' if avg > 0 else ''}{avg:.1f}%")
+        lines.append(f"  {head}")
+        lines.append("")
+    # 장중 급등 (유니버스 기준 상위)
+    universe = {s["code"]: s for s in data.get("all_stocks") or []}
+    movers = sorted(
+        ((universe[c]["name"], q["chg"]) for c, q in quotes.items()
+         if c in universe and q.get("chg") is not None and q["chg"] >= 5),
+        key=lambda x: -x[1])[:3]
+    if movers:
+        lines.append("🚀 장중 급등: " +
+                     " · ".join(f"{n} +{c:.1f}%" for n, c in movers))
+    # 관심종목 특이 (±3% 이상)
+    try:
+        sys.path.insert(0, str(ROOT))
+        from notify import parse_watchlist
+        watch = parse_watchlist()
+    except Exception:
+        watch = []
+    wl = []
+    for code in watch:
+        q = quotes.get(code)
+        if q and q.get("chg") is not None and abs(q["chg"]) >= 3:
+            nm = universe.get(code, {}).get("name", code)
+            wl.append(f"{nm} {'+' if q['chg'] > 0 else ''}{q['chg']:.1f}%")
+    if wl:
+        lines.append("⭐ 관심종목 특이: " + " · ".join(wl[:4]))
+    lines.append("")
+    lines.append("<i>장중 참고용 · 마감 집계는 저녁 요약에서</i>")
+    return "\n".join(lines)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--pulse", action="store_true", help="장중 시황 요약만 발송 (기록 없음)")
     ap.add_argument("--data", default=str(DATA_PATH))
     args = ap.parse_args()
 
@@ -184,6 +245,16 @@ def main():
     print(f"  → {len(quotes)}종목 수신")
     if len(quotes) < len(universe) * 0.5:
         print("실시간 수신율 저조 - 발송 생략 (장중이 아닐 수 있음)")
+        return
+
+    if args.pulse:
+        msg = build_pulse_message(data, quotes)
+        print("[2/2] 장중 시황 요약")
+        if args.dry_run:
+            print(msg)
+            return
+        if not send_telegram(msg):
+            sys.exit(1)
         return
 
     cands = scan_candidates(universe, quotes)
