@@ -380,6 +380,26 @@ def compass_lines(data, brief=False):
     lines.append("")
     return lines
 
+SCREEN_LABELS = {"vacancy": "🏦 빈집털이", "pullback": "🎯 대장주 눌림목",
+                 "hotmoney": "🔥 종합 수급", "stealth": "🤫 몰래 매집",
+                 "gate52": "🚪 신고가 문앞"}
+
+def screen_lines(data):
+    """조건 검색 적중 블록 (저녁 요약용) - 적중 없으면 빈 리스트."""
+    e = lambda t: html.escape(str(t or ""))
+    screens = data.get("screens") or {}
+    out = []
+    for key, label in SCREEN_LABELS.items():
+        hits = screens.get(key) or []
+        if hits:
+            names = " · ".join(f"<b>{e(h['name'])}</b>({e(h['why'])})" for h in hits[:3])
+            out.append(f"{label}: {names}")
+    if out:
+        out.insert(0, "🔎 <b>조건 검색 적중</b>")
+        out.append("")
+    return out
+
+
 def stale_notice(data, today=None):
     """침묵 정지 방어: 평일인데 데이터 기준일이 오늘이 아니면 경고 라인."""
     today = today or kst_today()
@@ -402,6 +422,7 @@ def build_evening_message(data):
     k, q = idx.get("KOSPI") or {}, idx.get("KOSDAQ") or {}
     lines = [f"🌙 <b>마감 요약</b>  <i>({e(md)})</i>", ""]
     lines.extend(stale_notice(data))
+    lines.extend(screen_lines(data))
     if k.get("value"):
         lines.append(
             f"KOSPI {fmt_num(k['value'])} {arrow(k.get('change_pct'))}"

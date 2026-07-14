@@ -344,6 +344,9 @@ def flow_metrics(rows, price=None):
         "i_5d_amt_100m": round(i5 * px / 1e8, 1),
         "f_20d_amt_100m": round(f20 * px / 1e8, 1),
         "i_20d_amt_100m": round(i20 * px / 1e8, 1),
+        "f_1d_amt_100m": round(rows[0]["frgn"] * px / 1e8, 1),   # 최신일 순매수 대금
+        "i_1d_amt_100m": round(rows[0]["inst"] * px / 1e8, 1),
+        "d1_date": rows[0]["date"].replace(".", "-"),            # 최신일 날짜
         "days": len(rows),
     }
 
@@ -1500,12 +1503,136 @@ def build_sample():
                     graduates=[{"code": "005490", "name": "POSCO홀딩스",
                                 "exit_date": "2026-07-06", "ret_pct": 6.8},
                                {"code": "035720", "name": "카카오",
-                                "exit_date": "2026-07-08", "ret_pct": -4.2}])
+                                "exit_date": "2026-07-08", "ret_pct": -4.2}],
+                    screens={"vacancy": [{"code": "010140", "name": "삼성중공업",
+                                          "why": "기관 45억+외인 18억 · 20일선 돌파"}],
+                             "pullback": [], "hotmoney": [],
+                             "stealth": [{"code": "000810", "name": "삼성화재",
+                                          "why": "외인 5일·기관 4일 연속 · 주가 5일 1.2% 변동뿐"}],
+                             "gate52": []})
 
 
 # ---------------------------------------------------------------------------
 # 조립 & 메인
 # ---------------------------------------------------------------------------
+
+# 조건 검색 5종 임계값 (전부 여기서 튜닝)
+CONFIG_SCREENS = {
+    "vacancy":  {"min_mktcap": 3000, "min_price": 10000, "i_1d": 30, "f_1d": 10,
+                 "min_turnover": 300, "vol_mult": 1.3},     # 빈집털이·숏커버링
+    "pullback": {"min_mktcap": 5000, "big_turnover": 1500, "vol_ratio_max": 0.35,
+                 "gap_lo": 0.98, "gap_hi": 1.02, "chg_abs_max": 2.0},  # 대장주 눌림목
+    "hotmoney": {"min_mktcap": 1500, "min_turnover": 300, "turnover_mult": 5.0,
+                 "chg_lo": 7.0, "chg_hi": 20.0},            # 종합 수급 포착 (20일 신고가)
+    "stealth":  {"min_mktcap": 2000, "f_streak": 4, "i_streak": 3,
+                 "px_drift_max": 2.0, "vol_mult_max": 1.3}, # 몰래 매집 (제안)
+    "gate52":   {"near_lo": 97.0, "near_hi": 99.9, "min_f5": 0},  # 신고가 문앞 (제안)
+}
+
+SCREEN_LABELS = {"vacancy": "🏦 빈집털이", "pullback": "🎯 대장주 눌림목",
+                 "hotmoney": "🔥 종합 수급", "stealth": "🤫 몰래 매집",
+                 "gate52": "🚪 신고가 문앞"}
+
+
+def history_turnovers(hist_dir, days=5):
+    """히스토리에서 종목별 최근 일별 거래대금(억) 목록 {code: [..]}."""
+    acc = {}
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-days:]
+    except Exception:
+        return {}
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for s in d.get("all_stocks") or []:
+            if s.get("volume") and s.get("price"):
+                acc.setdefault(s["code"], []).append(s["price"] * s["volume"] / 1e8)
+    return acc
+
+
+def build_screens(stocks, hist_dir, market_date, cfg=None):
+    """조건 검색 5종. 반환: {screen: [{code,name,why}]} (각 최대 5종목).
+    주의: 시가·고가 미수집이라 '도지 캔들'은 |등락률|로 근사, '윗꼬리 비율'은 미적용.
+    신고가는 20일 기준 (60일은 히스토리 축적 후 확장 여지)."""
+    cfg = cfg or CONFIG_SCREENS
+    vols = history_turnovers(hist_dir)          # 일별 거래대금(억) 이력
+    vb = volume_baselines(hist_dir, days=5)     # (평균 거래량, 평균 가격)
+    out = {k: [] for k in cfg}
+
+    def ma(closes, n):
+        return sum(closes[-n:]) / n if closes and len(closes) >= n else None
+
+    for s in stocks:
+        code, px = s.get("code"), s.get("price")
+        if not code or not px:
+            continue
+        mkt = s.get("mktcap_100m") or 0
+        chg = s.get("change_pct")
+        vol = s.get("volume") or 0
+        turnover = px * vol / 1e8
+        closes = s.get("closes") or []
+        avg_vol = vb.get(code, (None, None))[0]
+        tos = vols.get(code) or []
+        fresh = s.get("d1_date") == market_date   # 당일 수급 확정 여부
+
+        # ① 빈집털이·숏커버링: 당일 기관+외인 동반 매수 + 20일선 거래량 동반 돌파
+        c = cfg["vacancy"]
+        ma20, ma20p = ma(closes, 20), ma(closes[:-1], 19) if len(closes) >= 20 else (None)
+        if (mkt >= c["min_mktcap"] and px >= c["min_price"] and fresh
+                and (s.get("i_1d_amt_100m") or 0) >= c["i_1d"]
+                and (s.get("f_1d_amt_100m") or 0) >= c["f_1d"]
+                and turnover >= c["min_turnover"]
+                and ma20 and ma20p and closes[-1] > ma20 and closes[-2] <= ma20p
+                and avg_vol and vol >= avg_vol * c["vol_mult"]):
+            out["vacancy"].append({"code": code, "name": s["name"],
+                "why": f"기관 {s['i_1d_amt_100m']:.0f}억+외인 {s['f_1d_amt_100m']:.0f}억 · 20일선 돌파"})
+
+        # ② 대장주 눌림목: 주도주가 거래량 급감 + 이평선 지지 + 단봉
+        c = cfg["pullback"]
+        ma10 = ma(closes, 10)
+        gap_ok = any(m and c["gap_lo"] <= px / m <= c["gap_hi"] for m in (ma10, ma(closes, 20)))
+        if (mkt >= c["min_mktcap"] and tos and max(tos) >= c["big_turnover"]
+                and avg_vol and vol <= avg_vol * c["vol_ratio_max"]
+                and gap_ok and chg is not None and abs(chg) <= c["chg_abs_max"]):
+            out["pullback"].append({"code": code, "name": s["name"],
+                "why": f"거래량 평소의 {vol/avg_vol*100:.0f}% · 이평선 지지 (등락 {chg:+.1f}%)"})
+
+        # ③ 종합 수급 포착: 거래대금 폭증 + 강한 상승 초입 + 20일 신고가
+        c = cfg["hotmoney"]
+        avg_to = sum(tos) / len(tos) if tos else None
+        if (mkt >= c["min_mktcap"] and turnover >= c["min_turnover"]
+                and avg_to and turnover >= avg_to * c["turnover_mult"]
+                and chg is not None and c["chg_lo"] <= chg <= c["chg_hi"]
+                and closes and closes[-1] >= max(closes)):
+            out["hotmoney"].append({"code": code, "name": s["name"],
+                "why": f"+{chg:.1f}% · 대금 평소 {turnover/avg_to:.1f}배 · 20일 신고가"})
+
+        # ④ 몰래 매집(제안): 주가·거래량 조용 + 외인·기관 연속 순매수
+        c = cfg["stealth"]
+        drift = abs(closes[-1] / closes[-6] - 1) * 100 if len(closes) >= 6 else None
+        if (mkt >= c["min_mktcap"]
+                and (s.get("f_streak") or 0) >= c["f_streak"]
+                and (s.get("i_streak") or 0) >= c["i_streak"]
+                and drift is not None and drift <= c["px_drift_max"]
+                and avg_vol and vol <= avg_vol * c["vol_mult_max"]):
+            out["stealth"].append({"code": code, "name": s["name"],
+                "why": f"외인 {s['f_streak']}일·기관 {s['i_streak']}일 연속 · 주가 5일 {drift:.1f}% 변동뿐"})
+
+        # ⑤ 신고가 문앞(제안): 52주 고점 직전 + 수급 양호
+        c = cfg["gate52"]
+        near = s.get("near_52w_pct")
+        if (near is not None and c["near_lo"] <= near <= c["near_hi"]
+                and (s.get("f_5d_amt_100m") or 0) > c["min_f5"]
+                and (chg or 0) >= 0):
+            out["gate52"].append({"code": code, "name": s["name"],
+                "why": f"52주 고점의 {near:.1f}% · 외인 5일 +{s['f_5d_amt_100m']:.0f}억"})
+
+    for k in out:
+        out[k] = out[k][:5]
+    return out
+
 
 def build_insider_watch(disclosures, min_count=None):
     """K1 경량판: 임원·주요주주/5%룰 보고가 짧은 기간에 몰린 회사 감지.
@@ -1560,7 +1687,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              market_date=None, performance=None, kospi_trend=None,
              sentiment_enabled=False, perf_curve=None, scan_review=None,
              strategies=None, strategy_race=None, silence=None, news_compass=None,
-             insider_watch=None, graduates=None):
+             insider_watch=None, graduates=None, screens=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -1606,6 +1733,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "news_compass": news_compass,
         "insider_watch": insider_watch or [],
         "graduates": graduates or [],
+        "screens": screens or {},
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1716,6 +1844,10 @@ def run_full(max_universe=None, out_path=None):
         print(f"  → 내부자 신고 몰림 {len(insider_watch)}곳")
     graduates = build_graduates(hist_dir, stocks,
                                 {s["code"] for s in ideas}, market_date)
+    screens = build_screens(stocks, hist_dir, market_date)
+    hits = sum(len(v) for v in screens.values())
+    if hits:
+        print(f"  → 조건 검색 적중 {hits}건")
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")
@@ -1725,7 +1857,8 @@ def run_full(max_universe=None, out_path=None):
                     perf_curve=perf_curve, scan_review=scan_review,
                     strategies=strategies, strategy_race=strategy_race,
                     silence=silence, news_compass=news_compass,
-                    insider_watch=insider_watch, graduates=graduates)
+                    insider_watch=insider_watch, graduates=graduates,
+                    screens=screens)
 
 
 def main():

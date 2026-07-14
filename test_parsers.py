@@ -1059,6 +1059,64 @@ def test_pulse_message():
         cs.fetch_realtime = orig
 
 
+def test_screens():
+    """조건 검색 5종: 각 검색식이 목표 종목만 잡는지."""
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as td:
+        # 5일치 히스토리: 거래량·가격 (기준선용)
+        for i, day in enumerate(["2026-07-07", "2026-07-08", "2026-07-09",
+                                 "2026-07-10", "2026-07-11"]):
+            Path(td, day + ".json").write_text(json.dumps({"all_stocks": [
+                {"code": "VAC01", "price": 20000, "volume": 1_000_000},
+                {"code": "PUL01", "price": 50000, "volume": 4_000_000},   # 대금 2,000억(주도주)
+                {"code": "HOT01", "price": 10000, "volume": 500_000},     # 평소 대금 50억
+                {"code": "STL01", "price": 30000, "volume": 300_000},
+            ]}, ensure_ascii=False), encoding="utf-8")
+
+        up20 = [10000]*19  # 20일선 아래 횡보 후 오늘 돌파
+        stocks = [
+            # ① 빈집털이: 당일 기관 45억+외인 18억, 20일선 돌파, 거래량 1.5배
+            {"code": "VAC01", "name": "빈집주", "price": 21000, "mktcap_100m": 5000,
+             "change_pct": 3.0, "volume": 1_500_000, "closes": [20800]*19 + [21000],
+             "i_1d_amt_100m": 45, "f_1d_amt_100m": 18, "d1_date": "2026-07-14"},
+            # ② 눌림목: 거래량 30%로 급감, 20일선 지지(이격 100%), 등락 +0.5%
+            {"code": "PUL01", "name": "눌림주", "price": 50000, "mktcap_100m": 8000,
+             "change_pct": 0.5, "volume": 1_200_000, "closes": [50000]*20},
+            # ③ 종합 수급: +9%, 대금 평소 9배, 20일 신고가
+            {"code": "HOT01", "name": "핫머니주", "price": 10900, "mktcap_100m": 2000,
+             "change_pct": 9.0, "volume": 4_500_000, "closes": [10000]*19 + [10900]},
+            # ④ 몰래 매집: 외인5·기관4 연속, 주가 5일 0.5%, 거래량 평소 수준
+            {"code": "STL01", "name": "매집주", "price": 30100, "mktcap_100m": 4000,
+             "change_pct": 0.2, "volume": 310_000, "f_streak": 5, "i_streak": 4,
+             "closes": [30000]*15 + [29950, 30000, 30050, 30080, 30100]},
+            # ⑤ 신고가 문앞: 52주 고점의 98.5% + 외인 5일 순매수
+            {"code": "GAT01", "name": "문앞주", "price": 98500, "mktcap_100m": 9000,
+             "change_pct": 1.0, "volume": 100_000, "near_52w_pct": 98.5,
+             "f_5d_amt_100m": 250, "closes": [95000]*20},
+            # 미끼: 아무 데도 안 걸려야 함
+            {"code": "NON01", "name": "구경꾼", "price": 5000, "mktcap_100m": 800,
+             "change_pct": 1.0, "volume": 50_000, "closes": [5000]*20},
+        ]
+        sc = collect.build_screens(stocks, td, "2026-07-14")
+        assert [h["code"] for h in sc["vacancy"]] == ["VAC01"], sc["vacancy"]
+        assert [h["code"] for h in sc["pullback"]] == ["PUL01"], sc["pullback"]
+        assert [h["code"] for h in sc["hotmoney"]] == ["HOT01"], sc["hotmoney"]
+        assert [h["code"] for h in sc["stealth"]] == ["STL01"], sc["stealth"]
+        assert [h["code"] for h in sc["gate52"]] == ["GAT01"], sc["gate52"]
+
+
+def test_screen_message_lines():
+    """저녁 요약의 조건 검색 블록: 적중 시 표시, 없으면 침묵."""
+    import notify
+    data = {"screens": {"vacancy": [{"code": "A", "name": "빈집주", "why": "기관 45억"}],
+                        "pullback": [], "hotmoney": [], "stealth": [], "gate52": []}}
+    out = "\n".join(notify.screen_lines(data))
+    assert "조건 검색 적중" in out and "빈집주" in out
+    assert notify.screen_lines({"screens": {}}) == []
+    assert notify.screen_lines({}) == []
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

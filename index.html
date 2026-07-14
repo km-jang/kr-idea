@@ -155,6 +155,8 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 .slpreset:hover{color:var(--ink-1)}
 .mktchip.on{background:var(--series-1);color:#fff;font-weight:700}
 
+.bfill.buy{background:var(--up)}
+
 /* 업종 바: 가운데 0축 기준 · 순매수(+)는 빨강으로 오른쪽, 순매도(-)는 파랑으로 왼쪽 */
 .btrack.diverge::before{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;
   width:1px;background:var(--grid)}
@@ -785,6 +787,33 @@ function ideaCards(d, override){
   </div>`).join("");
 }
 
+const SCREEN_LABELS_UI = {vacancy:"🏦 빈집털이", pullback:"🎯 대장주 눌림목",
+  hotmoney:"🔥 종합 수급", stealth:"🤫 몰래 매집", gate52:"🚪 신고가 문앞"};
+function screensBox(d){
+  let el = document.getElementById("screensBox");
+  if(!el){
+    el = document.createElement("div"); el.id = "screensBox";
+    const fb = document.getElementById("flowBars");
+    fb.parentNode.insertBefore(el, fb);
+  }
+  const sc = d.screens || {};
+  const parts = [];
+  for(const k in SCREEN_LABELS_UI){
+    const hits = sc[k] || [];
+    if(hits.length){
+      parts.push(`<div style="margin:4px 0"><b>${SCREEN_LABELS_UI[k]}</b> · ` +
+        hits.map(h=>`<span class="qn" data-c="${h.code}" data-n="${esc(h.name)}">${esc(h.name)}</span>`+
+                    ` <span style="color:var(--ink-3);font-size:11.5px">${esc(h.why)}</span>`).join(" / ") +
+        `</div>`);
+    }
+  }
+  if(!parts.length){ el.style.display = "none"; el.innerHTML = ""; return; }
+  el.style.display = "";
+  el.innerHTML = `<div class="bars" style="border-left:3px solid var(--series-1)">
+    <h3>🔎 조건 검색 적중 <span style="font-weight:400;color:var(--ink-3)">· 5개 검색식, 걸린 날만 표시</span></h3>
+    <div style="font-size:13px;line-height:1.9">${parts.join("")}</div></div>`;
+}
+
 function flowBars(d){
   const rows = (d.flow_scan||[]).filter(s=>(s.f_5d_amt_100m||0)>0)
     .sort((a,b)=>b.f_5d_amt_100m-a.f_5d_amt_100m).slice(0,10);
@@ -794,7 +823,7 @@ function flowBars(d){
   el.innerHTML = `<h3>외국인 5일 누적 순매수 금액 상위 (억원)</h3>` +
     rows.map(s=>`<div class="brow" title="${esc(s.name)} · 외국인 ${s.f_streak}일 연속, 5일 ${fmt(s.f_5d_amt_100m)}억">
       <span class="bl">${esc(s.name)}</span>
-      <span class="btrack"><span class="bfill" style="width:${(s.f_5d_amt_100m/max*100).toFixed(1)}%"></span></span>
+      <span class="btrack"><span class="bfill buy" style="width:${(s.f_5d_amt_100m/max*100).toFixed(1)}%"></span></span>
       <span class="bv">${fmt(s.f_5d_amt_100m)}</span></div>`).join("");
 }
 
@@ -1539,7 +1568,7 @@ function renderAll(d, isHistory){
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
   sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
   curveChart(d); raceChart(d); portSection(d); silenceSection(d); compassSection(d);
-  brief3(d); sectionBadges(d);
+  screensBox(d); brief3(d); sectionBadges(d);
   if(!isHistory){
     TODAY_DATA = d;
     initSliders(d); initSearch(d); initHistory(d); initPort(d);
