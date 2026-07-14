@@ -208,6 +208,22 @@ section.folded > *:not(h2){display:none}
   cursor:pointer;font-family:inherit}
 table.slim{min-width:0}
 
+/* ---------- 종목 퀵 메뉴 ---------- */
+.qn{cursor:pointer;border-bottom:1px dotted var(--ink-3)}
+.qn:hover{color:var(--series-1-deep)}
+#qsheetBack{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40}
+#qsheet{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:430px;
+  background:var(--surface-1);border:1px solid var(--ring);border-radius:16px 16px 0 0;
+  padding:16px 16px 22px;z-index:41;box-shadow:0 -8px 30px rgba(0,0,0,.18)}
+#qsheet h3{margin:0 0 12px;font-size:15.5px}
+#qsheet .qrow{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+#qsheet .qbtn{display:block;text-align:center;font-size:13.5px;font-weight:600;color:var(--ink-1);
+  background:var(--chip-bg);border:none;border-radius:10px;padding:12px 6px;cursor:pointer;
+  text-decoration:none;font-family:inherit}
+#qsheet .qbtn:hover{background:var(--ring)}
+#qsheet .qclose{margin-top:10px;width:100%;font-size:13px;color:var(--ink-3);background:none;
+  border:none;padding:8px;cursor:pointer;font-family:inherit}
+
 /* ---------- 모바일 최적화 (좁은 화면) ---------- */
 @media (max-width:520px){
   body{font-size:14px}
@@ -401,6 +417,8 @@ table.slim{min-width:0}
     <div class="empty" id="searchHint">검색어를 입력하세요.</div>
   </section>
   <div id="devilPanel" style="display:none"></div>
+  <div id="qsheetBack" onclick="closeQsheet()"></div>
+  <div id="qsheet" style="display:none"></div>
 
   <footer>
     본 페이지는 공개 데이터(네이버 증권, DART 전자공시)를 자동 수집·요약한 <b>투자 참고 자료</b>이며,
@@ -470,7 +488,7 @@ function watchSection(d){
   tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>PBR</th>"+
     "<th>배당률</th><th>외인 연속</th><th>종합점수</th><th>바로가기</th><th style='text-align:left'>메모</th></tr></thead><tbody>"+
     rows.map(s=>`<tr>
-      <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
+      <td>${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
       <td>${fmt(s.price)}</td>
       <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
       <td>${s.pbr==null?"–":s.pbr.toFixed(2)}</td>
@@ -499,7 +517,7 @@ function initSearch(d){
     tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>PBR</th>"+
       "<th>PER</th><th>배당률</th><th>외인 연속</th><th>종합점수</th><th>바로가기</th></tr></thead><tbody>"+
       (hits.length ? hits.map(s=>`<tr>
-        <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>
+        <td>${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>
           <button class="xlink devilbtn" data-code="${s.code}" title="반론 보기">😈</button></td>
         <td>${fmt(s.price)}</td>
         <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
@@ -679,7 +697,7 @@ function sentiSection(d){
   tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th>"+
     "<th>검색 급증</th><th>뉴스 24h</th><th>외인 연속</th><th>종합점수</th></tr></thead><tbody>"+
     rows.map(s=>`<tr>
-      <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
+      <td>${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
       <td>${fmt(s.price)}</td>
       <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
       <td>${(s.trend_ratio||0)>=3?`<b>🔍 ${s.trend_ratio}배</b>`:(s.trend_ratio!=null?s.trend_ratio+"배":"–")}</td>
@@ -761,7 +779,7 @@ function makeTable(elId, rows, cols, defaultKey){
   render();
 }
 
-const nameCell = s=>`${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>`;
+const nameCell = s=>`${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>`;
 const streakCell = (n,hi)=>`<span class="streak${(n||0)>=hi?" hi":""}">${n||0}일</span>`;
 const pctCell = s=>`<span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span>`;
 const signAmt = v=>v==null?"–":`<span class="${cls(v)}">${fmt(v)}</span>`;
@@ -985,7 +1003,7 @@ function portSection(d){
   tbl.innerHTML = "<thead><tr><th>종목</th><th>보유</th><th>매수가</th><th>현재가</th>"+
     "<th>수익률</th><th>평가액</th><th>비중</th><th>시그널</th><th></th></tr></thead><tbody>"+
     rows.map((h,i)=>`<tr>
-      <td><span class="nm2">${esc(h.name)}</span><span class="cd2">${h.code}</span></td>
+      <td><span class="nm2 qn" data-c="${h.code}" data-n="${esc(h.name)}">${esc(h.name)}</span><span class="cd2">${h.code}</span></td>
       <td>${fmt(h.qty)}주</td><td>${fmt(h.avg)}</td><td>${fmt(h.price)}</td>
       <td>${pn(h.ret,2)}</td><td>${won(h.val)}</td>
       <td>${totVal? (h.val/totVal*100).toFixed(0):0}%</td>
@@ -1095,7 +1113,7 @@ function compassSection(d){
         ${(t.stocks||[]).map(s=>{
           const chg = s.change_pct==null?"":` <span class="${cls(s.change_pct)}">${s.change_pct>0?"+":""}${s.change_pct.toFixed(1)}%</span>`;
           const hl = s.verdict.startsWith("🎯") ? "font-weight:700;color:var(--ink-1)" : "";
-          return `<div style="${hl}">${starHtml(s.code)}${esc(s.name)}${chg} · ${esc(s.verdict)}
+          return `<div style="${hl}">${starHtml(s.code)}<span class="qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span>${chg} · ${esc(s.verdict)}
             <button class="xlink devilbtn" data-code="${s.code}">😈</button></div>`;
         }).join("")}
       </div></div>`).join("");
@@ -1132,7 +1150,7 @@ function silenceSection(d){
   tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th>"+
     "<th>거래량 (평소比)</th><th>뉴스 24h</th><th>검색 배수</th><th>PBR</th><th>배당률</th></tr></thead><tbody>"+
     rows.map(s=>`<tr>
-      <td>${starHtml(s.code)}<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>
+      <td>${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>
         <button class="xlink devilbtn" data-code="${s.code}" title="반론 보기">😈</button></td>
       <td>${fmt(s.price)}</td>
       <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
@@ -1409,6 +1427,30 @@ function initHistory(d){
 if("serviceWorker" in navigator){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
+
+/* ---------- 종목 퀵 메뉴 (종목명 클릭) ---------- */
+function openQsheet(code, name){
+  const s = document.getElementById("qsheet");
+  s.innerHTML = `
+    <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>
+    <div class="qrow">
+      <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">📈 차트</a>
+      <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">📰 뉴스</a>
+      <a class="qbtn" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(name)}">📄 공시</a>
+      <button class="qbtn" onclick="closeQsheet();showDevil('${code}')">😈 반론 보기</button>
+    </div>
+    <button class="qclose" onclick="closeQsheet()">닫기</button>`;
+  s.style.display = "block";
+  document.getElementById("qsheetBack").style.display = "block";
+}
+function closeQsheet(){
+  document.getElementById("qsheet").style.display = "none";
+  document.getElementById("qsheetBack").style.display = "none";
+}
+document.addEventListener("click", e=>{
+  const qn = e.target.closest(".qn");
+  if(qn && qn.dataset.c){ e.preventDefault(); openQsheet(qn.dataset.c, qn.dataset.n || qn.textContent); }
+});
 
 initFold();
 
