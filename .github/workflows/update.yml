@@ -8,6 +8,7 @@ on:
     - cron: "50 5 * * 1-5"    # 매 영업일 14:50 KST - 종가매매 스캔
     - cron: "40 10 * * 1-5"   # 매 영업일 19:40 KST - 예비 알람 (본 수집 누락 시에만 작동)
     - cron: "25 23 * * 0-4"   # 매 영업일 08:25 KST - 아침 예비 알람 (본 발송 누락 시에만)
+    - cron: "5 3 * * 1-5"    # 매 영업일 12:05 KST - 장중 시황 요약 (점심 맥박)
   workflow_dispatch: {}
 
 permissions:
@@ -136,6 +137,14 @@ jobs:
           else
             echo "휴장일 등으로 새 데이터 없음 — 발송 생략"
           fi
+
+      - name: 장중 시황 요약 (12:05)
+        if: github.event.schedule == '5 3 * * 1-5'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python closing_scan.py --pulse
 
       - name: 종가매매 스캔
         if: github.event.schedule == '50 5 * * 1-5'
