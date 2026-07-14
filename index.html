@@ -1024,6 +1024,13 @@ function portSection(d){
     secFlow[s.sector]=(secFlow[s.sector]||0)+s.f_5d_amt_100m; });
   Object.keys(bySec).forEach(k=>{ if((secFlow[k]||0) < -500)
     notes.push(`📉 보유 업종 <b>${esc(k)}</b>에서 외국인 자금 이탈 중 (5일 ${fmt(Math.round(secFlow[k]))}억)`); });
+  // 백업 리마인더: 보유 종목이 있는데 30일 넘게 백업(CSV)을 안 눌렀으면
+  try{
+    const lastBk = +localStorage.getItem("kr_idea_last_backup") || 0;
+    const days = (Date.now() - lastBk) / 864e5;
+    if(rows.length && (!lastBk || days > 30))
+      notes.push(`💾 포트폴리오 백업이 ${lastBk ? Math.floor(days)+"일째 없음" : "아직 없음"} · 위 백업(CSV) 버튼을 눌러두세요 (폰 분실·교체 대비)`);
+  }catch(e){}
   risk.style.display = notes.length ? "" : "none";
   risk.innerHTML = notes.length ? `<div class="bars" style="margin-top:10px">
     <h3>리스크 진단</h3><div style="font-size:13px;line-height:2;color:var(--ink-2)">${notes.join("<br>")}</div></div>` : "";
@@ -1076,6 +1083,8 @@ function initPort(d){
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = "내포트폴리오.csv"; a.click();
     URL.revokeObjectURL(a.href);
+    try{ localStorage.setItem("kr_idea_last_backup", Date.now()); }catch(e){}
+    portSection(DATA);   // 백업 리마인더 즉시 갱신
   });
   document.getElementById("portImport").addEventListener("change", e=>{
     const f = e.target.files[0]; if(!f) return;

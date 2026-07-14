@@ -937,6 +937,22 @@ def test_send_retries_on_server_error():
         notify.time.sleep = orig_sleep
 
 
+def test_weekly_extra_lines():
+    """주간 건강 체크 + 매월 첫 일요일 백업 리마인더."""
+    import notify
+    data = {"kospi_trend": [{"d": "2026-07-08", "v": 3400}, {"d": "2026-07-09", "v": 3410},
+                            {"d": "2026-07-10", "v": 3405}]}
+    # 7/12(첫째 주 일요일) → 건강 체크 + 백업의 날 둘 다
+    out = "\n".join(notify.weekly_extra_lines(data, today="2026-07-05"))
+    assert "백업의 날" in out
+    # 둘째 주 이후 일요일 → 건강 체크만
+    out2 = "\n".join(notify.weekly_extra_lines(data, today="2026-07-12"))
+    assert "🔧 시스템" in out2 and "수집 3일" in out2 and "백업의 날" not in out2
+    # 데이터 없음 → 조용히 빈 리스트에 가깝게
+    out3 = notify.weekly_extra_lines({}, today="2026-07-12")
+    assert all("백업의 날" not in x for x in out3)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

@@ -464,9 +464,36 @@ def build_weekly_message(data):
             v = x["total_pct"]
             lines.append(f"{i}위 {e(x['name'])} {'+' if v > 0 else ''}{v}%")
     lines.append("")
+    lines.extend(weekly_extra_lines(data))
     lines.append(f'📈 <a href="{SITE_URL}">대시보드에서 상세 보기</a>')
     lines.append("<i>투자 참고 자료이며 매수·매도 추천이 아닙니다.</i>")
     return "\n".join(lines)
+
+
+def weekly_extra_lines(data, today=None):
+    """주간 결산 끝의 시스템 건강 체크 + (매월 첫 일요일) 백업 리마인더."""
+    today = today or kst_today()
+    out = []
+    # 시스템 건강: 최근 7일간 수집된 거래일 수
+    trend = data.get("kospi_trend") or []
+    try:
+        from datetime import date
+        t = date(*map(int, today.split("-")))
+        recent = [p for p in trend if p.get("d")
+                  and 0 <= (t - date(*map(int, p["d"].split("-")))).days <= 6]
+        n = len({p["d"] for p in recent})
+    except Exception:
+        n = 0
+    if trend:
+        latest = trend[-1].get("d", "?")
+        out.append(f"🔧 시스템: 이번 주 수집 {n}일 · 최신 데이터 {latest}")
+    # 매월 첫 일요일 = 백업의 날
+    if int(today.split("-")[2]) <= 7:
+        out.append("💾 <b>백업의 날</b>: ① 저장소에서 Code→Download ZIP "
+                   "② 대시보드 포트폴리오 백업(CSV) · 자세한 방법은 PLAYBOOK.md 7번")
+    if out:
+        out.append("")
+    return out
 
 
 def send(token, chat_id, text, retries=3, wait_s=4):
