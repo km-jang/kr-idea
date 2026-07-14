@@ -851,8 +851,22 @@ def test_theme_map_and_baselines():
 
 
 def test_compass_message_lines():
+    # 주의: 반드시 고정 픽스처만 사용할 것. 실제 data.json을 읽으면
+    # 저장소의 데이터 상태에 따라 결과가 달라져 수집이 차단된다 (2026-07-14 장애 원인).
     import notify
-    data = json.load(open("data.json"))
+    data = {"news_compass": {
+        "hot_themes": [{
+            "name": "반도체·HBM", "count": 12, "mult": 4.0,
+            "stocks": [
+                {"name": "한미반도체", "change_pct": 3.2, "verdict": "🎯 발굴 후보"},
+                {"name": "SK하이닉스", "change_pct": 1.1, "verdict": "주도주"},
+            ],
+        }],
+        "debuts": [
+            {"name": "가온칩스", "news_24h": 6, "news_pos": 3, "news_neg": 0},
+            {"name": "이수페타시스", "news_24h": 5, "news_pos": 1, "news_neg": 2},
+        ],
+    }}
     lines = notify.compass_lines(data)
     joined = "\n".join(lines)
     assert "뉴스 나침반" in joined and "점화" in joined and "데뷔" in joined
