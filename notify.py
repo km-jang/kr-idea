@@ -16,6 +16,8 @@ import html
 import json
 import os
 import sys
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -467,16 +469,53 @@ def build_weekly_message(data):
     return "\n".join(lines)
 
 
-def send(token, chat_id, text):
-    r = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-              "disable_web_page_preview": True},
-        timeout=20)
-    ok = r.status_code == 200 and r.json().get("ok")
-    if not ok:
-        print(f"텔레그램 발송 실패: {r.status_code} {r.text[:300]}")
-    return ok
+def send(token, chat_id, text, retries=3, wait_s=4):
+    """텔레그램 발송. 일시적 오류(네트워크·서버)는 재시도, 설정 오류(400번대)는 즉시 중단."""
+    last = ""
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                      "disable_web_page_preview": True},
+                timeout=20)
+            if r.status_code == 200 and r.json().get("ok"):
+                return True
+            last = f"{r.status_code} {r.text[:300]}"
+            if 400 <= r.status_code < 500 and r.status_code != 429:
+                break  # 토큰/챗ID 오류 등은 재시도해도 소용없음
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {exc}"
+        if attempt < retries:
+            print(f"발송 실패({attempt}/{retries}) - {wait_s}초 후 재시도: {last}")
+            time.sleep(wait_s)
+    print(f"텔레그램 발송 실패: {last}")
+    return False
+
+
+SENT_LOG = Path(__file__).parent / "sent_log.json"
+
+def mark_sent(mode):
+    """발송 장부 기록 (예비 알람의 중복 발송 방지용)."""
+    try:
+        log = json.loads(SENT_LOG.read_text(encoding="utf-8")) if SENT_LOG.exists() else {}
+    except Exception:
+        log = {}
+    log[mode] = kst_today()
+    try:
+        SENT_LOG.write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as exc:
+        print(f"발송 장부 기록 실패(무시): {exc}")
+
+def already_sent(mode):
+    try:
+        log = json.loads(SENT_LOG.read_text(encoding="utf-8"))
+        return log.get(mode) == kst_today()
+    except Exception:
+        return False
+
+def kst_today():
+    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
 
 
 def main():
@@ -484,8 +523,15 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="발송 없이 내용만 출력")
     ap.add_argument("--evening", action="store_true", help="저녁 마감 요약 (짧은 버전)")
     ap.add_argument("--weekly", action="store_true", help="일요일 주간 결산")
+    ap.add_argument("--if-not-sent", action="store_true",
+                    help="오늘 이미 발송했으면 조용히 종료 (예비 알람용)")
     ap.add_argument("--data", default=str(DATA_PATH))
     args = ap.parse_args()
+
+    mode = "weekly" if args.weekly else "evening" if args.evening else "morning"
+    if args.if_not_sent and already_sent(mode):
+        print(f"오늘 {mode} 발송 완료 기록 있음 - 예비 알람 조용히 종료")
+        return
 
     try:
         data = json.loads(Path(args.data).read_text(encoding="utf-8"))
@@ -512,6 +558,7 @@ def main():
         return
 
     if send(token, chat_id, msg):
+        mark_sent(mode)
         print("브리핑 발송 완료")
     else:
         sys.exit(1)

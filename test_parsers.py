@@ -875,6 +875,68 @@ def test_compass_message_lines():
     assert notify.compass_lines({"news_compass": None}) == []
     assert notify.compass_lines({"news_compass": {"hot_themes": [], "debuts": []}}) == []
 
+def test_sent_ledger():
+    """발송 장부: 기록 후 당일 재발송 차단, 다른 날짜면 통과."""
+    import notify, tempfile, os
+    from pathlib import Path
+    orig = notify.SENT_LOG
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            notify.SENT_LOG = Path(td) / "sent_log.json"
+            assert notify.already_sent("morning") is False   # 장부 없음
+            notify.mark_sent("morning")
+            assert notify.already_sent("morning") is True    # 오늘 기록됨
+            assert notify.already_sent("evening") is False   # 다른 모드는 무관
+            # 어제 날짜로 조작하면 재발송 허용
+            import json as _j
+            log = _j.loads(notify.SENT_LOG.read_text(encoding="utf-8"))
+            log["morning"] = "2000-01-01"
+            notify.SENT_LOG.write_text(_j.dumps(log), encoding="utf-8")
+            assert notify.already_sent("morning") is False
+    finally:
+        notify.SENT_LOG = orig
+
+
+def test_send_no_retry_on_client_error():
+    """400번대 설정 오류는 재시도 없이 즉시 중단 (429 제외)."""
+    import notify
+    calls = []
+    class FakeResp:
+        status_code = 400
+        text = "Bad Request: chat not found"
+        def json(self): return {"ok": False}
+    orig_post = notify.requests.post
+    notify.requests.post = lambda *a, **k: (calls.append(1), FakeResp())[1]
+    orig_sleep = notify.time.sleep
+    notify.time.sleep = lambda s: None
+    try:
+        ok = notify.send("tok", "chat", "msg", retries=3)
+        assert ok is False and len(calls) == 1, f"400 오류인데 {len(calls)}회 호출"
+    finally:
+        notify.requests.post = orig_post
+        notify.time.sleep = orig_sleep
+
+
+def test_send_retries_on_server_error():
+    """500번대·네트워크 오류는 지정 횟수만큼 재시도."""
+    import notify
+    calls = []
+    class FakeResp:
+        status_code = 502
+        text = "Bad Gateway"
+        def json(self): return {"ok": False}
+    orig_post = notify.requests.post
+    notify.requests.post = lambda *a, **k: (calls.append(1), FakeResp())[1]
+    orig_sleep = notify.time.sleep
+    notify.time.sleep = lambda s: None
+    try:
+        ok = notify.send("tok", "chat", "msg", retries=3)
+        assert ok is False and len(calls) == 3, f"3회 재시도여야 하는데 {len(calls)}회"
+    finally:
+        notify.requests.post = orig_post
+        notify.time.sleep = orig_sleep
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

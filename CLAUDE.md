@@ -9,8 +9,12 @@
 **모든 안내는 클릭 단위로 쉽게**, 전문용어 없이 설명한다.
 
 - 웹: https://km-jang.github.io/kr-idea/ (GitHub Pages, main 브랜치 루트)
-- 자동화: GitHub Actions (`.github/workflows/update.yml`) — 스케줄 3개
-  - 평일 19:10 KST 수집+마감요약 / 평일 08:00 KST 아침 브리핑 / 일요일 18:00 KST 주간 결산
+- 자동화: GitHub Actions (`.github/workflows/update.yml`) · 스케줄 6개
+  - 평일 08:00 아침 브리핑 (+08:25 예비) / 14:50 종가 스캔 / 19:10 수집+마감요약 (+19:40 예비)
+  - 일요일 18:00 주간 결산
+  - 예비 알람은 본 실행 완료를 확인하면 아무것도 안 함 (GitHub 예약 지연·누락 대비 이중화)
+  - 어떤 단계든 실패하면 텔레그램으로 자동 통보 (`실패 자동 통보` 스텝)
+  - `sent_log.json` = 발송 장부 (봇이 커밋, 예비 알람의 중복 발송 방지) — 직접 수정 금지
 - 알림: 텔레그램 (Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, 선택 `DART_API_KEY`)
 
 ## 아키텍처 (파일 전부 저장소 최상위)
