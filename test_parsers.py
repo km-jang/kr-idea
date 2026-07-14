@@ -1033,6 +1033,32 @@ def test_stale_notice():
     assert notify.stale_notice(old, today="2026-07-12") == []
 
 
+def test_pulse_message():
+    """점심 맥박: 5선 장중 성적·급등·관심종목이 담기고 저장은 안 함."""
+    import closing_scan as cs
+    orig = cs.fetch_realtime
+    cs.fetch_realtime = lambda codes, chunk=20: {
+        "KOSPI": {"chg": 0.42}, "KOSDAQ": {"chg": -0.15}}  # 지수 조회 목킹
+    try:
+        data = {
+            "ideas": [{"code": "A1", "name": "아이디어원"},
+                      {"code": "B2", "name": "아이디어투"}],
+            "all_stocks": [{"code": "A1", "name": "아이디어원"},
+                           {"code": "B2", "name": "아이디어투"},
+                           {"code": "C3", "name": "급등이"}],
+        }
+        quotes = {"A1": {"chg": 1.9}, "B2": {"chg": -0.3}, "C3": {"chg": 8.2}}
+        msg = cs.build_pulse_message(data, quotes)
+        assert "장중 시황" in msg
+        assert "KOSPI ▲0.42%" in msg
+        assert "아이디어원 +1.9%" in msg and "아이디어투 -0.3%" in msg
+        assert "급등이 +8.2%" in msg
+        assert "5선 장중 평균 +0.8%" in msg
+        assert "마감 집계는 저녁 요약" in msg
+    finally:
+        cs.fetch_realtime = orig
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

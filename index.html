@@ -260,6 +260,7 @@ table.slim{min-width:0}
 <div class="wrap">
   <header class="top">
     <h1>국내장 아이디어 대시보드</h1>
+    <span id="hdot" style="display:none;width:8px;height:8px;border-radius:50%;flex:0 0 auto"></span>
     <span class="stamp" id="stamp">불러오는 중…</span>
     <span class="badge-sample" id="sampleBadge" style="display:none">샘플 데이터</span>
     <select id="histSel" title="과거 날짜의 대시보드 보기" style="margin-left:auto;font-size:12px;
@@ -1505,12 +1506,36 @@ function brief3(d){
   el.style.display = "block";
 }
 
+/* ---------- 자가진단 신호등 (수집 신선도, 주말 감안) ---------- */
+function healthDot(d){
+  const el = document.getElementById("hdot");
+  if(!el || !d.market_date || d.sample){ if(el) el.style.display = "none"; return; }
+  const kst = new Date(Date.now() + 9 * 3600e3);          // KST 기준
+  const today = kst.toISOString().slice(0, 10);
+  const dow = kst.getUTCDay();                              // 0=일 6=토
+  const hour = kst.getUTCHours();
+  const daysOld = Math.round((new Date(today) - new Date(d.market_date)) / 864e5);
+  let color, label;
+  const allow = (dow === 0 || dow === 6 || dow === 1) ? 3 : 1;   // 주말·월요일은 금요일 데이터가 정상
+  if(daysOld > 5){
+    color = "#d64b4b"; label = "수집이 " + daysOld + "일째 멈춰 있습니다 · PLAYBOOK 점검 필요";
+  } else if(daysOld > allow || (dow >= 2 && dow <= 5 && hour >= 21 && daysOld >= 1)){
+    color = "#eda100"; label = "수집 지연 의심 (기준일 " + d.market_date + ") · 휴장일이면 정상";
+  } else {
+    color = "#1baf7a"; label = "시스템 정상 작동 중 (기준일 " + d.market_date + ")";
+  }
+  el.style.background = color;
+  el.title = label;
+  el.style.display = "inline-block";
+}
+
 function renderAll(d, isHistory){
   DATA = d;
   document.getElementById("stamp").textContent =
     (d.market_date ? d.market_date.replace(/-/g,".")+" 장 마감 기준" : "") +
     (d.generated_at ? " · "+d.generated_at.replace(/^\d{4}-\d{2}-\d{2} /,"")+" 수집" : "");
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
+  healthDot(d);
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
   sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
   curveChart(d); raceChart(d); portSection(d); silenceSection(d); compassSection(d);
