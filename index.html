@@ -144,7 +144,8 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 .sllbl{font-size:12.5px;font-weight:600;color:var(--ink-2)}
 .slval{font-size:12px;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums}
 .slrow input[type=range]{width:100%;accent-color:var(--series-1);height:22px}
-.slfoot{display:flex;align-items:center;gap:10px;padding:6px 0 4px}
+.slfoot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:6px 0 4px}
+.slfoot button{white-space:nowrap}
 .slstate{font-size:11.5px;color:var(--ink-3)}
 .slreset{margin-left:auto;font-size:12px;color:var(--ink-2);background:var(--chip-bg);
   border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit}
@@ -207,6 +208,9 @@ section.folded > *:not(h2){display:none}
   background:var(--chip-bg);border:none;border-top:1px solid var(--ring);padding:9px;
   cursor:pointer;font-family:inherit}
 table.slim{min-width:0}
+
+.fbbtn{cursor:pointer;font-size:13px;margin-left:6px;opacity:.55;user-select:none}
+.fbbtn:hover{opacity:1}
 
 /* ---------- 종목 퀵 메뉴 ---------- */
 .qn{cursor:pointer;border-bottom:1px dotted var(--ink-3)}
@@ -334,6 +338,8 @@ table.slim{min-width:0}
       <div class="slrow"><span class="sllbl">최소 대금</span><input type="range" id="fTurn" min="0" max="500" step="10" value="30"><span class="slval" id="fTurnV">30억</span></div>
       <div class="slrow"><span class="sllbl">최소 시총</span><input type="range" id="fCap" min="0" max="20000" step="500" value="3000"><span class="slval" id="fCapV">3,000억</span></div>
       <div class="slfoot">
+        <button class="slpreset" id="quizBtn" style="font-weight:700">🎯 간단 설정</button>
+        <button class="slpreset" id="raceBtn" style="display:none;font-weight:700"></button>
         <button class="slpreset" data-w="150,70,120,100">수급형</button>
         <button class="slpreset" data-w="70,160,60,120">가치형</button>
         <button class="slpreset" data-w="110,60,200,80">모멘텀형</button>
@@ -622,11 +628,14 @@ function initSliders(d){
     const cur = getW();
     ideaCards(d, isDefaultW(cur) ? null : adjustedIdeas(d, cur));
   }
+  // 외부(문답·리그·좋아요 학습)에서 가중치 적용할 수 있게 공개
+  window.__applyWeights = w => { setW(w); paint(); apply(); };
   for(const k in map){
     document.getElementById(map[k]).addEventListener("input", e=>{
       const cur = getW(); cur[k] = +e.target.value; setW(cur); paint(); apply();
     });
   }
+  initQuiz(d); initRaceBtn(d);
   document.getElementById("slReset").addEventListener("click", ()=>{
     setW({...DEF_W}); paint(); apply();
   });
@@ -639,6 +648,119 @@ function initSliders(d){
   });
   paint(); apply();
 }
+
+/* ---------- 토스트 (조작 결과를 투명하게 알려줌) ---------- */
+function toast(msg){
+  let t = document.getElementById("toastBox");
+  if(!t){
+    t = document.createElement("div"); t.id = "toastBox";
+    t.style.cssText = "position:fixed;left:50%;bottom:76px;transform:translateX(-50%);"+
+      "max-width:340px;background:var(--ink-1);color:var(--page);font-size:12.5px;"+
+      "padding:10px 16px;border-radius:10px;z-index:60;opacity:0;transition:opacity .25s;"+
+      "box-shadow:0 4px 18px rgba(0,0,0,.25);text-align:center";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg; t.style.opacity = "1";
+  clearTimeout(t._tm); t._tm = setTimeout(()=>{ t.style.opacity = "0"; }, 2600);
+}
+
+/* ---------- A안: 성향 문답 (간단 설정) ---------- */
+const QUIZ = [
+  {q:"① 얼마나 들고 가는 편이에요?", opts:[
+    ["🏃 며칠 · 짧게 치고 빠지기", {m:40, f:30, v:-30, turn:100}],
+    ["🚶 몇 주 · 흐름 타기",        {f:20, m:10}],
+    ["🧘 몇 달+ · 묻어두기",        {v:40, d:20, m:-30}]]},
+  {q:"② 어느 쪽이 마음 편해요?", opts:[
+    ["🛒 싸게 사서 기다리기",   {v:40, m:-20}],
+    ["🏄 오르는 놈 따라타기",   {m:40, f:20, v:-30}],
+    ["⚖️ 반반 균형",           {}]]},
+  {q:"③ 종목 크기는?", opts:[
+    ["🏛 대형주 안정감",     {cap:10000, turn:100}],
+    ["🎢 중소형도 괜찮아",   {cap:3000}]]},
+];
+function quizPersona(w){
+  const {f, v, m} = w;
+  if(v >= f && v >= m && v > 110) return "🐢 진득한 가치 사냥꾼";
+  if(m >= f && m >= v && m > 110) return "🔥 추세의 서퍼";
+  if(f >= v && f >= m && f > 110) return "🌊 수급 추적자";
+  return "⚖️ 균형 잡힌 관찰자";
+}
+function initQuiz(){
+  document.getElementById("quizBtn").onclick = ()=>{
+    const acc = {f:100, v:100, m:100, d:100, turn: DEF_W.turn, cap: DEF_W.cap};
+    let step = 0;
+    const sheet = document.getElementById("qsheet");
+    function show(){
+      const q = QUIZ[step];
+      sheet.innerHTML = `<h3>🎯 간단 설정 <span class="cd2">${step+1}/${QUIZ.length}</span></h3>
+        <div style="font-size:14px;font-weight:600;margin-bottom:10px">${q.q}</div>
+        <div class="qrow" style="grid-template-columns:1fr">` +
+        q.opts.map((o,i)=>`<button class="qbtn" data-i="${i}">${o[0]}</button>`).join("") +
+        `</div><button class="qclose" onclick="closeQsheet()">그만두기</button>`;
+      sheet.querySelectorAll(".qbtn").forEach(b=>b.onclick = ()=>{
+        const delta = QUIZ[step].opts[+b.dataset.i][1];
+        for(const k of ["f","v","m","d"]) if(delta[k]) acc[k] = Math.min(200, Math.max(10, acc[k] + delta[k]));
+        if(delta.turn) acc.turn = Math.max(acc.turn, delta.turn);
+        if(delta.cap)  acc.cap  = Math.max(acc.cap, delta.cap);
+        step++;
+        if(step < QUIZ.length){ show(); return; }
+        // 결과
+        window.__applyWeights(acc);
+        sheet.innerHTML = `<h3>내 투자 스타일: ${quizPersona(acc)}</h3>
+          <div style="font-size:13px;line-height:1.9;color:var(--ink-2)">
+          당신의 성향으로 5선 기준을 다시 계산했어요.<br>
+          수급 ${acc.f}% · 밸류 ${acc.v}% · 모멘텀 ${acc.m}% · 공시 ${acc.d}%<br>
+          최소 거래대금 ${fmt(acc.turn)}억 · 최소 시총 ${fmt(acc.cap)}억<br>
+          <span style="color:var(--ink-3)">마음에 안 들면 언제든 [기본값] 버튼으로 원위치</span></div>
+          <button class="qclose" onclick="closeQsheet()">닫기</button>`;
+      });
+      sheet.style.display = "block";
+      document.getElementById("qsheetBack").style.display = "block";
+    }
+    show();
+  };
+}
+
+/* ---------- B안: 리그 1위 따라가기 ---------- */
+const RACE_W = {"기본형":{f:100,v:100,m:100,d:100}, "수급형":{f:150,v:70,m:120,d:100},
+                "가치형":{f:70,v:160,m:60,d:120}, "모멘텀형":{f:110,v:60,m:200,d:80}};
+function initRaceBtn(d){
+  const btn = document.getElementById("raceBtn");
+  const rank = ((d.strategy_race||{}).rank)||[];
+  const leader = rank[0];
+  if(!leader || !RACE_W[leader.name]){ btn.style.display = "none"; return; }
+  btn.style.display = "";
+  btn.textContent = `🏆 리그 1위(${leader.name} ${leader.total_pct>0?"+":""}${leader.total_pct}%) 따라가기`;
+  btn.onclick = ()=>{
+    const cur = getW();
+    window.__applyWeights({...cur, ...RACE_W[leader.name]});
+    toast(`${leader.name} 가중치 적용 완료 · 실제 성과로 검증된 설정입니다`);
+  };
+}
+
+/* ---------- C안: 좋아요 학습 (👍/👎) ---------- */
+function dominantFactor(s){
+  const cand = [["f", (s.flow_score||0)/40, "수급"],
+                ["v", (s.value_score||0)/40, "밸류"],
+                ["m", (s.mom_score||0)/10, "모멘텀"]];
+  cand.sort((a,b)=>b[1]-a[1]);
+  return cand[0];
+}
+document.addEventListener("click", e=>{
+  const fb = e.target.closest(".fbbtn");
+  if(!fb || !DATA) return;
+  const s = allStocks(DATA).find(x=>x.code === fb.dataset.code)
+        || (DATA.ideas||[]).find(x=>x.code === fb.dataset.code);
+  if(!s || !window.__applyWeights) return;
+  const [key, , label] = dominantFactor(s);
+  const dir = fb.dataset.fb === "up" ? +10 : -10;
+  const cur = getW();
+  const before = cur[key];
+  cur[key] = Math.min(200, Math.max(10, cur[key] + dir));
+  window.__applyWeights(cur);
+  toast(`${s.name}은 ${label} 주도형 → ${label} 가중치 ${before}%→${cur[key]}% ` +
+        `(${dir>0?"더 보기":"덜 보기"}) · 되돌리기: [기본값]`);
+});
 
 function ideaCards(d, override){
   const el = document.getElementById("ideaCards");
@@ -658,7 +780,7 @@ function ideaCards(d, override){
     <div class="scorebar"><i style="width:${Math.min(100,s.score)}%"></i></div>
     <div class="sc">종합 <b>${s.score}</b> · 수급 ${s.flow_score} · 밸류 ${s.value_score}${s.mom_score!=null?` · 모멘텀 ${s.mom_score}`:""} · 공시 ${s.disc_score>=0?"+":""}${s.disc_score}</div>
     <div class="tags">${(s.reasons||[]).slice(0,4).map(r=>`<span class="tag">${esc(r)}</span>`).join("")}</div>
-    <div class="links">${starHtml(s.code)}${linksHtml(s.code)}<a class="xlink" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(s.name)}">공시</a></div>
+    <div class="links">${starHtml(s.code)}${linksHtml(s.code)}<span class="fbbtn" data-fb="up" data-code="${s.code}" title="이런 종목 더">👍</span><span class="fbbtn" data-fb="down" data-code="${s.code}" title="이런 종목 덜">👎</span><a class="xlink" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(s.name)}">공시</a></div>
   </div>`).join("");
 }
 

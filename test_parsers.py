@@ -1019,6 +1019,20 @@ def test_insider_briefing_line():
     assert "내부자·대주주" not in notify.build_message(d)
 
 
+def test_stale_notice():
+    """침묵 정지 방어: 평일 + 데이터 옛날 → 경고 / 주말·최신이면 침묵."""
+    import notify
+    old = {"market_date": "2026-07-10"}
+    # 화요일(2026-07-14)인데 기준일이 옛날 → 경고
+    out = notify.stale_notice(old, today="2026-07-14")
+    assert out and "수집되지 않았습니다" in out[0]
+    # 데이터가 오늘자면 침묵
+    fresh = {"market_date": "2026-07-14"}
+    assert notify.stale_notice(fresh, today="2026-07-14") == []
+    # 주말이면 옛날 데이터여도 침묵 (2026-07-12는 일요일)
+    assert notify.stale_notice(old, today="2026-07-12") == []
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

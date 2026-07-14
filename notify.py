@@ -380,6 +380,20 @@ def compass_lines(data, brief=False):
     lines.append("")
     return lines
 
+def stale_notice(data, today=None):
+    """침묵 정지 방어: 평일인데 데이터 기준일이 오늘이 아니면 경고 라인."""
+    today = today or kst_today()
+    md = data.get("market_date") or ""
+    try:
+        t = datetime.strptime(today, "%Y-%m-%d")
+    except Exception:
+        return []
+    if t.weekday() >= 5 or not md or md == today:
+        return []
+    return [f"⚠️ 오늘({today}) 새 데이터가 수집되지 않았습니다 · 기준일 {md}",
+            "휴장일이면 정상 · 평일인데 이틀 연속이면 PLAYBOOK 점검 필요", ""]
+
+
 def build_evening_message(data):
     """저녁 마감 요약 - 짧은 버전."""
     e = lambda s: html.escape(str(s or ""))
@@ -387,6 +401,7 @@ def build_evening_message(data):
     idx = data.get("indices") or {}
     k, q = idx.get("KOSPI") or {}, idx.get("KOSDAQ") or {}
     lines = [f"🌙 <b>마감 요약</b>  <i>({e(md)})</i>", ""]
+    lines.extend(stale_notice(data))
     if k.get("value"):
         lines.append(
             f"KOSPI {fmt_num(k['value'])} {arrow(k.get('change_pct'))}"
