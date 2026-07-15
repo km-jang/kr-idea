@@ -1870,6 +1870,65 @@ if("serviceWorker" in navigator){
 }
 
 /* ---------- 종목 퀵 메뉴 (종목명 클릭) ---------- */
+/* ---------- 🤖 AI 팩트 스캐너 (프롬프트 제너레이터, 비용 0원) ---------- */
+function buildAIPrompt(code, fallbackName){
+  const d = window.DATA || {};
+  const s = allStocks(d).find(x=>x.code===code) || {name: fallbackName, code};
+  const nv = (v,suffix="") => v==null ? "정보없음" : v+suffix;
+  const mine = (d.mines||[]).find(m=>m.code===code);
+  const ins = (d.insider_trades||[]).find(x=>x.code===code);
+  const devils = (typeof devilNotes==="function" ? devilNotes(code, d) : []).slice(0,3);
+  const anchors = [
+    `- 종목명: ${s.name||code} (${code}) · 업종: ${nv(s.sector)}`,
+    `- 현재가 ${nv(s.price,"원")} · 당일 등락률 ${nv(s.change_pct,"%")} · 시가총액 ${nv(s.mktcap_100m,"억원")}`,
+    `- 밸류: PBR ${nv(s.pbr,"배")} · PER ${nv(s.per,"배")} · 배당수익률 ${nv(s.dvr,"%")}`,
+    `- 수급: 외국인 ${nv(s.f_streak,"일 연속")} 순매수(5일 누적 ${nv(s.f_5d_amt_100m,"억원")}) · 기관 ${nv(s.i_streak,"일 연속")}(5일 ${nv(s.i_5d_amt_100m,"억원")})`,
+    `- 심리: 24시간 뉴스 ${nv(s.news_24h,"건")} · 검색량 평소 대비 ${nv(s.trend_ratio,"배")} · 52주 고점 대비 ${s.near_52w_pct!=null?(100-s.near_52w_pct).toFixed(0)+"% 아래":"정보없음"}`,
+    `- 공시 점수: ${nv(s.disc_score,"점")} (양수=호재성, 음수=악재성 공시 감지)`,
+  ];
+  if(mine) anchors.push(`- ⚠️ 자체 지뢰탐지기 위험 점수 ${mine.score}점: ${(mine.reasons||[]).join(", ")}`);
+  if(ins) anchors.push(`- 내부자 매매(14일): 매수 ${ins.buys}건/매도 ${ins.sells}건, 순 ${ins.net_amt_100m}억원`);
+  if(devils.length) anchors.push(`- 자체 반론 엔진이 이미 감지한 우려: ${devils.join(" / ")}`);
+
+  return `너는 투자자의 원금을 보호하는 것이 유일한 목적인, 철저하게 회의적인 독립 리스크 분석가다. 증권사 리포트식 매수 유도, 두루뭉술한 위로, "투자는 본인 책임" 같은 면피성 멘트는 일절 금지한다.
+
+# 객관적 팩트 (내 대시보드가 수집한 실제 수치 · 왜곡 금지)
+${anchors.join("\n")}
+
+# 실시간 웹 검색 미션 (5대 리스크 영역을 검색으로 교차 검증하라)
+1. 개미 과열: 커뮤니티·종토방에서 개인들이 열광하는 매수 논리의 허점 (감정 과열 여부)
+2. 재료 수명: 최근 상승/하락을 만든 뉴스 재료가 이미 선반영된 소멸 구간인지, 신선한지
+3. 공시 지뢰: 최근 1년 내 CB·BW 발행, 제3자배정 유상증자, 최대주주·임원 지분 매도 등 주주가치 희석 요인
+4. 글로벌 연동: 이 종목과 커플링된 미국 종목·섹터의 최근 흐름과 매크로 악재
+5. 테마 서열: 이 종목이 테마의 대장주인지, 대장이 꺾이면 낙폭이 배가 되는 후발주인지
+
+위 팩트 중 "자체 감지" 항목이 있다면 그것이 실제로 웹에서 확인되는지 우선 검증하라.
+
+# 출력 규칙
+- 5개 영역을 모두 조사하되, 출력은 가장 치명적인 리스크 딱 3가지만.
+- 각 항목은 [영역명] + 1줄 요약, 반드시 구체적 날짜·수치·공시명 포함.
+- 마지막 줄에 "종합 위험도: 상/중/하" 한 단어 판정.
+
+결론 - 지금 ${s.name||code}의 매수 전 반드시 알아야 할 치명적 리스크 3선:`;
+}
+
+function copyAIPrompt(code, name){
+  const text = buildAIPrompt(code, name);
+  const done = ()=>toast(`📋 ${name} 리스크 스캔 프롬프트 복사 완료 · Claude/Gemini 창에 붙여넣으세요`);
+  const fail = ()=>{
+    // 복사 차단 환경: 시트에 텍스트를 직접 보여줘서 수동 복사
+    const s = document.getElementById("qsheet");
+    s.innerHTML = `<h3>프롬프트 수동 복사</h3>
+      <textarea style="width:100%;height:200px;font-size:11px;border:1px solid var(--ring);
+        border-radius:8px;background:var(--page);color:var(--ink-1);padding:8px" readonly>${esc(text)}</textarea>
+      <button class="qclose" onclick="closeQsheet()">닫기</button>`;
+    const ta = s.querySelector("textarea"); ta.focus(); ta.select();
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(fail);
+  } else fail();
+}
+
 function openQsheet(code, name){
   const s = document.getElementById("qsheet");
   const mine = ((window.DATA||{}).mines||[]).find(m=>m.code===code);
@@ -1884,6 +1943,7 @@ function openQsheet(code, name){
       <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">📰 뉴스</a>
       <a class="qbtn" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(name)}">📄 공시</a>
       <button class="qbtn" onclick="closeQsheet();showDevil('${code}')">😈 반론 보기</button>
+      <button class="qbtn" style="grid-column:1/-1" onclick="closeQsheet();copyAIPrompt('${code}', '${esc(name)}')">🤖 AI 리스크 스캔 (프롬프트 복사 → Claude/Gemini에 붙여넣기)</button>
     </div>
     <button class="qclose" onclick="closeQsheet()">닫기</button>`;
   s.style.display = "block";
