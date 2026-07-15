@@ -1009,9 +1009,10 @@ def test_weekly_graduates_and_tuning():
 
 
 def test_insider_briefing_line():
-    """내부자 몰림이 있으면 아침 브리핑에 조건부 한 줄."""
+    """내부자 몰림(경량판)은 방향 데이터가 없을 때만 표시."""
     import notify
     d = json.load(open("data.json"))
+    d["insider_trades"] = []          # 방향 데이터 없음 → 경량판 표시
     d["insider_watch"] = [{"company": "CJ ENM", "count": 3}]
     msg = notify.build_message(d)
     assert "내부자·대주주 신고 몰림" in msg and "CJ ENM(3건)" in msg
@@ -1115,6 +1116,72 @@ def test_screen_message_lines():
     assert "조건 검색 적중" in out and "빈집주" in out
     assert notify.screen_lines({"screens": {}}) == []
     assert notify.screen_lines({}) == []
+
+
+def test_parse_elestock():
+    """elestock 응답 파싱: 최근 N일 필터 + 증감 부호."""
+    js = {"status": "000", "list": [
+        {"rcept_dt": "2026-07-10", "repror": "김대표", "isu_exctv_ofcps": "대표이사",
+         "sp_stock_lmp_irds_cnt": "10,000"},
+        {"rcept_dt": "2026-07-08", "repror": "최부사장", "isu_exctv_ofcps": "부사장",
+         "sp_stock_lmp_irds_cnt": "-5,000"},
+        {"rcept_dt": "2026-05-01", "repror": "옛날사람", "isu_exctv_ofcps": "이사",
+         "sp_stock_lmp_irds_cnt": "99,999"},   # 14일 밖 → 제외
+        {"rcept_dt": "2026-07-09", "repror": "무변동", "isu_exctv_ofcps": "이사",
+         "sp_stock_lmp_irds_cnt": "0"},        # 증감 0 → 제외
+    ]}
+    out = collect.parse_elestock(js, days=14, today="2026-07-15")
+    assert len(out) == 2
+    assert out[0]["delta"] == 10000 and out[0]["position"] == "대표이사"
+    assert out[1]["delta"] == -5000
+    assert collect.parse_elestock({"status": "013"}) == []
+
+
+def test_aggregate_insider():
+    reports = [{"date": "2026-07-10", "reporter": "김대표", "position": "대표이사", "delta": 10000},
+               {"date": "2026-07-08", "reporter": "최부사장", "position": "부사장", "delta": -3000}]
+    agg = collect.aggregate_insider(reports, price=50000)
+    assert agg["buys"] == 1 and agg["sells"] == 1
+    assert agg["net_shares"] == 7000
+    assert abs(agg["net_amt_100m"] - 3.5) < 0.01
+    assert "김대표(대표이사) +10,000주" in agg["people"]
+    assert collect.aggregate_insider([], 1000) is None
+
+
+def test_build_insider_trades():
+    """공시에 뜬 회사만 조회 → 방향 집계 (fetch 목킹)."""
+    stocks = [{"code": "035760", "name": "CJ ENM", "price": 70000, "change_pct": 1.0,
+               "mktcap_100m": 15000},
+              {"code": "005930", "name": "삼성전자", "price": 87000, "change_pct": 0.5,
+               "mktcap_100m": 5000000}]
+    discs = [{"company": "CJ ENM", "tag": "내부자 지분변동"}]
+    fake_codes = lambda key, codes: {"035760": "00123456"}
+    fake_stock = lambda key, cc: {"status": "000", "list": [
+        {"rcept_dt": "2026-07-14", "repror": "김임원", "isu_exctv_ofcps": "이사",
+         "sp_stock_lmp_irds_cnt": "2,000"}]}
+    out = collect.build_insider_trades(stocks, "fakekey", discs, today="2026-07-15",
+                                       fetch_codes=fake_codes, fetch_stock=fake_stock)
+    assert len(out) == 1
+    assert out[0]["name"] == "CJ ENM" and out[0]["buys"] == 1
+    assert abs(out[0]["net_amt_100m"] - 1.4) < 0.01
+    # 키 없으면 빈 리스트 (경량판 유지)
+    assert collect.build_insider_trades(stocks, "", discs) == []
+
+
+def test_insider_trades_briefing():
+    """방향 데이터가 있으면 매수/매도 우세 라인, 없으면 경량판."""
+    import notify
+    d = json.load(open("data.json"))
+    d["insider_trades"] = [
+        {"name": "CJ ENM", "net_amt_100m": 10.7, "buys": 3, "sells": 0},
+        {"name": "LG화학", "net_amt_100m": -6.6, "buys": 0, "sells": 2}]
+    msg = notify.build_message(d)
+    assert "내부자 매수 우세" in msg and "CJ ENM" in msg
+    assert "내부자 매도 우세" in msg and "LG화학" in msg
+    d["insider_trades"] = []
+    d["insider_watch"] = [{"company": "한미반도체", "count": 2}]
+    msg2 = notify.build_message(d)
+    assert "신고 몰림" in msg2 and "매수 우세" not in msg2
 
 
 if __name__ == "__main__":

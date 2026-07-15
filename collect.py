@@ -1509,12 +1509,135 @@ def build_sample():
                              "pullback": [], "hotmoney": [],
                              "stealth": [{"code": "000810", "name": "삼성화재",
                                           "why": "외인 5일·기관 4일 연속 · 주가 5일 1.2% 변동뿐"}],
-                             "gate52": []})
+                             "gate52": []},
+                    insider_trades=[
+                        {"code": "035760", "name": "CJ ENM", "price": 71200,
+                         "change_pct": 0.71, "mktcap_100m": 15600,
+                         "buys": 3, "sells": 0, "net_shares": 15000,
+                         "net_amt_100m": 10.7,
+                         "people": ["김대표(대표이사) +10,000주", "이사내(사내이사) +3,000주",
+                                    "박전무(전무) +2,000주"]},
+                        {"code": "051910", "name": "LG화학", "price": 82300,
+                         "change_pct": 3.16, "mktcap_100m": 58000,
+                         "buys": 0, "sells": 2, "net_shares": -8000,
+                         "net_amt_100m": -6.6,
+                         "people": ["최부사장(부사장) -5,000주", "정상무(상무) -3,000주"]}])
 
 
 # ---------------------------------------------------------------------------
 # 조립 & 메인
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 내부자 매매 트래커 (K1 풀버전) - OpenDART elestock API
+# ---------------------------------------------------------------------------
+
+def fetch_corp_codes(api_key, universe_codes):
+    """OpenDART 고유번호 zip 다운로드 → {종목코드: corp_code} (유니버스만)."""
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+    r = requests.get("https://opendart.fss.or.kr/api/corpCode.xml",
+                     params={"crtfc_key": api_key}, timeout=30)
+    r.raise_for_status()
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    xml_data = zf.read(zf.namelist()[0])
+    want = set(universe_codes)
+    out = {}
+    for el in ET.fromstring(xml_data).iter("list"):
+        sc = (el.findtext("stock_code") or "").strip()
+        if sc in want:
+            out[sc] = (el.findtext("corp_code") or "").strip()
+    return out
+
+
+def fetch_elestock(api_key, corp_code):
+    r = requests.get("https://opendart.fss.or.kr/api/elestock.json",
+                     params={"crtfc_key": api_key, "corp_code": corp_code},
+                     timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def parse_elestock(js, days=14, today=None):
+    """elestock 응답 → 최근 N일 보고 [{date, reporter, position, delta}]."""
+    if not js or js.get("status") not in ("000", None):
+        return []
+    try:
+        base = datetime.strptime(today, "%Y-%m-%d") if today else datetime.now(KST).replace(tzinfo=None)
+    except Exception:
+        base = datetime.now(KST).replace(tzinfo=None)
+    out = []
+    for row in js.get("list") or []:
+        dt = (row.get("rcept_dt") or "").replace(".", "-").strip()
+        try:
+            d = datetime.strptime(dt, "%Y-%m-%d")
+        except Exception:
+            continue
+        if (base - d).days > days:
+            continue
+        delta = to_num(str(row.get("sp_stock_lmp_irds_cnt", "")).replace(",", ""))
+        if delta is None or delta == 0:
+            continue
+        pos = (row.get("isu_exctv_ofcps") or "").strip() or               (row.get("isu_main_shrholdr") or "").strip() or "주요주주"
+        out.append({"date": dt, "reporter": (row.get("repror") or "").strip(),
+                    "position": pos, "delta": delta})
+    return out
+
+
+def aggregate_insider(reports, price):
+    """보고 목록 → 집계 {buys, sells, net_shares, net_amt_100m, people}."""
+    if not reports:
+        return None
+    buys = [r for r in reports if r["delta"] > 0]
+    sells = [r for r in reports if r["delta"] < 0]
+    net = sum(r["delta"] for r in reports)
+    people = []
+    for r in sorted(reports, key=lambda x: -abs(x["delta"]))[:3]:
+        sign = "+" if r["delta"] > 0 else ""
+        people.append(f"{r['reporter']}({r['position']}) {sign}{r['delta']:,.0f}주")
+    return {"buys": len(buys), "sells": len(sells),
+            "net_shares": net,
+            "net_amt_100m": round(net * (price or 0) / 1e8, 1),
+            "people": people}
+
+
+def build_insider_trades(stocks, api_key, disclosures, today=None,
+                         fetch_codes=None, fetch_stock=None):
+    """내부자 보고가 뜬 회사만 상세 조회 → 방향·금액 집계 (K1 풀버전).
+    키가 없거나 실패하면 [] (경량판 insider_watch가 대신 표시됨)."""
+    if not api_key:
+        return []
+    fetch_codes = fetch_codes or fetch_corp_codes
+    fetch_stock = fetch_stock or fetch_elestock
+    tags = {"내부자 지분변동", "5%룰 보고"}
+    names = {d.get("company") for d in disclosures or [] if d.get("tag") in tags}
+    targets = [s for s in stocks if s.get("name") in names][:40]
+    if not targets:
+        return []
+    try:
+        cmap = fetch_codes(api_key, [s["code"] for s in targets])
+    except Exception as e:
+        print(f"  내부자: corp_code 매핑 실패 ({e}) - 경량판만 표시")
+        return []
+    out = []
+    for s in targets:
+        cc = cmap.get(s["code"])
+        if not cc:
+            continue
+        try:
+            reports = parse_elestock(fetch_stock(api_key, cc), today=today)
+            agg = aggregate_insider(reports, s.get("price"))
+            if agg and (agg["buys"] or agg["sells"]):
+                out.append({"code": s["code"], "name": s["name"],
+                            "price": s.get("price"), "change_pct": s.get("change_pct"),
+                            "mktcap_100m": s.get("mktcap_100m"), **agg})
+        except Exception as e:
+            print(f"  내부자 {s['name']}: {e}")
+        time.sleep(REQUEST_DELAY)
+    out.sort(key=lambda x: -abs(x["net_amt_100m"]))
+    return out[:15]
+
 
 # 조건 검색 5종 임계값 (전부 여기서 튜닝)
 CONFIG_SCREENS = {
@@ -1687,7 +1810,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              market_date=None, performance=None, kospi_trend=None,
              sentiment_enabled=False, perf_curve=None, scan_review=None,
              strategies=None, strategy_race=None, silence=None, news_compass=None,
-             insider_watch=None, graduates=None, screens=None):
+             insider_watch=None, graduates=None, screens=None, insider_trades=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -1734,6 +1857,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "insider_watch": insider_watch or [],
         "graduates": graduates or [],
         "screens": screens or {},
+        "insider_trades": insider_trades or [],
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1842,6 +1966,10 @@ def run_full(max_universe=None, out_path=None):
     insider_watch = build_insider_watch(disclosures)
     if insider_watch:
         print(f"  → 내부자 신고 몰림 {len(insider_watch)}곳")
+    insider_trades = build_insider_trades(stocks, api_key, disclosures,
+                                          today=market_date)
+    if insider_trades:
+        print(f"  → 내부자 매매 방향 판별 {len(insider_trades)}곳")
     graduates = build_graduates(hist_dir, stocks,
                                 {s["code"] for s in ideas}, market_date)
     screens = build_screens(stocks, hist_dir, market_date)
@@ -1858,7 +1986,7 @@ def run_full(max_universe=None, out_path=None):
                     strategies=strategies, strategy_race=strategy_race,
                     silence=silence, news_compass=news_compass,
                     insider_watch=insider_watch, graduates=graduates,
-                    screens=screens)
+                    screens=screens, insider_trades=insider_trades)
 
 
 def main():

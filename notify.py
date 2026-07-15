@@ -281,10 +281,21 @@ def build_message(data):
         more = f" 외 {len(neg)-3}건" if len(neg) > 3 else ""
         lines.append(f"🔴 악재성 공시: {head}{more}")
 
-    iw = data.get("insider_watch") or []
-    if iw:
-        head = " · ".join(f"{e(x['company'])}({x['count']}건)" for x in iw[:4])
-        lines.append(f"👤 내부자·대주주 신고 몰림: {head} · 매수/매도 방향은 공시 원문 확인")
+    it = data.get("insider_trades") or []
+    if it:
+        buys = [x for x in it if x["net_amt_100m"] > 0][:3]
+        sells = [x for x in it if x["net_amt_100m"] < 0][:2]
+        if buys:
+            head = " · ".join(f"<b>{e(x['name'])}</b>(+{x['net_amt_100m']}억)" for x in buys)
+            lines.append(f"👤 내부자 매수 우세: {head}")
+        if sells:
+            head = " · ".join(f"{e(x['name'])}({x['net_amt_100m']}억)" for x in sells)
+            lines.append(f"👤 내부자 매도 우세: {head}")
+    else:
+        iw = data.get("insider_watch") or []
+        if iw:
+            head = " · ".join(f"{e(x['company'])}({x['count']}건)" for x in iw[:4])
+            lines.append(f"👤 내부자·대주주 신고 몰림: {head} · 매수/매도 방향은 공시 원문 확인")
 
     if pos or neg:
         lines.append("")

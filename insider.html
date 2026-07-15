@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>내부자 매매 트래커</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="임원·주요주주의 실제 매수/매도를 추적 — 아이디어 대시보드의 내부자 특화 페이지">
+<meta name="theme-color" content="#0b0b0b">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --ring:rgba(11,11,11,.10);
+  --series-1:#2a78d6; --series-1-deep:#1c5cab;
+  --up:#c93a3a; --down:#256abf;
+  --chip-bg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --series-1:#3987e5; --series-1-deep:#6da7ec;
+    --up:#e66767; --down:#3987e5;
+    --chip-bg:#262624;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top h1{font-size:20px;font-weight:700;margin:0}
+.stamp{color:var(--ink-3);font-size:12.5px}
+a.backlink{font-size:12.5px;color:var(--series-1-deep);text-decoration:none;margin-left:auto}
+section{margin:26px 0}
+h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
+.sub{font-size:12.5px;color:var(--ink-3);margin:0 0 12px}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.card{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:14px 15px}
+.card.buy{border-left:3px solid var(--up)}
+.card.sell{border-left:3px solid var(--down)}
+.card .row1{display:flex;align-items:baseline;gap:8px}
+.card .nm{font-size:16px;font-weight:700}
+.card .cd{font-size:11.5px;color:var(--ink-3)}
+.card .px{margin-left:auto;font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.amt{font-size:22px;font-weight:800;margin:6px 0 2px}
+.amt span{font-size:12px;font-weight:600;color:var(--ink-3)}
+.people{font-size:12.5px;color:var(--ink-2);line-height:1.8;margin-top:6px}
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.tag{font-size:11.5px;color:var(--ink-2);background:var(--chip-bg);border-radius:5px;padding:2px 8px}
+.tag a{color:inherit;text-decoration:none}
+.bars{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:16px;margin-bottom:12px}
+.bars h3{font-size:13.5px;font-weight:700;margin:0 0 8px;color:var(--ink-2)}
+.empty{color:var(--ink-3);font-size:13px;padding:22px;text-align:center;
+  background:var(--surface-1);border:1px solid var(--ring);border-radius:12px}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
+  font-size:11.5px;color:var(--ink-3);line-height:1.7}
+@media (max-width:520px){
+  body{font-size:14px}
+  .wrap{padding:10px 10px 50px}
+  header.top h1{font-size:17px}
+  .cards{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>👤 내부자 매매 트래커</h1>
+    <span class="stamp" id="stamp">불러오는 중…</span>
+    <a class="backlink" href="index.html">← 메인 대시보드</a>
+  </header>
+
+  <div class="bars" style="font-size:13px;line-height:1.8">
+    <h3>이 도구가 보는 것</h3>
+    회사 내부 사정을 가장 잘 아는 <b>임원·주요주주가 자기 돈으로 자사 주식을 사고 파는 기록</b>(전자공시 의무보고)을
+    추적합니다. 내부자 매수는 학계에서도 검증된 주가 선행 신호 중 하나입니다.
+    다만 매도는 세금·상속 등 다양한 이유가 있어 매수 신호보다 해석에 주의가 필요합니다.
+  </div>
+
+  <section id="buys">
+    <h2>🟢 내부자 매수 우세</h2>
+    <p class="sub">최근 14일 보고 기준 · 금액은 현재가 환산 근사치</p>
+    <div class="cards" id="buyCards"></div>
+  </section>
+
+  <section id="sells">
+    <h2>🔵 내부자 매도 우세</h2>
+    <p class="sub">매도는 개인 사정일 수 있으니 참고 신호로만</p>
+    <div class="cards" id="sellCards"></div>
+  </section>
+
+  <footer>
+    자료: 금융감독원 전자공시(DART) 임원·주요주주 소유상황보고 · 보고 시점과 실제 매매 시점은 차이가 있을 수 있습니다.<br>
+    투자 참고 자료이며 매수·매도 추천이 아닙니다. · <a href="index.html" style="color:var(--series-1-deep)">메인 대시보드로</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = v => v==null ? "-" : Math.round(v).toLocaleString("ko-KR");
+
+function card(x, kind){
+  const amt = x.net_amt_100m;
+  const sign = amt > 0 ? "+" : "";
+  return `<div class="card ${kind}">
+    <div class="row1"><span class="nm">${esc(x.name)}</span><span class="cd">${x.code}</span>
+      <span class="px">${fmt(x.price)}<span class="${x.change_pct>0?"up":x.change_pct<0?"down":"flat"}" style="font-size:11.5px"> ${x.change_pct>0?"▲":x.change_pct<0?"▼":""}${Math.abs(x.change_pct||0).toFixed(2)}%</span></span></div>
+    <div class="amt ${amt>0?"up":"down"}">${sign}${amt}억 <span>순${amt>0?"매수":"매도"} · 매수 ${x.buys}건 / 매도 ${x.sells}건</span></div>
+    <div class="people">${(x.people||[]).map(esc).join("<br>")}</div>
+    <div class="tags">
+      <span class="tag"><a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${x.code}">차트</a></span>
+      <span class="tag"><a target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(x.name)}">공시 원문</a></span>
+    </div>
+  </div>`;
+}
+
+fetch("data.json?t="+Date.now())
+  .then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d=>{
+    document.getElementById("stamp").textContent =
+      (d.market_date||"").replace(/-/g,".") + " 기준" + (d.sample ? " · 샘플" : "");
+    const it = d.insider_trades || [];
+    const buys = it.filter(x=>x.net_amt_100m > 0);
+    const sells = it.filter(x=>x.net_amt_100m < 0);
+    document.getElementById("buyCards").innerHTML =
+      buys.length ? buys.map(x=>card(x,"buy")).join("")
+      : '<div class="empty">최근 14일 내 내부자 매수 우세 종목이 없습니다.' +
+        (it.length===0 ? '<br><span style="font-size:11.5px">이 페이지는 DART 키 등록 후 저녁 수집부터 채워집니다.</span>' : '') + '</div>';
+    document.getElementById("sellCards").innerHTML =
+      sells.length ? sells.map(x=>card(x,"sell")).join("")
+      : '<div class="empty">매도 우세 종목이 없습니다.</div>';
+  })
+  .catch(err=>{
+    document.getElementById("stamp").textContent = "데이터를 불러오지 못했습니다 ("+esc(err.message)+")";
+  });
+</script>
+</body>
+</html>
