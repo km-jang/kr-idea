@@ -224,6 +224,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--pulse", action="store_true", help="장중 시황 요약만 발송 (기록 없음)")
+    ap.add_argument("--if-not-sent", action="store_true",
+                    help="오늘 이미 발송했으면 조용히 종료 (예비 알람용)")
     ap.add_argument("--data", default=str(DATA_PATH))
     args = ap.parse_args()
 
@@ -248,6 +250,14 @@ def main():
         return
 
     if args.pulse:
+        try:
+            sys.path.insert(0, str(ROOT))
+            import notify
+        except Exception:
+            notify = None
+        if args.if_not_sent and notify and notify.already_sent("pulse"):
+            print("오늘 점심 맥박 발송 기록 있음 - 예비 조용히 종료")
+            return
         msg = build_pulse_message(data, quotes)
         print("[2/2] 장중 시황 요약")
         if args.dry_run:
@@ -255,6 +265,8 @@ def main():
             return
         if not send_telegram(msg):
             sys.exit(1)
+        if notify:
+            notify.mark_sent("pulse")
         return
 
     cands = scan_candidates(universe, quotes)

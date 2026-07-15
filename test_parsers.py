@@ -284,11 +284,32 @@ def test_validate_missing_fundamentals():
 
 
 def test_holiday_skip():
-    prev = {"sample": False, "market_date": "2026-07-10"}
-    assert collect.is_holiday_rerun(prev, "2026-07-10") is True    # 같은 장 기준일 → 스킵
-    assert collect.is_holiday_rerun(prev, "2026-07-11") is False   # 새 거래일 → 진행
-    assert collect.is_holiday_rerun(None, "2026-07-10") is False   # 이전 데이터 없음 → 진행
-    assert collect.is_holiday_rerun(prev, None) is False           # 기준일 미확인 → 진행(안전)
+    from datetime import datetime
+    evening = datetime(2026, 7, 10, 19, 10)
+    prev = {"sample": False, "market_date": "2026-07-10",
+            "generated_at": "2026-07-10 19:05 KST"}   # 마감 후 정상 수집분
+    assert collect.is_holiday_rerun(prev, "2026-07-10", now=evening) is True   # 같은 기준일 → 스킵
+    assert collect.is_holiday_rerun(prev, "2026-07-11", now=evening) is False  # 새 거래일 → 진행
+    assert collect.is_holiday_rerun(None, "2026-07-10", now=evening) is False  # 이전 없음 → 진행
+    assert collect.is_holiday_rerun(prev, None, now=evening) is False          # 기준일 미확인 → 진행
+    # 생성 시각 없는 구버전 데이터 → 기존 동작(스킵) 유지
+    assert collect.is_holiday_rerun({"market_date": "2026-07-10"}, "2026-07-10",
+                                    now=evening) is True
+
+
+def test_intraday_snapshot_overwrite():
+    """아침 수동 실행(장중 스냅샷)이 저녁 정기 수집을 막지 않아야 한다 (2026-07-15 실장애)."""
+    from datetime import datetime
+    snap = {"market_date": "2026-07-14", "generated_at": "2026-07-14 09:01 KST"}
+    evening = datetime(2026, 7, 14, 19, 10)
+    midday = datetime(2026, 7, 14, 11, 0)
+    # 장중 스냅샷 + 마감 후 → 재수집 허용 (덮어쓰기)
+    assert collect.is_holiday_rerun(snap, "2026-07-14", now=evening) is False
+    # 장중 스냅샷 + 아직 장중 → 중복 실행 방지 (스킵)
+    assert collect.is_holiday_rerun(snap, "2026-07-14", now=midday) is True
+    # 마감 후 수집분 + 마감 후 재실행(진짜 휴장일 패턴) → 스킵
+    done = {"market_date": "2026-07-14", "generated_at": "2026-07-14 19:20 KST"}
+    assert collect.is_holiday_rerun(done, "2026-07-14", now=evening) is True
 
 
 def test_load_previous(tmp_path=None):
