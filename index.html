@@ -265,6 +265,7 @@ table.slim{min-width:0}
     <span id="hdot" style="display:none;width:8px;height:8px;border-radius:50%;flex:0 0 auto"></span>
     <span class="stamp" id="stamp">불러오는 중…</span>
     <span class="badge-sample" id="sampleBadge" style="display:none">샘플 데이터</span>
+    <a href="dividend.html" style="font-size:12px;color:var(--series-1-deep);text-decoration:none;font-weight:600">💵 배당 공장</a>
     <select id="histSel" title="과거 날짜의 대시보드 보기" style="margin-left:auto;font-size:12px;
       padding:4px 8px;border:1px solid var(--ring);border-radius:8px;
       background:var(--surface-1);color:var(--ink-2);font-family:inherit"></select>
@@ -281,6 +282,7 @@ table.slim{min-width:0}
 
   <nav class="chips">
     <a href="#port">포트폴리오</a>
+    <a href="#paper">모의 투자</a>
     <a href="#watch">관심종목</a>
     <a href="#ideas">오늘의 아이디어</a>
     <a href="#compass">뉴스 나침반</a>
@@ -323,6 +325,47 @@ table.slim{min-width:0}
       </div>
     </div>
   </section>
+  <section id="paper">
+    <h2>🎮 모의 투자</h2>
+    <p class="sub">가상 자금으로 연습하는 계좌 · 체결가는 <b>가장 최근 수집 가격(종가 기준)</b> ·
+      수수료 0.015%, 매도 시 세금 포함 0.215% 근사 차감 · 이 브라우저에만 저장</p>
+    <div id="paperStart" style="display:none" class="bars">
+      <div style="font-size:13.5px;margin-bottom:10px">가상 계좌를 만들어 연습을 시작하세요. 돈은 진짜가 아니지만 판단은 진짜입니다.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <select id="paperInit" style="padding:8px 12px;font-size:14px;border:1px solid var(--ring);
+          border-radius:8px;background:var(--surface-1);color:var(--ink-1);font-family:inherit">
+          <option value="10000000">1,000만원으로 시작</option>
+          <option value="5000000">500만원으로 시작</option>
+          <option value="30000000">3,000만원으로 시작</option>
+        </select>
+        <button id="paperCreate" class="slreset" style="margin-left:0">계좌 개설</button>
+      </div>
+    </div>
+    <div id="paperBody" style="display:none">
+      <div class="tiles" id="paperTiles"></div>
+      <div class="sliders" style="margin-top:2px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <input type="search" id="paperSearch" placeholder="종목명 또는 코드" autocomplete="off"
+            style="flex:2;min-width:140px;padding:8px 12px;font-size:14px;border:1px solid var(--ring);
+            border-radius:8px;background:var(--surface-1);color:var(--ink-1);font-family:inherit;outline:none">
+          <input type="number" id="paperQty" placeholder="수량" min="1"
+            style="flex:1;min-width:80px;padding:8px 12px;font-size:14px;border:1px solid var(--ring);
+            border-radius:8px;background:var(--surface-1);color:var(--ink-1);font-family:inherit;outline:none">
+          <button id="paperBuy" class="slreset" style="margin-left:0;color:var(--up)">매수</button>
+          <button id="paperSell" class="slreset" style="margin-left:0;color:var(--down)">매도</button>
+        </div>
+        <div id="paperHint" style="font-size:11.5px;color:var(--ink-3);padding:6px 2px 2px"></div>
+      </div>
+      <div class="tblwrap" id="paperWrap" style="display:none;margin-top:10px"><table id="paperTbl"></table></div>
+      <div id="paperLog" style="margin-top:10px"></div>
+      <div class="slfoot" style="padding-top:8px">
+        <button class="slpreset" id="paperCsv">일지 백업(CSV)</button>
+        <span class="slstate" id="paperNote"></span>
+        <button id="paperReset" class="slreset">계좌 초기화</button>
+      </div>
+    </div>
+  </section>
+
   <section id="watch">
     <h2>⭐ 관심종목</h2>
     <p class="sub">표의 별표(☆)를 눌러 추가·제거 · 이 브라우저에만 저장됩니다</p>
@@ -1189,6 +1232,171 @@ function portSection(d){
   document.getElementById("portHint").textContent = "";
 }
 
+/* ---------- 🎮 모의 투자 (전부 브라우저 안에서, 서버 전송 없음) ---------- */
+const PAPER_KEY = "kr_idea_paper";
+const FEE_BUY = 0.00015, FEE_SELL = 0.00215;   // 수수료·세금 근사
+const getPaper = () => { try { return JSON.parse(localStorage.getItem(PAPER_KEY)); } catch(e){ return null; } };
+const setPaper = a => { try { localStorage.setItem(PAPER_KEY, JSON.stringify(a)); } catch(e){} };
+
+function paperHoldings(acc){
+  // 거래 내역 → 보유 현황 {code:{name, qty, cost}} (평단은 매수 평균)
+  const h = {};
+  for(const t of acc.trades){
+    if(t.side === "b"){
+      const cur = h[t.code] || {name: t.name, qty: 0, cost: 0};
+      cur.qty += t.qty; cur.cost += t.qty * t.px; cur.name = t.name;
+      h[t.code] = cur;
+    } else {
+      const cur = h[t.code];
+      if(cur){
+        cur.cost -= (cur.cost / cur.qty) * t.qty;   // 평단 기준 원가 차감
+        cur.qty -= t.qty;
+        if(cur.qty <= 0) delete h[t.code];
+      }
+    }
+  }
+  return h;
+}
+
+function paperSection(d){
+  const acc = getPaper();
+  const start = document.getElementById("paperStart");
+  const body = document.getElementById("paperBody");
+  if(!acc){ start.style.display = ""; body.style.display = "none"; setBadge("paper",""); return; }
+  start.style.display = "none"; body.style.display = "";
+  const px = {}; allStocks(d).forEach(s=>{ if(s.price) px[s.code] = s; });
+  const hold = paperHoldings(acc);
+  let evalV = 0;
+  const rows = Object.entries(hold).map(([code, h])=>{
+    const cur = px[code] ? px[code].price : (h.cost / h.qty);
+    const val = cur * h.qty; evalV += val;
+    const avg = h.cost / h.qty;
+    return {code, name: h.name, qty: h.qty, avg, cur, val,
+            ret: (cur / avg - 1) * 100, live: !!px[code]};
+  }).sort((a,b)=>b.val-a.val);
+  const total = acc.cash + evalV;
+  const retAll = (total / acc.init - 1) * 100;
+  // KOSPI 대비 (계좌 개설 시점 지수 기준)
+  const kNow = ((d.indices||{}).KOSPI||{}).value;
+  const kRet = (acc.kospi0 && kNow) ? (kNow / acc.kospi0 - 1) * 100 : null;
+  const vsK = kRet == null ? "" :
+    ` <span class="${cls(retAll - kRet)}" style="font-size:12px">(KOSPI 대비 ${retAll-kRet>=0?"+":""}${(retAll-kRet).toFixed(1)}p)</span>`;
+  document.getElementById("paperTiles").innerHTML = `
+    <div class="tile"><div class="lbl">총자산</div><div class="val">${fmt(Math.round(total))}<span style="font-size:13px">원</span></div></div>
+    <div class="tile"><div class="lbl">현금</div><div class="val">${fmt(Math.round(acc.cash))}<span style="font-size:13px">원</span></div></div>
+    <div class="tile"><div class="lbl">수익률</div><div class="val ${cls(retAll)}">${retAll>=0?"+":""}${retAll.toFixed(2)}%</div>${vsK}</div>`;
+  // 보유 테이블
+  const wrap = document.getElementById("paperWrap");
+  if(rows.length){
+    wrap.style.display = "";
+    document.getElementById("paperTbl").innerHTML =
+      "<thead><tr><th style='text-align:left'>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가액</th><th>수익률</th><th></th></tr></thead><tbody>" +
+      rows.map(r=>`<tr>
+        <td style="text-align:left"><span class="nm2 qn" data-c="${r.code}" data-n="${esc(r.name)}">${esc(r.name)}</span>${r.live?"":" <span style='font-size:10px;color:var(--ink-3)'>(시세없음)</span>"}</td>
+        <td>${fmt(r.qty)}</td><td>${fmt(Math.round(r.avg))}</td><td>${fmt(r.cur)}</td>
+        <td>${fmt(Math.round(r.val))}</td>
+        <td class="${cls(r.ret)}">${r.ret>=0?"+":""}${r.ret.toFixed(1)}%</td>
+        <td><button class="slpreset" data-pclose="${r.code}" style="padding:3px 9px">전량매도</button></td></tr>`).join("") +
+      "</tbody>";
+  } else wrap.style.display = "none";
+  // 거래 일지 (최근 8건)
+  const log = document.getElementById("paperLog");
+  const recent = acc.trades.slice(-8).reverse();
+  log.innerHTML = recent.length ? `<div class="bars"><h3>📒 거래 일지 <span style="font-weight:400;color:var(--ink-3)">최근 ${recent.length}건 · 총 ${acc.trades.length}건</span></h3>
+    <div style="font-size:12.5px;line-height:1.9;color:var(--ink-2)">` +
+    recent.map(t=>`${t.date} ${t.side==="b"?'<span class="up">매수</span>':'<span class="down">매도</span>'} `+
+      `<b>${esc(t.name)}</b> ${fmt(t.qty)}주 @${fmt(t.px)}` +
+      (t.pnl!=null?` <span class="${cls(t.pnl)}">(실현 ${t.pnl>=0?"+":""}${fmt(Math.round(t.pnl))}원)</span>`:"")).join("<br>") +
+    `</div></div>` : "";
+  document.getElementById("paperNote").textContent =
+    `개설 ${acc.opened} · 실현손익 누적 ${fmt(Math.round(acc.realized||0))}원`;
+  setBadge("paper", `${retAll>=0?"+":""}${retAll.toFixed(1)}%`, retAll < -5);
+}
+
+function initPaper(d){
+  document.getElementById("paperCreate").onclick = ()=>{
+    const init = +document.getElementById("paperInit").value;
+    setPaper({init, cash: init, trades: [], realized: 0,
+              opened: (d.market_date||"").replace(/-/g,"."),
+              kospi0: ((d.indices||{}).KOSPI||{}).value || null});
+    paperSection(d);
+    toast("가상 계좌 개설 완료 · 5선이나 검색에서 종목을 골라 연습해보세요");
+  };
+  const search = document.getElementById("paperSearch");
+  const hint = document.getElementById("paperHint");
+  let picked = null;
+  search.addEventListener("input", ()=>{
+    const q = search.value.trim().toLowerCase();
+    picked = null;
+    if(!q){ hint.textContent = ""; return; }
+    const hit = allStocks(d).find(s=>s.name.toLowerCase()===q || s.code===q) ||
+                allStocks(d).find(s=>s.name.toLowerCase().includes(q));
+    if(hit && hit.price){
+      picked = hit;
+      const devils = devilNotes(hit.code, d);
+      const warn = devils.length && !devils[0].startsWith("뚜렷한") ? ` · 😈 ${devils[0]}` : "";
+      hint.textContent = `선택: ${hit.name} · 체결 예정가 ${fmt(hit.price)}원${warn}`;
+    } else hint.textContent = "검색 결과 없음";
+  });
+  function trade(side){
+    const acc = getPaper(); if(!acc) return;
+    const qty = +document.getElementById("paperQty").value;
+    if(!picked || !qty || qty < 1){ hint.textContent = "종목과 수량을 입력해주세요"; return; }
+    const pxv = picked.price;
+    const date = (d.market_date||"").replace(/-/g,".");
+    if(side === "b"){
+      const cost = pxv * qty * (1 + FEE_BUY);
+      if(cost > acc.cash){ hint.textContent = `현금 부족: 필요 ${fmt(Math.round(cost))}원 · 보유 ${fmt(Math.round(acc.cash))}원`; return; }
+      acc.cash -= cost;
+      acc.trades.push({side:"b", code: picked.code, name: picked.name, qty, px: pxv, date});
+      toast(`매수 체결: ${picked.name} ${fmt(qty)}주 @${fmt(pxv)} (수수료 ${fmt(Math.round(pxv*qty*FEE_BUY))}원)`);
+    } else {
+      const hold = paperHoldings(acc)[picked.code];
+      if(!hold || hold.qty < qty){ hint.textContent = `보유 수량 부족 (보유 ${hold?fmt(hold.qty):0}주)`; return; }
+      const avg = hold.cost / hold.qty;
+      const proceeds = pxv * qty * (1 - FEE_SELL);
+      const pnl = proceeds - avg * qty;
+      acc.cash += proceeds;
+      acc.realized = (acc.realized||0) + pnl;
+      acc.trades.push({side:"s", code: picked.code, name: picked.name, qty, px: pxv, date, pnl});
+      toast(`매도 체결: ${picked.name} ${fmt(qty)}주 @${fmt(pxv)} · 실현 ${pnl>=0?"+":""}${fmt(Math.round(pnl))}원`);
+    }
+    setPaper(acc); paperSection(d);
+  }
+  document.getElementById("paperBuy").onclick = ()=>trade("b");
+  document.getElementById("paperSell").onclick = ()=>trade("s");
+  document.getElementById("paperBody").addEventListener("click", e=>{
+    const btn = e.target.closest("[data-pclose]");
+    if(!btn) return;
+    const acc = getPaper(); if(!acc) return;
+    const code = btn.dataset.pclose;
+    const hold = paperHoldings(acc)[code]; if(!hold) return;
+    const s = allStocks(d).find(x=>x.code===code);
+    const pxv = s && s.price ? s.price : hold.cost / hold.qty;
+    const avg = hold.cost / hold.qty;
+    const proceeds = pxv * hold.qty * (1 - FEE_SELL);
+    const pnl = proceeds - avg * hold.qty;
+    acc.cash += proceeds; acc.realized = (acc.realized||0) + pnl;
+    acc.trades.push({side:"s", code, name: hold.name, qty: hold.qty, px: pxv,
+                     date: (d.market_date||"").replace(/-/g,"."), pnl});
+    setPaper(acc); paperSection(d);
+    toast(`전량 매도: ${hold.name} · 실현 ${pnl>=0?"+":""}${fmt(Math.round(pnl))}원`);
+  });
+  document.getElementById("paperReset").onclick = ()=>{
+    if(!confirm("모의 계좌를 초기화할까요? 거래 기록이 모두 사라집니다.")) return;
+    localStorage.removeItem(PAPER_KEY); paperSection(d);
+  };
+  document.getElementById("paperCsv").onclick = ()=>{
+    const acc = getPaper(); if(!acc || !acc.trades.length) return;
+    const rows = acc.trades.map(t=>`${t.date},${t.side==="b"?"매수":"매도"},${t.code},${t.name},${t.qty},${t.px},${t.pnl!=null?Math.round(t.pnl):""}`).join("\n");
+    const blob = new Blob(["\ufeff날짜,구분,코드,종목명,수량,체결가,실현손익\n"+rows], {type:"text/csv;charset=utf-8"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "모의투자일지.csv"; a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  paperSection(d);
+}
+
 function initPort(d){
   const search = document.getElementById("portSearch");
   const hint = document.getElementById("portHint");
@@ -1571,7 +1779,7 @@ function renderAll(d, isHistory){
   screensBox(d); brief3(d); sectionBadges(d);
   if(!isHistory){
     TODAY_DATA = d;
-    initSliders(d); initSearch(d); initHistory(d); initPort(d);
+    initSliders(d); initSearch(d); initHistory(d); initPort(d); initPaper(d);
   } else {
     ideaCards(d);   // 과거 보기에선 슬라이더 미적용 원본 5선
   }

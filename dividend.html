@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>배당 월급 공장</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="국내 배당주 5선·랭킹·월배당 플래너 — 아이디어 대시보드의 배당 특화 페이지">
+<meta name="theme-color" content="#0b0b0b">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --ring:rgba(11,11,11,.10);
+  --series-1:#2a78d6; --series-1-deep:#1c5cab;
+  --up:#c93a3a; --down:#256abf;
+  --chip-bg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --series-1:#3987e5; --series-1-deep:#6da7ec;
+    --up:#e66767; --down:#3987e5;
+    --chip-bg:#262624;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top h1{font-size:20px;font-weight:700;margin:0}
+.stamp{color:var(--ink-3);font-size:12.5px}
+a.backlink{font-size:12.5px;color:var(--series-1-deep);text-decoration:none;margin-left:auto}
+section{margin:26px 0}
+h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
+.sub{font-size:12.5px;color:var(--ink-3);margin:0 0 12px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
+.tile{background:var(--surface-1);border:1px solid var(--ring);border-radius:10px;padding:12px 14px}
+.tile .lbl{font-size:12px;color:var(--ink-3);margin-bottom:2px}
+.tile .val{font-size:22px;font-weight:700;letter-spacing:-.01em}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.card{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:14px 15px}
+.card .row1{display:flex;align-items:baseline;gap:8px}
+.card .rank{font-size:12px;font-weight:800;color:var(--series-1-deep)}
+.card .nm{font-size:16px;font-weight:700}
+.card .cd{font-size:11.5px;color:var(--ink-3)}
+.card .px{margin-left:auto;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.tag{font-size:11.5px;color:var(--ink-2);background:var(--chip-bg);border-radius:5px;padding:2px 8px}
+.dvr-big{font-size:26px;font-weight:800;color:var(--up);margin:6px 0 0}
+.dvr-big span{font-size:12px;font-weight:600;color:var(--ink-3)}
+.tblwrap{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+th,td{padding:8px 10px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+thead th{font-size:11.5px;color:var(--ink-3);font-weight:600;border-bottom:1px solid var(--grid);cursor:pointer}
+tbody td{border-bottom:1px solid var(--grid)}
+tbody tr:last-child td{border-bottom:none}
+td .nm2{font-weight:600}
+td .cd2{font-size:10.5px;color:var(--ink-3);margin-left:5px}
+.bars{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:16px 16px 12px;margin-bottom:12px}
+.bars h3{font-size:13.5px;font-weight:700;margin:0 0 10px;color:var(--ink-2)}
+input,select{padding:8px 12px;font-size:14px;border:1px solid var(--ring);border-radius:8px;
+  background:var(--surface-1);color:var(--ink-1);font-family:inherit;outline:none}
+button{font-size:12px;color:var(--ink-2);background:var(--chip-bg);border:none;border-radius:6px;
+  padding:6px 12px;cursor:pointer;font-family:inherit}
+button:hover{color:var(--ink-1)}
+.empty{color:var(--ink-3);font-size:13px;padding:14px;text-align:center}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
+  font-size:11.5px;color:var(--ink-3);line-height:1.7}
+@media (max-width:520px){
+  body{font-size:14px}
+  .wrap{padding:10px 10px 50px}
+  header.top h1{font-size:17px}
+  .tiles{grid-template-columns:repeat(2,1fr);gap:8px}
+  .tile .val{font-size:18px}
+  .cards{grid-template-columns:1fr}
+  table{font-size:12px}
+  th,td{padding:6px 8px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>💵 배당 월급 공장</h1>
+    <span class="stamp" id="stamp">불러오는 중…</span>
+    <a class="backlink" href="index.html">← 메인 대시보드</a>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section id="picks">
+    <h2>이번 주 배당주 5선</h2>
+    <p class="sub">배당수익률(50) + 수급(20) + 저평가(20) + 안정성(10) 종합 · 시총 3,000억↑ · 배당률 2.5%↑ · 악재 공시 제외</p>
+    <div class="cards" id="pickCards"></div>
+  </section>
+
+  <section id="planner">
+    <h2>월배당 플래너</h2>
+    <p class="sub">"이 종목에 얼마 넣으면 배당이 얼마?"를 계산 · <b>이 브라우저에만 저장</b> ·
+      연간 배당 기준(지급 월은 종목마다 달라 연 환산 ÷ 12로 근사)</p>
+    <div class="bars">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <input type="search" id="plSearch" placeholder="종목명 또는 코드" autocomplete="off" style="flex:2;min-width:140px">
+        <input type="number" id="plAmt" placeholder="투자금(만원)" min="1" style="flex:1;min-width:110px">
+        <button id="plAdd">담기</button>
+      </div>
+      <div id="plHint" style="font-size:11.5px;color:var(--ink-3);padding:6px 2px 2px"></div>
+      <div id="plList" style="margin-top:10px"></div>
+      <div id="plSum" style="margin-top:8px;font-size:14px"></div>
+    </div>
+  </section>
+
+  <section id="ranking">
+    <h2>배당 랭킹 <span style="font-size:11.5px;font-weight:400;color:var(--ink-3)">열 제목 클릭 시 정렬</span></h2>
+    <p class="sub">배당수익률 2% 이상 · 시총 1,000억 이상 (배당은 확정치가 아닌 최근 기준 수익률입니다)</p>
+    <div class="tblwrap"><table id="rankTbl"></table></div>
+  </section>
+
+  <section id="notices">
+    <h2>최근 배당 공시</h2>
+    <p class="sub">현금·현물배당 결정 공시 (수집된 기간 내)</p>
+    <div id="noticeList" class="bars"><div class="empty">배당 공시가 없습니다.</div></div>
+  </section>
+
+  <footer>
+    배당수익률은 네이버 증권 기준의 최근 값으로, 기업의 배당 정책 변경에 따라 달라질 수 있습니다.<br>
+    투자 참고 자료이며 매수·매도 추천이 아닙니다. · <a href="index.html" style="color:var(--series-1-deep)">메인 대시보드로</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = v => v==null ? "-" : Math.round(v).toLocaleString("ko-KR");
+const cls = v => v>0 ? "up" : v<0 ? "down" : "flat";
+let DATA = null;
+
+const allStocks = d => (d.all_stocks||[]).filter(s=>s.price);
+
+/* ---------- 배당 점수 & 5선 ---------- */
+function divUniverse(d){
+  return allStocks(d).filter(s=>(s.dvr||0) >= 2.0 && (s.mktcap_100m||0) >= 1000);
+}
+function pct(sorted, v){
+  if(!sorted.length) return 0;
+  let i = 0; while(i < sorted.length && sorted[i] < v) i++;
+  return i / sorted.length;
+}
+function divPicks(d){
+  const uni = divUniverse(d).filter(s =>
+    (s.mktcap_100m||0) >= 3000 && (s.dvr||0) >= 2.5 && (s.disc_score||0) >= 0 &&
+    (s.volume ? s.price*s.volume/1e8 >= 30 : true));   // 거래량 정보 없으면 통과 (구버전 호환)
+  const dvrs = uni.map(s=>s.dvr).sort((a,b)=>a-b);
+  const pbrs = uni.filter(s=>s.pbr!=null).map(s=>s.pbr).sort((a,b)=>a-b);
+  return uni.map(s=>{
+    const sc = pct(dvrs, s.dvr) * 50
+      + Math.min((s.flow_score||0)/40, 1) * 20
+      + (s.pbr!=null ? (1 - pct(pbrs, s.pbr)) * 20 : 8)
+      + Math.min((s.mktcap_100m||0)/100000, 1) * 10;
+    return {...s, dscore: Math.round(sc*10)/10};
+  }).sort((a,b)=>b.dscore-a.dscore).slice(0,5);
+}
+
+/* ---------- 렌더 ---------- */
+function render(d){
+  DATA = d;
+  document.getElementById("stamp").textContent =
+    (d.market_date||"").replace(/-/g,".") + " 장 마감 기준" + (d.sample ? " · 샘플" : "");
+  const uni = divUniverse(d);
+  const avg = uni.length ? uni.reduce((a,s)=>a+s.dvr,0)/uni.length : 0;
+  const top = uni.slice().sort((a,b)=>b.dvr-a.dvr)[0];
+  document.getElementById("tiles").innerHTML = `
+    <div class="tile"><div class="lbl">배당주 (2%↑)</div><div class="val">${uni.length}<span style="font-size:13px">종목</span></div></div>
+    <div class="tile"><div class="lbl">평균 배당수익률</div><div class="val">${avg.toFixed(1)}%</div></div>
+    <div class="tile"><div class="lbl">최고 수익률</div><div class="val up">${top?top.dvr.toFixed(1):"-"}%</div>
+      <div style="font-size:11.5px;color:var(--ink-3)">${top?esc(top.name):""}</div></div>`;
+
+  // 5선 카드
+  const picks = divPicks(d);
+  document.getElementById("pickCards").innerHTML = picks.length ? picks.map((s,i)=>`
+    <div class="card">
+      <div class="row1"><span class="rank">${i+1}</span>
+        <span class="nm">${esc(s.name)}</span><span class="cd">${s.code}</span>
+        <span class="px">${fmt(s.price)}<span class="${cls(s.change_pct)}" style="font-size:12px"> ${s.change_pct>0?"▲":s.change_pct<0?"▼":""}${Math.abs(s.change_pct||0).toFixed(2)}%</span></span></div>
+      <div class="dvr-big">${s.dvr.toFixed(1)}% <span>연 배당수익률 · 1,000만원당 연 ${fmt(1000*s.dvr/100)}만원꼴</span></div>
+      <div class="tags">
+        ${s.pbr!=null?`<span class="tag">PBR ${s.pbr.toFixed(2)}</span>`:""}
+        ${(s.f_streak||0)>=3?`<span class="tag">외인 ${s.f_streak}일 연속</span>`:""}
+        ${(s.f_5d_amt_100m||0)>0?`<span class="tag">외인 5일 +${fmt(s.f_5d_amt_100m)}억</span>`:""}
+        <span class="tag">시총 ${fmt((s.mktcap_100m||0)/10000*10)/10}조</span>
+        <span class="tag">종합 ${s.dscore}점</span>
+      </div>
+      <div class="tags">
+        <a class="tag" style="text-decoration:none" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${s.code}">차트</a>
+        <a class="tag" style="text-decoration:none" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${s.code}">뉴스</a>
+      </div>
+    </div>`).join("") : '<div class="empty">조건을 만족하는 배당주가 없습니다.</div>';
+
+  rankTable(d);
+  renderPlan();
+  notices(d);
+}
+
+/* ---------- 랭킹 테이블 (정렬 지원) ---------- */
+let rkey = "dvr", rdir = -1;
+function rankTable(d){
+  const rows = divUniverse(d);
+  const cols = [
+    {k:"name", h:"종목", f:s=>`<span class="nm2">${esc(s.name)}</span><span class="cd2">${s.code}</span>`},
+    {k:"price", h:"현재가", f:s=>fmt(s.price)},
+    {k:"dvr", h:"배당수익률", f:s=>`<b class="up">${s.dvr.toFixed(1)}%</b>`},
+    {k:"pbr", h:"PBR", f:s=>s.pbr==null?"-":s.pbr.toFixed(2)},
+    {k:"per", h:"PER", f:s=>s.per==null?"-":s.per.toFixed(1)},
+    {k:"mktcap_100m", h:"시총(억)", f:s=>fmt(s.mktcap_100m)},
+    {k:"f_5d_amt_100m", h:"외인 5일(억)", f:s=>`<span class="${cls(s.f_5d_amt_100m)}">${fmt(s.f_5d_amt_100m)}</span>`},
+  ];
+  const el = document.getElementById("rankTbl");
+  const sorted = rows.slice().sort((a,b)=>{
+    const x=a[rkey], y=b[rkey];
+    if(x==null) return 1; if(y==null) return -1;
+    return (x<y?-1:x>y?1:0)*rdir;
+  }).slice(0,40);
+  el.innerHTML = "<thead><tr>" + cols.map(c=>
+    `<th data-k="${c.k}">${c.h}${c.k===rkey?(rdir<0?" ↓":" ↑"):""}</th>`).join("") +
+    "</tr></thead><tbody>" +
+    sorted.map(s=>"<tr>"+cols.map(c=>`<td${c.k==="name"?' style="text-align:left"':""}>${c.f(s)}</td>`).join("")+"</tr>").join("") +
+    "</tbody>";
+  el.querySelectorAll("th").forEach(th=>th.onclick=()=>{
+    const k = th.dataset.k;
+    if(k===rkey) rdir=-rdir; else {rkey=k; rdir=-1;}
+    rankTable(DATA);
+  });
+}
+
+/* ---------- 월배당 플래너 (브라우저 저장) ---------- */
+const PLKEY = "kr_div_plan";
+const getPlan = () => { try { return JSON.parse(localStorage.getItem(PLKEY))||[]; } catch(e){ return []; } };
+const setPlan = a => { try { localStorage.setItem(PLKEY, JSON.stringify(a)); } catch(e){} };
+let plPicked = null;
+
+function renderPlan(){
+  const plan = getPlan();
+  const list = document.getElementById("plList");
+  const sum = document.getElementById("plSum");
+  if(!plan.length){ list.innerHTML=""; sum.innerHTML=""; return; }
+  const px = {}; allStocks(DATA).forEach(s=>px[s.code]=s);
+  let yearly = 0, total = 0;
+  list.innerHTML = plan.map((p,i)=>{
+    const s = px[p.code];
+    const dvr = s ? (s.dvr||0) : (p.dvr||0);
+    const y = p.amt * 10000 * dvr / 100;
+    yearly += y; total += p.amt;
+    return `<div style="display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;border-bottom:1px solid var(--grid)">
+      <b>${esc(p.name)}</b><span style="color:var(--ink-3)">${fmt(p.amt)}만원 · 배당률 ${dvr.toFixed(1)}%</span>
+      <span style="margin-left:auto">연 ${fmt(y/10000)}만원</span>
+      <button data-pldel="${i}" style="padding:2px 8px">삭제</button></div>`;
+  }).join("");
+  sum.innerHTML = `총 <b>${fmt(total)}만원</b> 투자 시 → 연 배당 <b class="up">${fmt(yearly/10000)}만원</b>
+    · <b>월 평균 ${fmt(yearly/12/10000)}만원</b>
+    <span style="font-size:11.5px;color:var(--ink-3)">(세전 · 배당소득세 15.4% 차감 전)</span>`;
+}
+
+function initPlanner(){
+  const search = document.getElementById("plSearch");
+  const hint = document.getElementById("plHint");
+  search.addEventListener("input", ()=>{
+    const q = search.value.trim().toLowerCase();
+    plPicked = null;
+    if(!q){ hint.textContent=""; return; }
+    const hit = allStocks(DATA).find(s=>s.name.toLowerCase()===q || s.code===q) ||
+                allStocks(DATA).find(s=>s.name.toLowerCase().includes(q));
+    if(hit && (hit.dvr||0) > 0){
+      plPicked = hit;
+      hint.textContent = `선택: ${hit.name} · 배당수익률 ${hit.dvr.toFixed(1)}%`;
+    } else if(hit){
+      hint.textContent = `${hit.name}은(는) 배당 정보가 없습니다`;
+    } else hint.textContent = "검색 결과 없음";
+  });
+  document.getElementById("plAdd").addEventListener("click", ()=>{
+    const amt = +document.getElementById("plAmt").value;
+    if(!plPicked || !amt){ hint.textContent = "종목과 투자금(만원)을 입력해주세요"; return; }
+    const plan = getPlan();
+    const ex = plan.find(p=>p.code===plPicked.code);
+    if(ex) ex.amt += amt;
+    else plan.push({code: plPicked.code, name: plPicked.name, amt, dvr: plPicked.dvr});
+    setPlan(plan); renderPlan();
+    search.value=""; document.getElementById("plAmt").value=""; hint.textContent="";
+  });
+  document.getElementById("plList").addEventListener("click", e=>{
+    const del = e.target.closest("[data-pldel]");
+    if(!del) return;
+    const plan = getPlan(); plan.splice(+del.dataset.pldel, 1);
+    setPlan(plan); renderPlan();
+  });
+}
+
+/* ---------- 배당 공시 ---------- */
+function notices(d){
+  const hits = (d.disclosures||[]).filter(x=>(x.tag||"").includes("배당"));
+  const el = document.getElementById("noticeList");
+  if(!hits.length){ el.innerHTML = '<div class="empty">최근 수집된 배당 공시가 없습니다.</div>'; return; }
+  el.innerHTML = `<div style="font-size:13px;line-height:2">` + hits.map(x=>
+    `· <b>${esc(x.company)}</b> ${esc(x.title)} <span style="color:var(--ink-3);font-size:11.5px">${esc(x.time||"")}</span>`
+  ).join("<br>") + `</div>`;
+}
+
+fetch("data.json?t="+Date.now())
+  .then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d=>{ render(d); initPlanner(); })
+  .catch(err=>{
+    document.getElementById("stamp").textContent = "데이터를 불러오지 못했습니다 ("+esc(err.message)+")";
+  });
+</script>
+</body>
+</html>
