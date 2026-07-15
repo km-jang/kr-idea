@@ -1184,6 +1184,55 @@ def test_insider_trades_briefing():
     assert "신고 몰림" in msg2 and "매수 우세" not in msg2
 
 
+def test_build_mines():
+    """지뢰탐지기: 위험 공시 누적 + 시장 신호 합산, 무고한 종목 제외."""
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as td:
+        # 이력: 이틀에 걸쳐 유상증자 2회 + CB 1회
+        Path(td, "2026-07-10.json").write_text(json.dumps({"disclosures": [
+            {"company": "위험회사", "tag": "유상증자"},
+            {"company": "위험회사", "tag": "CB 발행"}]}, ensure_ascii=False), encoding="utf-8")
+        Path(td, "2026-07-14.json").write_text(json.dumps({"disclosures": [
+            {"company": "위험회사", "tag": "유상증자"}]}, ensure_ascii=False), encoding="utf-8")
+        stocks = [
+            {"code": "BAD001", "name": "위험회사", "price": 3000, "change_pct": -2.0,
+             "near_52w_pct": 45, "per": None, "dvr": 0, "volume": 100_000},
+            {"code": "OK0001", "name": "건실회사", "price": 50000, "change_pct": 0.5,
+             "near_52w_pct": 92, "per": 10.0, "dvr": 3.0, "volume": 2_000_000},
+        ]
+        today = [{"company": "위험회사", "tag": "소송 제기"}]
+        mines = collect.build_mines(stocks, td, today)
+        assert len(mines) == 1 and mines[0]["code"] == "BAD001"
+        m = mines[0]
+        # 유상증자 15×2 + CB 12 + 소송 12 + 추세붕괴 10 + 적자무배당 8 + 저유동성 5
+        assert m["score"] >= 60, m
+        joined = " ".join(m["reasons"])
+        assert "유상증자 2회" in joined and "52주 고점" in joined
+
+
+def test_mine_message_lines():
+    """저녁 요약 지뢰 라인: 감지 시 표시 + 관심종목 겹침 강조."""
+    import notify
+    data = {"mines": [{"code": "035720", "name": "카카오", "score": 35,
+                       "reasons": ["유상증자"]},
+                      {"code": "900001", "name": "샘플바이오", "score": 25,
+                       "reasons": ["CB 발행"]}]}
+    orig = notify.WATCHLIST_PATH
+    import tempfile, os
+    fd, p = tempfile.mkstemp(suffix=".txt")
+    os.write(fd, "035720  # 카카오\n".encode()); os.close(fd)
+    notify.WATCHLIST_PATH = notify.Path(p)
+    try:
+        out = "\n".join(notify.mine_lines(data))
+        assert "위험 신호 누적" in out and "카카오" in out
+        assert "관심종목 중 지뢰 감지" in out
+        assert notify.mine_lines({"mines": []}) == []
+    finally:
+        notify.WATCHLIST_PATH = orig
+        os.unlink(p)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

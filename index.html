@@ -267,6 +267,7 @@ table.slim{min-width:0}
     <span class="badge-sample" id="sampleBadge" style="display:none">샘플 데이터</span>
     <a href="dividend.html" style="font-size:12px;color:var(--series-1-deep);text-decoration:none;font-weight:600">💵 배당 공장</a>
     <a href="insider.html" style="font-size:12px;color:var(--series-1-deep);text-decoration:none;font-weight:600">👤 내부자</a>
+    <a href="mine.html" style="font-size:12px;color:var(--series-1-deep);text-decoration:none;font-weight:600">💣 지뢰</a>
     <select id="histSel" title="과거 날짜의 대시보드 보기" style="margin-left:auto;font-size:12px;
       padding:4px 8px;border:1px solid var(--ring);border-radius:8px;
       background:var(--surface-1);color:var(--ink-2);font-family:inherit"></select>
@@ -1220,6 +1221,11 @@ function portSection(d){
     secFlow[s.sector]=(secFlow[s.sector]||0)+s.f_5d_amt_100m; });
   Object.keys(bySec).forEach(k=>{ if((secFlow[k]||0) < -500)
     notes.push(`📉 보유 업종 <b>${esc(k)}</b>에서 외국인 자금 이탈 중 (5일 ${fmt(Math.round(secFlow[k]))}억)`); });
+  // 지뢰 교차: 보유 종목이 위험 신호 누적 목록에 있으면 최우선 경고
+  (d.mines||[]).forEach(m=>{
+    if(rows.some(h=>h.code===m.code))
+      notes.unshift(`💣 <b>${esc(m.name)}</b> 위험 신호 ${m.score}점 — ${esc((m.reasons||[])[0]||"")} · <a href="mine.html" style="color:inherit">지뢰탐지기</a>`);
+  });
   // 백업 리마인더: 보유 종목이 있는데 30일 넘게 백업(CSV)을 안 눌렀으면
   try{
     const lastBk = +localStorage.getItem("kr_idea_last_backup") || 0;
@@ -1768,7 +1774,7 @@ function healthDot(d){
 }
 
 function renderAll(d, isHistory){
-  DATA = d;
+  DATA = d; window.DATA = d;
   document.getElementById("stamp").textContent =
     (d.market_date ? d.market_date.replace(/-/g,".")+" 장 마감 기준" : "") +
     (d.generated_at ? " · "+d.generated_at.replace(/^\d{4}-\d{2}-\d{2} /,"")+" 수집" : "");
@@ -1825,8 +1831,13 @@ if("serviceWorker" in navigator){
 /* ---------- 종목 퀵 메뉴 (종목명 클릭) ---------- */
 function openQsheet(code, name){
   const s = document.getElementById("qsheet");
+  const mine = ((window.DATA||{}).mines||[]).find(m=>m.code===code);
+  const mineWarn = mine ? `<div style="font-size:12.5px;color:var(--crit);font-weight:700;
+    background:rgba(208,59,59,.1);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+    💣 위험 신호 ${mine.score}점 — ${esc((mine.reasons||[])[0]||"")}
+    <a href="mine.html" style="color:inherit">상세</a></div>` : "";
   s.innerHTML = `
-    <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>
+    <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}
     <div class="qrow">
       <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">📈 차트</a>
       <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">📰 뉴스</a>

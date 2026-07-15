@@ -425,6 +425,28 @@ def stale_notice(data, today=None):
             "휴장일이면 정상 · 평일인데 이틀 연속이면 PLAYBOOK 점검 필요", ""]
 
 
+def mine_lines(data):
+    """지뢰 경고 (저녁 요약용) - 감지된 날만, 관심종목 겹침은 강조."""
+    e = lambda t: html.escape(str(t or ""))
+    mines = data.get("mines") or []
+    if not mines:
+        return []
+    top = mines[0]
+    extra = f" 외 {len(mines)-1}종목" if len(mines) > 1 else ""
+    out = [f"💣 위험 신호 누적: <b>{e(top['name'])}</b>({top['score']}점 · "
+           f"{e(top['reasons'][0] if top.get('reasons') else '')}){extra}"]
+    try:
+        codes = parse_watchlist(WATCHLIST_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        codes = []
+    hit = [m for m in mines if m.get("code") in codes]
+    if hit:
+        out.append("⚠️ <b>관심종목 중 지뢰 감지</b>: " +
+                   " · ".join(f"{e(m['name'])}({m['score']}점)" for m in hit[:3]))
+    out.append("")
+    return out
+
+
 def build_evening_message(data):
     """저녁 마감 요약 - 짧은 버전."""
     e = lambda s: html.escape(str(s or ""))
@@ -434,6 +456,7 @@ def build_evening_message(data):
     lines = [f"🌙 <b>마감 요약</b>  <i>({e(md)})</i>", ""]
     lines.extend(stale_notice(data))
     lines.extend(screen_lines(data))
+    lines.extend(mine_lines(data))
     if k.get("value"):
         lines.append(
             f"KOSPI {fmt_num(k['value'])} {arrow(k.get('change_pct'))}"

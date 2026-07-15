@@ -1521,7 +1521,16 @@ def build_sample():
                          "change_pct": 3.16, "mktcap_100m": 58000,
                          "buys": 0, "sells": 2, "net_shares": -8000,
                          "net_amt_100m": -6.6,
-                         "people": ["최부사장(부사장) -5,000주", "정상무(상무) -3,000주"]}])
+                         "people": ["최부사장(부사장) -5,000주", "정상무(상무) -3,000주"]}],
+                    mines=[
+                        {"code": "900001", "name": "샘플바이오", "score": 47,
+                         "price": 3120, "change_pct": -2.1,
+                         "reasons": ["유상증자 2회", "CB 발행", "52주 고점 대비 -55%",
+                                     "이익 지표 부재 + 무배당"]},
+                        {"code": "900002", "name": "샘플테크", "score": 30,
+                         "price": 8900, "change_pct": -0.8,
+                         "reasons": ["전환가 조정 2회", "외인·기관 동반 이탈 (5일 -42억)",
+                                     "일 거래대금 7억 (저유동성)"]}])
 
 
 # ---------------------------------------------------------------------------
@@ -1637,6 +1646,97 @@ def build_insider_trades(stocks, api_key, disclosures, today=None,
         time.sleep(REQUEST_DELAY)
     out.sort(key=lambda x: -abs(x["net_amt_100m"]))
     return out[:15]
+
+
+# ---------------------------------------------------------------------------
+# 지뢰탐지기 (E) - 위험 신호 누적 점수 → 피해야 할 종목
+# ---------------------------------------------------------------------------
+
+CONFIG_MINES = {
+    "window_days": 30,   # 며칠치 공시 이력을 누적할지
+    "min_score": 20,     # 이 점수 이상만 지뢰 목록에 표시
+    "top_n": 12,
+}
+
+RISK_WEIGHTS = {   # 공시 태그 → 위험 점수 (반복되면 합산)
+    "유상증자": 15, "CB 발행": 12, "BW 발행": 12, "감자": 15,
+    "관리종목": 22, "상폐 위험": 30, "자사주 처분": 7,
+    "소송 제기": 12, "횡령·배임": 30, "영업정지": 22, "전환가 조정": 8,
+}
+
+
+def collect_risk_events(hist_dir, today_disclosures, window_days=30):
+    """최근 N일 공시 이력(히스토리+오늘)에서 위험 태그 이벤트 누적 {회사: [(태그, 날짜)]}."""
+    events = {}
+    def add(discs, day):
+        for x in discs or []:
+            tag = x.get("tag")
+            if tag in RISK_WEIGHTS and x.get("company"):
+                events.setdefault(x["company"], []).append((tag, day))
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-window_days:]
+    except Exception:
+        files = []
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        add(d.get("disclosures"), f.stem)
+    add(today_disclosures, "today")
+    # 같은 날 같은 태그 중복 제거
+    return {c: sorted(set(evs)) for c, evs in events.items()}
+
+
+def build_mines(stocks, hist_dir, disclosures, insider_trades=None, cfg=None):
+    """위험 신호 누적 점수화 → 지뢰 목록 [{code,name,score,reasons}]."""
+    cfg = cfg or CONFIG_MINES
+    by_name = {s["name"]: s for s in stocks if s.get("name")}
+    events = collect_risk_events(hist_dir, disclosures, cfg["window_days"])
+    ins_sell = {x["name"]: x for x in (insider_trades or []) if x.get("net_amt_100m", 0) < -1}
+    out = []
+    for s in stocks:
+        name = s.get("name")
+        score, reasons = 0, []
+        # ① 공시 위험 누적
+        evs = events.get(name) or []
+        tag_cnt = {}
+        for tag, _ in evs:
+            tag_cnt[tag] = tag_cnt.get(tag, 0) + 1
+        for tag, n in sorted(tag_cnt.items(), key=lambda x: -RISK_WEIGHTS[x[0]]):
+            score += RISK_WEIGHTS[tag] * n
+            reasons.append(f"{tag} {n}회" if n > 1 else tag)
+        has_disc_risk = bool(evs)
+        # ② 수급 동반 이탈
+        f5, i5 = s.get("f_5d_amt_100m") or 0, s.get("i_5d_amt_100m") or 0
+        if f5 < 0 and i5 < 0 and (f5 + i5) <= -30:
+            score += 10
+            reasons.append(f"외인·기관 동반 이탈 (5일 {f5+i5:.0f}억)")
+        # ③ 추세 붕괴
+        near = s.get("near_52w_pct")
+        if near is not None and near < 60:
+            score += 10
+            reasons.append(f"52주 고점 대비 -{100-near:.0f}%")
+        # ④ 적자 추정 + 무배당
+        if s.get("per") is None and not (s.get("dvr") or 0):
+            score += 8
+            reasons.append("이익 지표 부재 + 무배당")
+        # ⑤ 내부자 매도 우세
+        if name in ins_sell:
+            score += 10
+            reasons.append(f"내부자 매도 우세 ({ins_sell[name]['net_amt_100m']}억)")
+        # ⑥ 저유동성
+        to = (s.get("price") or 0) * (s.get("volume") or 0) / 1e8
+        if s.get("volume") and to < 10:
+            score += 5
+            reasons.append(f"일 거래대금 {to:.0f}억 (저유동성)")
+        # 공시 위험이 하나도 없으면 시장 신호만으로는 30점 이상일 때만
+        if score >= cfg["min_score"] and (has_disc_risk or score >= 30):
+            out.append({"code": s["code"], "name": name, "score": round(score),
+                        "price": s.get("price"), "change_pct": s.get("change_pct"),
+                        "reasons": reasons[:5]})
+    out.sort(key=lambda x: -x["score"])
+    return out[:cfg["top_n"]]
 
 
 # 조건 검색 5종 임계값 (전부 여기서 튜닝)
@@ -1810,7 +1910,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              market_date=None, performance=None, kospi_trend=None,
              sentiment_enabled=False, perf_curve=None, scan_review=None,
              strategies=None, strategy_race=None, silence=None, news_compass=None,
-             insider_watch=None, graduates=None, screens=None, insider_trades=None):
+             insider_watch=None, graduates=None, screens=None, insider_trades=None,
+             mines=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -1858,6 +1959,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "graduates": graduates or [],
         "screens": screens or {},
         "insider_trades": insider_trades or [],
+        "mines": mines or [],
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -1970,6 +2072,9 @@ def run_full(max_universe=None, out_path=None):
                                           today=market_date)
     if insider_trades:
         print(f"  → 내부자 매매 방향 판별 {len(insider_trades)}곳")
+    mines = build_mines(stocks, hist_dir, disclosures, insider_trades)
+    if mines:
+        print(f"  → 지뢰 감지 {len(mines)}종목")
     graduates = build_graduates(hist_dir, stocks,
                                 {s["code"] for s in ideas}, market_date)
     screens = build_screens(stocks, hist_dir, market_date)
@@ -1986,7 +2091,7 @@ def run_full(max_universe=None, out_path=None):
                     strategies=strategies, strategy_race=strategy_race,
                     silence=silence, news_compass=news_compass,
                     insider_watch=insider_watch, graduates=graduates,
-                    screens=screens, insider_trades=insider_trades)
+                    screens=screens, insider_trades=insider_trades, mines=mines)
 
 
 def main():

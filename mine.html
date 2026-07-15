@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지뢰탐지기</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="위험 신호가 누적된 종목을 걸러내는 방어 도구 — 아이디어 대시보드의 지뢰탐지 페이지">
+<meta name="theme-color" content="#0b0b0b">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --ring:rgba(11,11,11,.10);
+  --series-1:#2a78d6; --series-1-deep:#1c5cab;
+  --up:#c93a3a; --down:#256abf; --crit:#d03b3b;
+  --chip-bg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --series-1:#3987e5; --series-1-deep:#6da7ec;
+    --up:#e66767; --down:#3987e5; --crit:#e66767;
+    --chip-bg:#262624;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top h1{font-size:20px;font-weight:700;margin:0}
+.stamp{color:var(--ink-3);font-size:12.5px}
+a.backlink{font-size:12.5px;color:var(--series-1-deep);text-decoration:none;margin-left:auto}
+section{margin:26px 0}
+h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
+.sub{font-size:12.5px;color:var(--ink-3);margin:0 0 12px}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
+.bars{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:16px;margin-bottom:12px}
+.bars h3{font-size:13.5px;font-weight:700;margin:0 0 8px;color:var(--ink-2)}
+.alert{border-left:4px solid var(--crit);background:rgba(208,59,59,.08)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.card{background:var(--surface-1);border:1px solid var(--ring);border-left:3px solid var(--crit);
+  border-radius:12px;padding:14px 15px}
+.card .row1{display:flex;align-items:baseline;gap:8px}
+.card .nm{font-size:16px;font-weight:700}
+.card .cd{font-size:11.5px;color:var(--ink-3)}
+.card .px{margin-left:auto;font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.score{font-size:22px;font-weight:800;color:var(--crit);margin:6px 0 2px}
+.score span{font-size:12px;font-weight:600;color:var(--ink-3)}
+.reasons{font-size:12.5px;color:var(--ink-2);line-height:1.8;margin-top:6px}
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.tag{font-size:11.5px;color:var(--ink-2);background:var(--chip-bg);border-radius:5px;padding:2px 8px}
+.tag a{color:inherit;text-decoration:none}
+.empty{color:var(--ink-3);font-size:13px;padding:22px;text-align:center;
+  background:var(--surface-1);border:1px solid var(--ring);border-radius:12px}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
+  font-size:11.5px;color:var(--ink-3);line-height:1.7}
+@media (max-width:520px){
+  body{font-size:14px}
+  .wrap{padding:10px 10px 50px}
+  header.top h1{font-size:17px}
+  .cards{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>💣 지뢰탐지기</h1>
+    <span class="stamp" id="stamp">불러오는 중…</span>
+    <a class="backlink" href="index.html">← 메인 대시보드</a>
+  </header>
+
+  <div class="bars" style="font-size:13px;line-height:1.8">
+    <h3>이 도구가 보는 것</h3>
+    수익을 내는 도구가 아니라 <b>잃지 않게 하는 방패</b>입니다. 최근 30일간 유상증자·CB 발행·감자·
+    소송·횡령 같은 <b>위험 공시의 누적</b>에 수급 이탈·추세 붕괴·저유동성 같은 시장 신호를 더해
+    위험 점수를 매깁니다. 여기 뜬 종목이 반드시 나쁜 건 아니지만, <b>사기 전에 이유를 알아야 하는</b> 종목입니다.
+  </div>
+
+  <div id="myAlert" style="display:none" class="bars alert">
+    <h3>⚠️ 내 종목 경고</h3>
+    <div id="myAlertBody" style="font-size:13.5px;line-height:1.9"></div>
+  </div>
+
+  <section id="mines">
+    <h2>위험 신호 누적 상위</h2>
+    <p class="sub">위험 점수 20점 이상 · 최근 30일 공시 이력 + 시장 신호 합산 (튜닝: collect.py CONFIG_MINES)</p>
+    <div class="cards" id="mineCards"></div>
+  </section>
+
+  <footer>
+    자료: 전자공시(DART) 위험 공시 누적 + 수급·주가 신호 · 위험 점수는 참고 지표이며 기업 가치 평가가 아닙니다.<br>
+    투자 참고 자료이며 매수·매도 추천이 아닙니다. · <a href="index.html" style="color:var(--series-1-deep)">메인 대시보드로</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = v => v==null ? "-" : Math.round(v).toLocaleString("ko-KR");
+
+fetch("data.json?t="+Date.now())
+  .then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d=>{
+    document.getElementById("stamp").textContent =
+      (d.market_date||"").replace(/-/g,".") + " 기준" + (d.sample ? " · 샘플" : "");
+    const mines = d.mines || [];
+    // 내 보유·관심 종목 교차 (이 브라우저에만 저장된 데이터 사용)
+    let mycodes = [];
+    try{
+      mycodes = (JSON.parse(localStorage.getItem("kr_idea_port")||"[]")).map(h=>h.code)
+        .concat(JSON.parse(localStorage.getItem("kr_idea_watchlist")||"[]"));
+    }catch(e){}
+    const hits = mines.filter(m=>mycodes.includes(m.code));
+    if(hits.length){
+      document.getElementById("myAlert").style.display = "";
+      document.getElementById("myAlertBody").innerHTML = hits.map(m=>
+        `<b>${esc(m.name)}</b> 위험 ${m.score}점 — ${(m.reasons||[]).slice(0,2).map(esc).join(" · ")}`
+      ).join("<br>") + `<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">보유·관심 종목 중 위험 신호가 누적된 종목입니다. 공시 원문을 꼭 확인하세요.</div>`;
+    }
+    document.getElementById("mineCards").innerHTML = mines.length ? mines.map(m=>`
+      <div class="card">
+        <div class="row1"><span class="nm">${esc(m.name)}</span><span class="cd">${m.code}</span>
+          <span class="px">${fmt(m.price)}<span class="${m.change_pct>0?"up":m.change_pct<0?"down":"flat"}" style="font-size:11.5px"> ${m.change_pct>0?"▲":m.change_pct<0?"▼":""}${Math.abs(m.change_pct||0).toFixed(1)}%</span></span></div>
+        <div class="score">위험 ${m.score}점 <span>높을수록 확인 필요</span></div>
+        <div class="reasons">${(m.reasons||[]).map(r=>"· "+esc(r)).join("<br>")}</div>
+        <div class="tags">
+          <span class="tag"><a target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(m.name)}">공시 원문</a></span>
+          <span class="tag"><a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${m.code}">차트</a></span>
+        </div>
+      </div>`).join("")
+      : '<div class="empty">현재 위험 점수 20점을 넘는 종목이 없습니다.<br><span style="font-size:11.5px">공시 이력이 쌓일수록(최대 30일) 감지가 정교해집니다.</span></div>';
+  })
+  .catch(err=>{
+    document.getElementById("stamp").textContent = "데이터를 불러오지 못했습니다 ("+esc(err.message)+")";
+  });
+</script>
+</body>
+</html>
