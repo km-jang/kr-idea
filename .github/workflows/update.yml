@@ -9,6 +9,9 @@ on:
     - cron: "40 10 * * 1-5"   # 매 영업일 19:40 KST - 예비 알람 (본 수집 누락 시에만 작동)
     - cron: "25 23 * * 0-4"   # 매 영업일 08:25 KST - 아침 예비 알람 (본 발송 누락 시에만)
     - cron: "5 3 * * 1-5"    # 매 영업일 12:05 KST - 장중 시황 요약 (점심 맥박)
+    - cron: "35 3 * * 1-5"    # 매 영업일 12:35 KST - 점심 맥박 예비 (본 발송 누락 시에만)
+    - cron: "7 6 * * 1-5"     # 매 영업일 15:07 KST - 종가 스캔 예비 (본 스캔 누락 시에만)
+    - cron: "30 12 * * 1-5"   # 매 영업일 21:30 KST - 야간 자가 점검 (수집 반영 감시)
   workflow_dispatch: {}
 
 permissions:
@@ -144,7 +147,60 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python closing_scan.py --pulse
+        run: |
+          python closing_scan.py --pulse
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 점심 발송 기록" && git push)
+
+      - name: 점심 맥박 예비 (12:35, 본 발송 누락 시에만)
+        if: github.event.schedule == '35 3 * * 1-5'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python closing_scan.py --pulse --if-not-sent
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 점심 예비 발송 기록" && git push)
+
+      - name: 종가 스캔 예비 (15:07, 본 스캔 누락 시에만)
+        if: github.event.schedule == '7 6 * * 1-5'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          DONE=$(python -c "import json;rs=json.load(open('scans.json'));print('yes' if any(r.get('date')=='$TODAY' for r in rs) else 'no')" 2>/dev/null || echo "no")
+          if [ "$DONE" = "yes" ]; then echo "본 스캔 완료 확인 - 예비 조용히 종료"; exit 0; fi
+          echo "본 스캔 누락 감지 - 예비 스캔 시작"
+          python closing_scan.py
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add scans.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "scan(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && git push)
+
+      - name: 야간 자가 점검 (21:30, 수집 반영 감시)
+        if: github.event.schedule == '30 12 * * 1-5'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "시크릿 없음 - 생략"; exit 0; fi
+          TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
+          FRESH=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+          if [ "$FRESH" = "yes" ]; then echo "자가 점검 통과 (수집 $GEN)"; exit 0; fi
+          MSG="🩺 야간 자가 점검: 오늘 마감 수집이 아직 반영되지 않았습니다 (현재 데이터: $GEN)
+          휴장일이면 정상입니다. 평일이라면 Actions 확인 또는 Run workflow로 수동 수집을 권장합니다.
+          https://github.com/${{ github.repository }}/actions"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
 
       - name: 종가매매 스캔
         if: github.event.schedule == '50 5 * * 1-5'
