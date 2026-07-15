@@ -696,7 +696,7 @@ function initSliders(d){
   document.getElementById("slReset").addEventListener("click", ()=>{
     setW({...DEF_W}); paint(); apply();
   });
-  document.querySelectorAll(".slpreset").forEach(btn=>{
+  document.querySelectorAll(".slpreset[data-w]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const [f,v,m,dd] = btn.dataset.w.split(",").map(Number);
       const cur = getW();
