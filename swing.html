@@ -106,6 +106,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <div id="myAlertBody" style="font-size:13.5px;line-height:1.9"></div>
   </div>
 
+  <section id="exitSec" style="display:none">
+    <h2>🚪 내 종목 청산 신호</h2>
+    <p class="sub">보유·관심 종목이 이동평균선을 이탈했는지 점검 (이 브라우저에 저장된 종목만 · 진입 반대편 관리)</p>
+    <div class="bars" id="exitBox" style="font-size:13.5px;line-height:1.95"></div>
+  </section>
+
   <section id="reviewSec" style="display:none">
     <h2>📋 지난 스윙 성적표</h2>
     <p class="sub" id="reviewSub"></p>
@@ -218,6 +224,30 @@ fetch("data.json?t="+Date.now())
       document.getElementById("myAlertBody").innerHTML = hits.map(p=>
         `<b>${esc(p.name)}</b> 스윙 ${p.swing}점 — ${(p.setups||[]).slice(0,3).map(esc).join(" · ")}`
       ).join("<br>");
+    }
+
+    // 청산 신호: 보유·관심 종목의 이평선 이탈 점검 (all_stocks의 ma5/ma20 사용)
+    if(mycodes.length){
+      const byCode = {}; (d.all_stocks||[]).forEach(s=>byCode[s.code]=s);
+      const stop=[], warn=[]; let cruise=0, unknown=0;
+      [...new Set(mycodes)].forEach(c=>{
+        const s = byCode[c];
+        if(!s || s.price==null || s.ma20==null){ unknown++; return; }
+        if(s.price < s.ma20)
+          stop.push(`🔴 <b>${esc(s.name)}</b> · 20일선(생명선) ${fmt(s.ma20)} 이탈 — <span class="down">손절 검토</span>`);
+        else if(s.ma5!=null && s.price < s.ma5)
+          warn.push(`🟡 <b>${esc(s.name)}</b> · 5일선 ${fmt(s.ma5)} 이탈 — 단기 주의`);
+        else cruise++;
+      });
+      if(stop.length || warn.length){
+        document.getElementById("exitSec").style.display = "";
+        let extra = [];
+        if(cruise) extra.push(`🟢 순항 중 ${cruise}종목 (이평선 위)`);
+        if(unknown) extra.push(`<span style="color:var(--ink-3)">· 유니버스 밖 ${unknown}종목은 판별 불가</span>`);
+        document.getElementById("exitBox").innerHTML =
+          stop.concat(warn).join("<br>") +
+          (extra.length ? `<div style="font-size:12px;color:var(--ink-3);margin-top:8px">${extra.join(" ")}</div>` : "");
+      }
     }
 
     document.getElementById("swingCards").innerHTML = swing.length ? swing.map(card).join("")

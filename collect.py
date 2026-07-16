@@ -2126,14 +2126,21 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         return out
 
     def compact(s):
-        """전체 종목 목록용 축약 레코드 (검색·워치리스트에 사용)."""
-        return {k: s.get(k) for k in (
+        """전체 종목 목록용 축약 레코드 (검색·워치리스트·청산 신호에 사용)."""
+        r = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
             "pbr", "per", "dvr", "f_streak", "i_streak", "f_5d_amt_100m",
             "i_5d_amt_100m",
             "flow_score", "value_score", "mom_score", "disc_score", "score",
             "flow_delta", "near_52w_pct", "reasons", "sector",
             "volume", "trend_ratio", "news_24h")}
+        closes = s.get("closes")
+        m5, m20 = _swing_ma(closes, 5), _swing_ma(closes, 20)   # 청산 신호용 이평선
+        if m5:
+            r["ma5"] = round(m5)
+        if m20:
+            r["ma20"] = round(m20)
+        return r
 
     flow_rank = sorted(stocks, key=lambda s: -(s.get("flow_score") or 0))[:30]
     value_rank = sorted(stocks, key=lambda s: -(s.get("value_score") or 0))[:30]

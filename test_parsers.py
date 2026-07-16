@@ -1353,6 +1353,75 @@ def test_build_swing_review():
         assert rv["hit_rate"] == 100
 
 
+def test_swing_lines():
+    """저녁 브리핑 스윙 라인: 후보 있으면 TOP3 + 목표/손절, 없으면 0픽셀."""
+    import notify
+    data = {"swing": [
+        {"name": "정배열주", "swing": 82, "setups": ["정배열", "5일선 지지"],
+         "target_pct": 6.0, "stop_pct": -3.0},
+        {"name": "골든주", "swing": 71, "setups": ["골든크로스"],
+         "target_pct": 4.4, "stop_pct": -2.2},
+        {"name": "수급주", "swing": 60, "setups": [], "target_pct": 3.0, "stop_pct": -1.5},
+        {"name": "네번째", "swing": 50, "setups": [], "target_pct": 2.0, "stop_pct": -1.0}]}
+    out = "\n".join(notify.swing_lines(data))
+    assert "스윙 후보" in out and "정배열주" in out and "82점" in out
+    assert "목표 +6.0%" in out and "손절 -3.0%" in out
+    assert "네번째" not in out            # TOP3만
+    assert notify.swing_lines({"swing": []}) == []   # 0픽셀
+    assert notify.swing_lines({}) == []
+
+
+def test_swing_in_evening_message():
+    """샘플 데이터의 스윙 후보가 저녁 브리핑에 실제로 들어가고 4096자 미만."""
+    import notify
+    data = collect.build_sample()
+    msg = notify.build_evening_message(data)
+    assert "스윙 후보" in msg
+    assert len(msg) < 4096
+
+
+def test_swing_exit_signal():
+    """청산 신호 판정: 20일선 이탈=손절, 5일선 이탈=주의, 정배열=신호없음."""
+    import notify
+    assert notify.swing_exit_signal({"price": 9000, "ma5": 9500, "ma20": 9800})[0] == "stop"
+    assert notify.swing_exit_signal({"price": 9600, "ma5": 9800, "ma20": 9400})[0] == "warn"
+    assert notify.swing_exit_signal({"price": 10000, "ma5": 9800, "ma20": 9400}) is None
+    assert notify.swing_exit_signal({"price": 9000, "ma20": None}) is None   # 데이터 없음
+
+
+def test_swing_exit_lines():
+    """저녁 브리핑 청산 신호: 관심종목만, 손절이 주의보다 먼저, 신호 없으면 0픽셀."""
+    import notify, tempfile, os
+    data = {"all_stocks": [
+        {"code": "000001", "name": "손절주", "price": 9000, "ma5": 9500, "ma20": 9800},
+        {"code": "000002", "name": "주의주", "price": 9600, "ma5": 9800, "ma20": 9400},
+        {"code": "000003", "name": "순항주", "price": 10000, "ma5": 9800, "ma20": 9400}]}
+    orig = notify.WATCHLIST_PATH
+    fd, p = tempfile.mkstemp(suffix=".txt")
+    os.write(fd, "000001\n000002\n000003\n".encode()); os.close(fd)
+    notify.WATCHLIST_PATH = notify.Path(p)
+    try:
+        out = "\n".join(notify.swing_exit_lines(data))
+        assert "청산 신호" in out and "손절주" in out and "주의주" in out
+        assert "순항주" not in out                       # 신호 없는 종목 제외
+        assert out.index("손절주") < out.index("주의주")  # 손절 먼저
+        # 관심종목 비어있으면 0픽셀
+        notify.WATCHLIST_PATH = notify.Path(p + "_none")
+        assert notify.swing_exit_lines(data) == []
+    finally:
+        notify.WATCHLIST_PATH = orig
+        os.unlink(p)
+
+
+def test_compact_ma_fields():
+    """all_stocks 축약 레코드에 청산 신호용 ma5/ma20가 실리는지."""
+    data = collect.build_sample()
+    withma = [s for s in data["all_stocks"] if s.get("ma20") is not None]
+    assert withma, "ma20 실린 종목이 없음"
+    s = withma[0]
+    assert isinstance(s["ma5"], (int, float)) and isinstance(s["ma20"], (int, float))
+
+
 def test_swing_in_sample_schema():
     """샘플 데이터에 스윙 후보·성적표 키가 있고 직렬화 가능."""
     data = collect.build_sample()

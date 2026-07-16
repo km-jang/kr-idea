@@ -411,6 +411,66 @@ def screen_lines(data):
     return out
 
 
+def swing_lines(data, top=3):
+    """5일선 스윙 후보 상위 (저녁 요약용) - 후보 없으면 빈 리스트 (0픽셀)."""
+    e = lambda t: html.escape(str(t or ""))
+    swing = data.get("swing") or []
+    if not swing:
+        return []
+    out = [f'📈 <b><a href="{SITE_URL}swing.html">스윙 후보</a></b> (5일선 단기)']
+    for p in swing[:top]:
+        setup = e(p["setups"][0]) if p.get("setups") else ""
+        tail = f" · {setup}" if setup else ""
+        out.append(f"<b>{e(p.get('name'))}</b> {p.get('swing')}점{tail} · "
+                   f"목표 +{p.get('target_pct')}% / 손절 {p.get('stop_pct')}%")
+    out.append("")
+    return out
+
+
+def swing_exit_signal(s):
+    """종목 1개의 청산 신호 판정 (이평선 기준). 반환: (레벨, 문구) 또는 None.
+    🔴 생명선(20일선) 이탈 = 손절 검토 · 🟡 5일선 이탈 = 단기 주의."""
+    px, ma5, ma20 = s.get("price"), s.get("ma5"), s.get("ma20")
+    if not (px and ma20):
+        return None
+    if px < ma20:
+        return ("stop", f"20일선(생명선) {fmt_num(ma20, 0)} 이탈 — 손절 검토")
+    if ma5 and px < ma5:
+        return ("warn", f"5일선 {fmt_num(ma5, 0)} 이탈 — 단기 주의")
+    return None
+
+
+def swing_exit_lines(data):
+    """관심종목(watchlist.txt)의 청산 신호 (저녁 요약용) - 신호 있을 때만 (0픽셀)."""
+    e = lambda t: html.escape(str(t or ""))
+    try:
+        codes = parse_watchlist(WATCHLIST_PATH.read_text(encoding="utf-8")
+                                if WATCHLIST_PATH.exists() else "")
+    except Exception:
+        codes = []
+    if not codes:
+        return []
+    by = {s.get("code"): s for s in (data.get("all_stocks") or [])}
+    hits = []
+    for c in codes:
+        s = by.get(c)
+        if not s:
+            continue
+        sig = swing_exit_signal(s)
+        if sig:
+            hits.append((sig[0], s.get("name"), sig[1]))
+    if not hits:
+        return []
+    order = {"stop": 0, "warn": 1}
+    hits.sort(key=lambda h: order.get(h[0], 9))
+    out = ["🚪 <b>내 종목 청산 신호</b>"]
+    for lvl, name, why in hits[:5]:
+        icon = "🔴" if lvl == "stop" else "🟡"
+        out.append(f"{icon} <b>{e(name)}</b> · {e(why)}")
+    out.append("")
+    return out
+
+
 def stale_notice(data, today=None):
     """침묵 정지 방어: 평일인데 데이터 기준일이 오늘이 아니면 경고 라인."""
     today = today or kst_today()
@@ -455,6 +515,8 @@ def build_evening_message(data):
     k, q = idx.get("KOSPI") or {}, idx.get("KOSDAQ") or {}
     lines = [f"🌙 <b>마감 요약</b>  <i>({e(md)})</i>", ""]
     lines.extend(stale_notice(data))
+    lines.extend(swing_exit_lines(data))
+    lines.extend(swing_lines(data))
     lines.extend(screen_lines(data))
     lines.extend(mine_lines(data))
     if k.get("value"):
