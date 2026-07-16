@@ -1032,7 +1032,7 @@ def test_weekly_graduates_and_tuning():
 def test_insider_briefing_line():
     """내부자 몰림(경량판)은 방향 데이터가 없을 때만 표시."""
     import notify
-    d = json.load(open("data.json"))
+    d = collect.build_sample()        # 고정 픽스처 (실제 data.json 의존 금지 - 조용한 실패 방지)
     d["insider_trades"] = []          # 방향 데이터 없음 → 경량판 표시
     d["insider_watch"] = [{"company": "CJ ENM", "count": 3}]
     msg = notify.build_message(d)
@@ -1192,7 +1192,7 @@ def test_build_insider_trades():
 def test_insider_trades_briefing():
     """방향 데이터가 있으면 매수/매도 우세 라인, 없으면 경량판."""
     import notify
-    d = json.load(open("data.json"))
+    d = collect.build_sample()        # 고정 픽스처 (실제 data.json 의존 금지 - 조용한 실패 방지)
     d["insider_trades"] = [
         {"name": "CJ ENM", "net_amt_100m": 10.7, "buys": 3, "sells": 0},
         {"name": "LG화학", "net_amt_100m": -6.6, "buys": 0, "sells": 2}]
@@ -1378,6 +1378,18 @@ def test_swing_in_evening_message():
     msg = notify.build_evening_message(data)
     assert "스윙 후보" in msg
     assert len(msg) < 4096
+
+
+def test_clamp_telegram():
+    """4096자 방어: 초과 시 줄 경계에서 잘라 태그 균형 유지 + 안내 라인."""
+    import notify
+    short = "짧은 메시지\n<b>굵게</b>"
+    assert notify.clamp_telegram(short) == short           # 제한 이하 → 그대로
+    big = "\n".join(f"<b>줄{i}</b> 내용" for i in range(600))  # 4096 초과
+    out = notify.clamp_telegram(big)
+    assert len(out) <= 4096
+    assert "생략" in out
+    assert out.count("<b>") == out.count("</b>")            # 태그 균형 (한 줄 중간 안 끊김)
 
 
 def test_swing_exit_signal():

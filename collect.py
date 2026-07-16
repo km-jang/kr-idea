@@ -1853,7 +1853,7 @@ def build_screens(stocks, hist_dir, market_date, cfg=None):
         if (mkt >= c["min_mktcap"] and turnover >= c["min_turnover"]
                 and avg_to and turnover >= avg_to * c["turnover_mult"]
                 and chg is not None and c["chg_lo"] <= chg <= c["chg_hi"]
-                and closes and closes[-1] >= max(closes)):
+                and closes and closes[-1] >= max(closes[-20:])):   # 20일 신고가 (21일치라도 최근 20일)
             out["hotmoney"].append({"code": code, "name": s["name"],
                 "why": f"+{chg:.1f}% · 대금 평소 {turnover/avg_to:.1f}배 · 20일 신고가"})
 
@@ -2291,10 +2291,19 @@ def run_full(max_universe=None, out_path=None):
     hits = sum(len(v) for v in screens.values())
     if hits:
         print(f"  → 조건 검색 적중 {hits}건")
-    swing = build_swing(stocks, screens, mines, market_date)
-    if swing:
-        print(f"  → 스윙 후보 {len(swing)}종목")
-    swing_review = build_swing_review(hist_dir, stocks, market_date)
+    # 스윙은 부가 기능 — 버그가 나도 핵심 대시보드 수집을 막지 않도록 방어
+    try:
+        swing = build_swing(stocks, screens, mines, market_date)
+        if swing:
+            print(f"  → 스윙 후보 {len(swing)}종목")
+    except Exception as e:
+        errors.append(f"swing: {e}")
+        swing = []
+    try:
+        swing_review = build_swing_review(hist_dir, stocks, market_date)
+    except Exception as e:
+        errors.append(f"swing_review: {e}")
+        swing_review = None
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")

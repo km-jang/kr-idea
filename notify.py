@@ -658,8 +658,22 @@ def weekly_extra_lines(data, today=None):
     return out
 
 
+def clamp_telegram(text, limit=4096):
+    """텔레그램 4096자 제한 방어. 초과 시 줄 경계에서 잘라 태그 균형 유지 + 안내 한 줄.
+    (줄 단위로 자르므로 <b>…</b> 같은 한 줄 안의 태그가 중간에 끊기지 않는다.)"""
+    if len(text) <= limit:
+        return text
+    notice = "\n…(길어서 일부 생략 · 대시보드에서 전체 확인)"
+    budget = limit - len(notice)
+    cut = text.rfind("\n", 0, budget)
+    if cut < budget // 2:            # 적당한 줄 경계가 없으면 통째로 자름
+        cut = budget
+    return text[:cut] + notice
+
+
 def send(token, chat_id, text, retries=3, wait_s=4):
     """텔레그램 발송. 일시적 오류(네트워크·서버)는 재시도, 설정 오류(400번대)는 즉시 중단."""
+    text = clamp_telegram(text)
     last = ""
     for attempt in range(1, retries + 1):
         try:
