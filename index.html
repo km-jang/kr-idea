@@ -446,7 +446,7 @@ table.slim{min-width:0}
   </section>
   <section id="senti">
     <h2>심리 히트</h2>
-    <p class="sub">검색량·뉴스가 급증한 종목 · 군중의 관심이 몰리기 시작한 곳 (수급과 교차 확인 권장)</p>
+    <p class="sub">검색량·뉴스가 급증한 종목 · 군중의 관심이 몰리기 시작한 곳 (수급과 교차 확인 권장) · 열 제목 클릭 시 정렬</p>
     <div class="tblwrap"><table id="sentiTbl"></table></div>
     <div class="empty" id="sentiEmpty" style="display:none"></div>
   </section>
@@ -988,16 +988,15 @@ function sentiSection(d){
     return;
   }
   wrap.style.display=""; empty.style.display="none";
-  tbl.innerHTML = "<thead><tr><th>종목</th><th>현재가</th><th>등락률</th>"+
-    "<th>검색 급증</th><th>뉴스 24h</th><th>외인 연속</th><th>종합점수</th></tr></thead><tbody>"+
-    rows.map(s=>`<tr>
-      <td>${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span></td>
-      <td>${fmt(s.price)}</td>
-      <td><span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span></td>
-      <td>${(s.trend_ratio||0)>=3?`<b>🔍 ${s.trend_ratio}배</b>`:(s.trend_ratio!=null?s.trend_ratio+"배":"–")}</td>
-      <td>${(s.news_24h||0)>=10?`<b>📰 ${s.news_24h}건</b>`:(s.news_24h!=null?s.news_24h+"건":"–")}</td>
-      <td><span class="streak${(s.f_streak||0)>=5?" hi":""}">${s.f_streak||0}일</span></td>
-      <td><b>${s.score??"–"}</b></td></tr>`).join("")+"</tbody>";
+  makeTable("sentiTbl", rows, [
+    {k:"name",h:"종목",f:nameCell,core:true},
+    {k:"price",h:"현재가",f:s=>fmt(s.price)},
+    {k:"change_pct",h:"등락률",f:pctCell,core:true},
+    {k:"trend_ratio",h:"검색 급증",f:s=>(s.trend_ratio||0)>=3?`<b>🔍 ${s.trend_ratio}배</b>`:(s.trend_ratio!=null?s.trend_ratio+"배":"–"),core:true},
+    {k:"news_24h",h:"뉴스 24h",f:s=>(s.news_24h||0)>=10?`<b>📰 ${s.news_24h}건</b>`:(s.news_24h!=null?s.news_24h+"건":"–")},
+    {k:"f_streak",h:"외인 연속",f:s=>streakCell(s.f_streak,5)},
+    {k:"score",h:"종합점수",f:s=>`<b>${s.score??"–"}</b>`,core:true},
+  ], "trend_ratio");
 }
 
 /* ---------- 업종 자금 흐름 ---------- */
