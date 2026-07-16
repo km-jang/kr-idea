@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>5일선 스윙 레이더</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="5일 이동평균선을 중심으로 단기(5일 이내) 스윙 후보를 고르는 레이더 — 조건검색 5종 통합, 진입·손절·목표 제시">
+<meta name="theme-color" content="#0b0b0b">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --ring:rgba(11,11,11,.10);
+  --series-1:#2a78d6; --series-1-deep:#1c5cab;
+  --up:#c93a3a; --down:#256abf; --crit:#d03b3b; --warn:#c9822a;
+  --chip-bg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --series-1:#3987e5; --series-1-deep:#6da7ec;
+    --up:#e66767; --down:#3987e5; --crit:#e66767; --warn:#e0a15a;
+    --chip-bg:#262624;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top h1{font-size:20px;font-weight:700;margin:0;white-space:nowrap}
+.stamp{color:var(--ink-3);font-size:12.5px}
+a.backlink{font-size:12.5px;color:var(--series-1-deep);text-decoration:none;margin-left:auto;white-space:nowrap}
+section{margin:26px 0}
+h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
+.sub{font-size:12.5px;color:var(--ink-3);margin:0 0 12px}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
+.bars{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:16px;margin-bottom:12px}
+.bars h3{font-size:13.5px;font-weight:700;margin:0 0 8px;color:var(--ink-2)}
+.alert{border-left:4px solid var(--up);background:rgba(201,58,58,.08)}
+.review{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:baseline}
+.review .big{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums}
+.review .lbl{font-size:12px;color:var(--ink-3)}
+.review .items{flex-basis:100%;font-size:12.5px;color:var(--ink-2);line-height:1.9;margin-top:4px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.card{background:var(--surface-1);border:1px solid var(--ring);border-left:3px solid var(--up);
+  border-radius:12px;padding:14px 15px}
+.card .row1{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.card .nm{font-size:16px;font-weight:700;white-space:nowrap}
+.card .cd{font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+.card .sw{margin-left:auto;font-size:19px;font-weight:800;color:var(--up);white-space:nowrap;font-variant-numeric:tabular-nums}
+.card .sw span{font-size:11px;font-weight:600;color:var(--ink-3)}
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.tag{font-size:11.5px;color:var(--ink-2);background:var(--chip-bg);border-radius:5px;padding:2px 8px;white-space:nowrap}
+.tag.warn{color:#fff;background:var(--warn)}
+.tag a{color:inherit;text-decoration:none}
+.plan{display:flex;gap:6px;margin-top:11px}
+.plan .box{flex:1;text-align:center;background:var(--chip-bg);border-radius:8px;padding:7px 4px}
+.plan .k{font-size:11px;color:var(--ink-3);display:block}
+.plan .v{font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.plan .p{font-size:11px;font-weight:600;white-space:nowrap}
+.chart{margin-top:11px}
+.chart svg{display:block;width:100%;height:66px}
+.leg{font-size:10.5px;color:var(--ink-3);margin-top:3px;display:flex;gap:12px;flex-wrap:wrap}
+.leg i{font-style:normal;display:inline-flex;align-items:center;gap:4px}
+.leg b{display:inline-block;width:14px;height:0;border-top-width:2px;border-top-style:solid}
+.qlinks{margin-top:10px;display:flex;gap:5px;flex-wrap:wrap}
+.qlinks a{font-size:11.5px;color:var(--series-1-deep);text-decoration:none;background:var(--chip-bg);border-radius:5px;padding:2px 8px}
+.empty{color:var(--ink-3);font-size:13px;padding:22px;text-align:center;
+  background:var(--surface-1);border:1px solid var(--ring);border-radius:12px}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
+  font-size:11.5px;color:var(--ink-3);line-height:1.7}
+@media (max-width:520px){
+  body{font-size:14px}
+  .wrap{padding:10px 10px 50px}
+  header.top h1{font-size:17px}
+  .cards{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>📈 5일선 스윙 레이더</h1>
+    <span class="stamp" id="stamp">불러오는 중…</span>
+    <a class="backlink" href="index.html">← 메인 대시보드</a>
+  </header>
+
+  <div class="bars" style="font-size:13px;line-height:1.8">
+    <h3>이 도구가 보는 것</h3>
+    <b>5일 이동평균선</b>을 중심축으로, 향후 <b>5일 이내 단기 스윙</b> 후보를 100점으로 채점합니다 —
+    이평선 배열·추세(30) · 외인/기관 수급 연속(25) · 진입 위치(20) · 유동성(15) · 촉매(10).
+    기존 <b>조건검색 5종</b>(빈집털이·눌림목·종합수급·몰래매집·신고가문앞)은 이 안에 <b>셋업 태그</b>로 통합돼 있습니다.
+    💣지뢰·악재 공시·상한가 임박(추격 위험) 종목은 자동으로 걸러냅니다. 각 후보엔
+    <b>진입가·손절(20일선=생명선 기준)·목표(손익비 2:1)</b>를 함께 제시합니다.<br>
+    <span style="color:var(--ink-3)">솔직한 한계: 이 신호가 실제로 통했는지(적중률)는 5영업일 기록이 쌓인 뒤 아래 성적표에 나타납니다.
+    ‘오늘의 아이디어 5선’(중장기 가치·수급)과는 <b>목적이 다른 별개 도구</b>입니다.</span>
+  </div>
+
+  <div id="myAlert" style="display:none" class="bars alert">
+    <h3>⭐ 내 종목이 스윙 후보에</h3>
+    <div id="myAlertBody" style="font-size:13.5px;line-height:1.9"></div>
+  </div>
+
+  <section id="reviewSec" style="display:none">
+    <h2>📋 지난 스윙 성적표</h2>
+    <p class="sub" id="reviewSub"></p>
+    <div class="bars review" id="reviewBox"></div>
+  </section>
+
+  <section id="swingSec">
+    <h2>오늘의 스윙 후보</h2>
+    <p class="sub">스윙 점수 45점 이상 · 상위 8종목 (튜닝: collect.py CONFIG_SWING)</p>
+    <div class="cards" id="swingCards"></div>
+  </section>
+
+  <footer>
+    자료: 네이버 금융 시세·수급 + 이동평균선 계산 · 조건검색 5종 통합 · 진입/손절/목표는 이동평균선·변동성 기반 <b>기계적 제안</b>입니다.<br>
+    투자 참고 자료이며 매수·매도 추천이 아닙니다. 손절은 반드시 지키세요. · <a href="index.html" style="color:var(--series-1-deep)">메인 대시보드로</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = v => v==null ? "-" : Math.round(v).toLocaleString("ko-KR");
+const WARN_TAGS = new Set(["과열주의"]);
+
+function swingChart(p){
+  const cs = (p.closes||[]).slice();
+  if(cs.length < 6) return "";
+  const W=300, H=66, pad=6;
+  const ma5=[];
+  for(let i=4;i<cs.length;i++) ma5.push([i,(cs[i]+cs[i-1]+cs[i-2]+cs[i-3]+cs[i-4])/5]);
+  const vals = cs.concat(ma5.map(m=>m[1]));
+  if(p.ma20!=null) vals.push(p.ma20);
+  const mn=Math.min(...vals), mx=Math.max(...vals), rng=(mx-mn)||1;
+  const X=i=>pad+i*(W-2*pad)/(cs.length-1);
+  const Y=v=>H-pad-(v-mn)/rng*(H-2*pad);
+  const price = cs.map((v,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+  const line5 = ma5.map((m,j)=>`${j?"L":"M"}${X(m[0]).toFixed(1)},${Y(m[1]).toFixed(1)}`).join("");
+  const y20 = p.ma20!=null ? Y(p.ma20).toFixed(1) : null;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="5일선 20일선 미니차트">
+    ${y20!=null?`<line x1="${pad}" y1="${y20}" x2="${W-pad}" y2="${y20}" stroke="var(--down)" stroke-width="1.3" stroke-dasharray="4,3" opacity="0.85"/>`:""}
+    <path d="${price}" fill="none" stroke="var(--ink-3)" stroke-width="1" opacity="0.55"/>
+    <path d="${line5}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round"/>
+  </svg>
+  <div class="leg">
+    <i><b style="border-color:var(--series-1)"></b>5일선</i>
+    <i><b style="border-color:var(--down);border-top-style:dashed"></b>20일선(생명선)</i>
+    <i><b style="border-color:var(--ink-3);opacity:.6"></b>주가</i>
+  </div>`;
+}
+
+function card(p){
+  const tags = (p.setups||[]).map(t=>{
+    const cls = WARN_TAGS.has(t) ? "tag warn" : "tag";
+    return `<span class="${cls}">${esc(t)}</span>`;
+  }).join("");
+  const chg = p.chg;
+  const chgHtml = chg==null ? "" :
+    `<span class="${chg>0?"up":chg<0?"down":"flat"}" style="font-size:11.5px;font-weight:600"> ${chg>0?"▲":chg<0?"▼":""}${Math.abs(chg).toFixed(1)}%</span>`;
+  return `<div class="card">
+    <div class="row1">
+      <span class="nm">${esc(p.name)}</span><span class="cd">${p.code}</span>${chgHtml}
+      <span class="sw">${p.swing}<span> 점</span></span>
+    </div>
+    <div class="tags">${tags}</div>
+    <div class="plan">
+      <div class="box"><span class="k">진입</span><span class="v">${fmt(p.entry)}</span></div>
+      <div class="box"><span class="k">손절</span><span class="v down">${fmt(p.stop)}</span><span class="p down">${p.stop_pct}%</span></div>
+      <div class="box"><span class="k">목표</span><span class="v up">${fmt(p.target)}</span><span class="p up">+${p.target_pct}%</span></div>
+    </div>
+    <div class="chart">${swingChart(p)}</div>
+    <div class="qlinks">
+      <a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${p.code}">차트</a>
+      <a target="_blank" rel="noopener" href="https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(p.name)}">뉴스</a>
+      <a target="_blank" rel="noopener" href="https://finance.naver.com/item/frgn.naver?code=${p.code}">수급</a>
+    </div>
+  </div>`;
+}
+
+fetch("data.json?t="+Date.now())
+  .then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d=>{
+    document.getElementById("stamp").textContent =
+      (d.market_date||"").replace(/-/g,".") + " 기준" + (d.sample ? " · 샘플" : "");
+    const swing = d.swing || [];
+
+    // 성적표 (5영업일 기록이 쌓인 뒤)
+    const rv = d.swing_review;
+    if(rv && rv.items && rv.items.length){
+      document.getElementById("reviewSec").style.display = "";
+      document.getElementById("reviewSub").textContent =
+        `${(rv.date||"").replace(/-/g,".")} 후보를 ${rv.hold_days||5}영업일 뒤(현재가)로 채점`;
+      const avg = rv.avg_ret_pct;
+      document.getElementById("reviewBox").innerHTML =
+        `<div><span class="big ${avg>0?"up":avg<0?"down":"flat"}">${avg>0?"+":""}${avg}%</span> <span class="lbl">평균 수익률</span></div>
+         <div><span class="big">${rv.hit_rate}%</span> <span class="lbl">적중률(플러스 비율)</span></div>
+         <div class="items">${rv.items.map(it=>
+            `${esc(it.name)} <span class="${it.ret_pct>0?"up":it.ret_pct<0?"down":"flat"}">${it.ret_pct>0?"+":""}${it.ret_pct}%</span>`
+         ).join(" · ")}</div>`;
+    }
+
+    // 내 보유·관심 종목 교차 (이 브라우저에만 저장된 데이터 사용)
+    let mycodes = [];
+    try{
+      mycodes = (JSON.parse(localStorage.getItem("kr_idea_port")||"[]")).map(h=>h.code)
+        .concat(JSON.parse(localStorage.getItem("kr_idea_watchlist")||"[]"));
+    }catch(e){}
+    const hits = swing.filter(p=>mycodes.includes(p.code));
+    if(hits.length){
+      document.getElementById("myAlert").style.display = "";
+      document.getElementById("myAlertBody").innerHTML = hits.map(p=>
+        `<b>${esc(p.name)}</b> 스윙 ${p.swing}점 — ${(p.setups||[]).slice(0,3).map(esc).join(" · ")}`
+      ).join("<br>");
+    }
+
+    document.getElementById("swingCards").innerHTML = swing.length ? swing.map(card).join("")
+      : '<div class="empty">오늘은 스윙 점수 45점을 넘는 후보가 없습니다.<br><span style="font-size:11.5px">추세·수급·진입 조건이 맞는 종목이 없을 때는 쉬는 것도 전략입니다.</span></div>';
+  })
+  .catch(err=>{
+    document.getElementById("stamp").textContent = "데이터를 불러오지 못했습니다 ("+esc(err.message)+")";
+  });
+</script>
+</body>
+</html>

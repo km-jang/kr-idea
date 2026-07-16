@@ -1445,14 +1445,15 @@ def build_sample():
                    "summary": {"avg_ret_pct": round(sum(r["avg_ret_pct"] for r in perf_records) / len(perf_records), 2),
                                "win_rate_pct": round(wins / len(perf_records) * 100),
                                "beat_kospi_pct": round(beat / len(perf_records) * 100)}}
-    for s in ideas:                        # 미리보기용 20일 종가 (완만한 상승 랜덤워크)
+    for s in stocks:                       # 미리보기용 21일 종가 + 거래량 (완만한 상승 랜덤워크)
         base = s["price"] / random.uniform(1.02, 1.15)
         closes, v = [], base
-        for _ in range(20):
+        for _ in range(21):
             v *= random.uniform(0.985, 1.02)
             closes.append(round(v))
         closes[-1] = s["price"]
         s["closes"] = closes
+        s["volume"] = round(random.uniform(40, 600) * 1e8 / s["price"])  # 거래대금 40~600억
     # 미리보기용 누적 수익률 곡선
     curve, port, kospi = [], 100.0, 100.0
     for i in range(10):
@@ -1504,6 +1505,27 @@ def build_sample():
         v = round(v * random.uniform(0.995, 1.012), 2)
         trend.append({"d": f"2026-06-{10+i:02d}", "v": v})
     trend.append({"d": "2026-07-10", "v": 3412.68})
+    screens_sample = {"vacancy": [{"code": "010140", "name": "삼성중공업",
+                                   "why": "기관 45억+외인 18억 · 20일선 돌파"}],
+                      "pullback": [], "hotmoney": [],
+                      "stealth": [{"code": "000810", "name": "삼성화재",
+                                   "why": "외인 5일·기관 4일 연속 · 주가 5일 1.2% 변동뿐"}],
+                      "gate52": []}
+    mines_sample = [
+        {"code": "900001", "name": "샘플바이오", "score": 47,
+         "price": 3120, "change_pct": -2.1,
+         "reasons": ["유상증자 2회", "CB 발행", "52주 고점 대비 -55%",
+                     "이익 지표 부재 + 무배당"]},
+        {"code": "900002", "name": "샘플테크", "score": 30,
+         "price": 8900, "change_pct": -0.8,
+         "reasons": ["전환가 조정 2회", "외인·기관 동반 이탈 (5일 -42억)",
+                     "일 거래대금 7억 (저유동성)"]}]
+    swing_sample = build_swing(stocks, screens_sample, mines_sample, "2026-07-10")
+    swing_review_sample = {"date": "2026-07-03", "hold_days": 5, "avg_ret_pct": 3.4,
+                           "hit_rate": 67, "items": [
+                               {"name": "두산에너빌리티", "entry": 43000, "ret_pct": 8.2},
+                               {"name": "한화에어로스페이스", "entry": 890000, "ret_pct": 4.1},
+                               {"name": "HD한국조선해양", "entry": 263500, "ret_pct": -2.1}]}
     now = datetime.now(KST)
     return assemble(stocks, disclosures, ideas,
                     {"KOSPI": {"value": 3412.68, "change_pct": 0.87},
@@ -1513,18 +1535,14 @@ def build_sample():
                     scan_review=scan_review, strategies=strategies,
                     strategy_race=strategy_race, silence=silence,
                     news_compass=news_compass,
+                    swing=swing_sample, swing_review=swing_review_sample,
                     insider_watch=[{"company": "CJ ENM", "count": 3},
                                    {"company": "한미반도체", "count": 2}],
                     graduates=[{"code": "005490", "name": "POSCO홀딩스",
                                 "exit_date": "2026-07-06", "ret_pct": 6.8},
                                {"code": "035720", "name": "카카오",
                                 "exit_date": "2026-07-08", "ret_pct": -4.2}],
-                    screens={"vacancy": [{"code": "010140", "name": "삼성중공업",
-                                          "why": "기관 45억+외인 18억 · 20일선 돌파"}],
-                             "pullback": [], "hotmoney": [],
-                             "stealth": [{"code": "000810", "name": "삼성화재",
-                                          "why": "외인 5일·기관 4일 연속 · 주가 5일 1.2% 변동뿐"}],
-                             "gate52": []},
+                    screens=screens_sample,
                     insider_trades=[
                         {"code": "035760", "name": "CJ ENM", "price": 71200,
                          "change_pct": 0.71, "mktcap_100m": 15600,
@@ -1537,15 +1555,7 @@ def build_sample():
                          "buys": 0, "sells": 2, "net_shares": -8000,
                          "net_amt_100m": -6.6,
                          "people": ["최부사장(부사장) -5,000주", "정상무(상무) -3,000주"]}],
-                    mines=[
-                        {"code": "900001", "name": "샘플바이오", "score": 47,
-                         "price": 3120, "change_pct": -2.1,
-                         "reasons": ["유상증자 2회", "CB 발행", "52주 고점 대비 -55%",
-                                     "이익 지표 부재 + 무배당"]},
-                        {"code": "900002", "name": "샘플테크", "score": 30,
-                         "price": 8900, "change_pct": -0.8,
-                         "reasons": ["전환가 조정 2회", "외인·기관 동반 이탈 (5일 -42억)",
-                                     "일 거래대금 7억 (저유동성)"]}])
+                    mines=mines_sample)
 
 
 # ---------------------------------------------------------------------------
@@ -1921,12 +1931,187 @@ def build_graduates(hist_dir, stocks, current_codes, market_date, lookback=21):
     return out
 
 
+# ---------------------------------------------------------------------------
+# 5일선 스윙 레이더 (단기 스윙 · 조건검색 5종 흡수)
+# ---------------------------------------------------------------------------
+
+CONFIG_SWING = {
+    "min_mktcap": 3000,      # 최소 시가총액 (억) — 5선과 동일 하한
+    "liq_full": 100,         # 유동성 만점 거래대금 (억)
+    "liq_floor": 30,         # 최소 거래대금 (억) — 미달은 후보 제외
+    "overheat_chg": 15.0,    # 당일 급등 과열 경고 기준 (%)
+    "gate_chg": 24.0,        # 당일 상한가 임박 — 추격 금지 (%)
+    "stop_vol_mult": 1.5,    # 손절 = 최근 5일 평균 변동폭 × 배수
+    "target_rr": 2.0,        # 목표 = 손절폭 × 배수 (손익비 2:1)
+    "min_score": 45,         # 후보 최소 스윙 점수
+    "top_n": 8,              # 최대 후보 수
+}
+
+
+def _swing_ma(closes, n, back=0):
+    seq = closes[:len(closes) - back] if back else closes
+    return sum(seq[-n:]) / n if seq and len(seq) >= n else None
+
+
+def build_swing(stocks, screens, mines, market_date, cfg=None):
+    """5일 이동평균선 중심 단기 스윙 레이더.
+    점수(0~100) = 이평선 배열·추세(30) + 수급 연속(25) + 진입 위치(20)
+                 + 유동성(15) + 촉매(10). 리스크 게이트로 지뢰·악재공시·과열 제외.
+    조건검색 5종(빈집털이·눌림목·종합수급·몰래매집·신고가문앞)을 셋업 태그로 흡수한다.
+    반환: [{code,name,swing,parts,setups,entry,stop,target,ma5,ma20,closes,...}] (점수 내림차순)."""
+    cfg = cfg or CONFIG_SWING
+    setup_of = {}
+    for scr, items in (screens or {}).items():
+        lbl = SCREEN_LABELS.get(scr, scr)
+        for it in items:
+            setup_of.setdefault(it["code"], []).append(lbl)
+    mine_codes = {m.get("code") for m in (mines or [])}
+    out = []
+    for s in stocks:
+        code, px = s.get("code"), s.get("price")
+        closes = s.get("closes") or []
+        if not code or not px or len(closes) < 20:
+            continue
+        mkt = s.get("mktcap_100m") or 0
+        chg = s.get("change_pct")
+        vol = s.get("volume") or 0
+        turnover = px * vol / 1e8
+        # --- 리스크 게이트 (하나라도 걸리면 후보 제외) ---
+        if mkt < cfg["min_mktcap"]:
+            continue
+        if turnover < cfg["liq_floor"]:
+            continue
+        if code in mine_codes:                       # 💣 지뢰 종목 제외
+            continue
+        if (s.get("disc_score") or 0) < 0:           # 악재 공시 제외
+            continue
+        if chg is not None and chg >= cfg["gate_chg"]:   # 상한가 임박 추격 금지
+            continue
+        ma5, ma20 = _swing_ma(closes, 5), _swing_ma(closes, 20)
+        ma5p, ma20p = _swing_ma(closes, 5, back=1), _swing_ma(closes, 20, back=1)
+        if not (ma5 and ma20 and ma5p):              # ma20p는 21일치 있을 때만 (골든크로스용)
+            continue
+
+        parts, tags = {}, []
+        # ① 이평선 배열·추세 (30)
+        t = 0
+        if px > ma5 > ma20:
+            t += 15; tags.append("정배열")
+        elif px > ma5:
+            t += 8
+        if ma5 > ma5p:                               # 5일선 상승 기울기
+            t += 8
+        if ma20p and ma5 > ma20 and ma5p <= ma20p:   # 골든크로스 (오늘 갓 돌파)
+            t += 7; tags.append("골든크로스")
+        parts["trend"] = t
+        # ② 수급 연속 (25): 외인 최대 15(5일) + 기관 최대 10(3일)
+        fst, ist = s.get("f_streak") or 0, s.get("i_streak") or 0
+        parts["flow"] = round(min(min(fst, 5) * 3, 15) + min(min(ist, 3) * 3.34, 10))
+        if fst >= 2 and ist >= 2:
+            tags.append(f"외인{fst}·기관{ist}일")
+        elif fst >= 2:
+            tags.append(f"외인 {fst}일")
+        elif ist >= 2:
+            tags.append(f"기관 {ist}일")
+        # ③ 진입 위치 (20): 5일선 밀착이 이상적, 추격 배제
+        dist = px / ma5
+        if 0.98 <= dist <= 1.03:
+            e = 20; tags.append("5일선 지지")
+        elif 1.03 < dist <= 1.08:
+            e = 12
+        elif 0.94 <= dist < 0.98:
+            e = 10; tags.append("5일선 눌림")
+        elif dist > 1.12:
+            e = 2
+        else:
+            e = 5
+        if chg is not None and chg >= cfg["overheat_chg"]:
+            e = min(e, 5)
+            if "과열주의" not in tags:
+                tags.append("과열주의")
+        parts["entry_pos"] = e
+        # ④ 유동성 (15)
+        parts["liq"] = round(min(turnover / cfg["liq_full"], 1) * 15)
+        # ⑤ 촉매 (10): 뉴스·검색·호재공시
+        cpts = 0
+        if (s.get("news_24h") or 0) >= CONFIG["senti_news_hot"]:
+            cpts += 4; tags.append("뉴스")
+        if (s.get("trend_ratio") or 0) >= CONFIG["senti_trend_hot"]:
+            cpts += 3; tags.append("검색")
+        if (s.get("disc_score") or 0) > 0:
+            cpts += 3; tags.append("호재공시")
+        parts["catalyst"] = min(cpts, 10)
+
+        score = sum(parts.values())
+        if score < cfg["min_score"]:
+            continue
+        # --- 청산 계획: 손절 = 20일선(생명선)·변동성 중 가까운(높은) 쪽, 목표 = 손절폭 × 2 ---
+        rets = [abs(closes[i] / closes[i - 1] - 1)
+                for i in range(len(closes) - 5, len(closes)) if i >= 1]
+        atr_pct = (sum(rets) / len(rets) * 100) if rets else 2.5
+        stop_by_vol = px * (1 - atr_pct * cfg["stop_vol_mult"] / 100)
+        stop = max(ma20, stop_by_vol)                # 진입가에 더 가까운(높은) 손절
+        stop = min(stop, px * 0.99)                  # 최소 -1%는 확보 (진입가 위로 못 감)
+        target = px + (px - stop) * cfg["target_rr"]
+        setups = []
+        for x in setup_of.get(code, []) + tags:      # 조건검색 태그 우선, 중복 제거
+            if x not in setups:
+                setups.append(x)
+        out.append({
+            "code": code, "name": s.get("name"), "market": s.get("market"),
+            "swing": score, "parts": parts, "setups": setups[:4],
+            "entry": round(px), "chg": chg,
+            "stop": round(stop), "stop_pct": round((stop / px - 1) * 100, 1),
+            "target": round(target), "target_pct": round((target / px - 1) * 100, 1),
+            "ma5": round(ma5), "ma20": round(ma20),
+            "closes": [round(c) for c in closes[-20:]],
+        })
+    out.sort(key=lambda x: -x["swing"])
+    return out[:cfg["top_n"]]
+
+
+def build_swing_review(hist_dir, stocks, market_date, hold_days=5):
+    """스윙 후보 성적 채점: hold_days(영업일) 전 스냅샷의 스윙 후보를 오늘 종가로 평가.
+    스윙 데이터가 쌓인 스냅샷이 hold_days개 미만이면 None (초기 검증 대기)."""
+    hist = Path(hist_dir)
+    if not hist.exists():
+        return None
+    swing_days = []
+    for f in sorted(hist.glob("*.json")):
+        if market_date and f.stem >= market_date:
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if d.get("swing"):
+            swing_days.append((f.stem, d["swing"]))
+    if len(swing_days) < hold_days:
+        return None
+    day, picks = swing_days[-hold_days]
+    price_map = {s["code"]: s.get("price") for s in stocks if s.get("price")}
+    items, hit = [], 0
+    for p in picks:
+        e, p1 = p.get("entry"), price_map.get(p.get("code"))
+        if e and p1:
+            ret = round((p1 / e - 1) * 100, 2)
+            if ret > 0:
+                hit += 1
+            items.append({"name": p.get("name"), "entry": e, "ret_pct": ret})
+    if not items:
+        return None
+    return {"date": day, "hold_days": hold_days,
+            "avg_ret_pct": round(sum(i["ret_pct"] for i in items) / len(items), 2),
+            "hit_rate": round(hit / len(items) * 100),
+            "items": items}
+
+
 def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None,
              market_date=None, performance=None, kospi_trend=None,
              sentiment_enabled=False, perf_curve=None, scan_review=None,
              strategies=None, strategy_race=None, silence=None, news_compass=None,
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
-             mines=None):
+             mines=None, swing=None, swing_review=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -1975,6 +2160,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "screens": screens or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
+        "swing": swing or [],
+        "swing_review": swing_review,
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -2018,7 +2205,8 @@ def run_full(max_universe=None, out_path=None):
             m = flow_metrics(rows, s.get("price"))
             if m:
                 s.update(m)
-                s["closes"] = [r["close"] for r in reversed(rows[:20])]  # 과거→현재
+                # 21일치(과거→현재): 어제 기준 20일선 계산용 1일 여유 (스윙 골든크로스)
+                s["closes"] = [r["close"] for r in reversed(rows[:21])]
         except Exception as e:
             errors.append(f"flow {s['code']}: {e}")
         if i % 50 == 0:
@@ -2096,6 +2284,10 @@ def run_full(max_universe=None, out_path=None):
     hits = sum(len(v) for v in screens.values())
     if hits:
         print(f"  → 조건 검색 적중 {hits}건")
+    swing = build_swing(stocks, screens, mines, market_date)
+    if swing:
+        print(f"  → 스윙 후보 {len(swing)}종목")
+    swing_review = build_swing_review(hist_dir, stocks, market_date)
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")
@@ -2106,7 +2298,8 @@ def run_full(max_universe=None, out_path=None):
                     strategies=strategies, strategy_race=strategy_race,
                     silence=silence, news_compass=news_compass,
                     insider_watch=insider_watch, graduates=graduates,
-                    screens=screens, insider_trades=insider_trades, mines=mines)
+                    screens=screens, insider_trades=insider_trades, mines=mines,
+                    swing=swing, swing_review=swing_review)
 
 
 def main():

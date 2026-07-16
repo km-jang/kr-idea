@@ -1254,6 +1254,118 @@ def test_mine_message_lines():
         os.unlink(p)
 
 
+def _mkswing(code, name, base=10000, step=40, **kw):
+    """상승 선형 종가 21일치로 정배열 스윙 후보 스텁 생성."""
+    closes = [round(base + step * i) for i in range(21)]
+    price = closes[-1]
+    b = {"code": code, "name": name, "market": "KOSPI", "price": price,
+         "change_pct": 1.0, "mktcap_100m": 50000,
+         "volume": round(200 * 1e8 / price), "closes": closes,
+         "f_streak": 4, "i_streak": 3, "disc_score": 0,
+         "news_24h": 0, "trend_ratio": 0.5}
+    b.update(kw)
+    return b
+
+
+def test_build_swing_score_and_plan():
+    """정배열+수급+진입+유동성 만점 후보의 점수 구성과 청산 계획(손익비 2:1)."""
+    s = _mkswing("SW0001", "정배열주")
+    out = collect.build_swing([s], {}, [], "2026-07-16")
+    assert len(out) == 1
+    p = out[0]
+    assert p["code"] == "SW0001"
+    # 이평선 배열·추세(정배열 15 + 5일선 상승 8 = 23) + 수급(외인12+기관10=22)
+    #   + 진입(5일선 밀착 20) + 유동성(200억→15) = 80
+    assert p["parts"]["trend"] == 23
+    assert p["parts"]["flow"] == 22
+    assert p["parts"]["entry_pos"] == 20
+    assert p["parts"]["liq"] == 15
+    assert p["swing"] == 80
+    # 청산 계획: 손절 < 진입 < 목표, 손익비 2:1
+    assert p["stop"] < p["entry"] < p["target"]
+    assert abs(p["target_pct"] - 2 * abs(p["stop_pct"])) < 0.15
+    assert "정배열" in p["setups"] and "5일선 지지" in p["setups"]
+    assert len(p["closes"]) == 20     # 미니차트용 20일
+
+
+def test_build_swing_gates():
+    """리스크 게이트: 지뢰·악재공시·시총미달·저유동성·상한가임박 제외."""
+    good = _mkswing("GOOD01", "통과주")
+    mine = _mkswing("MINE01", "지뢰주")
+    bad_disc = _mkswing("BADD01", "악재주", disc_score=-8)
+    small = _mkswing("SMALL1", "소형주", mktcap_100m=1000)
+    illiq = _mkswing("ILLIQ1", "저유동", volume=1)          # 거래대금 미달
+    limit = _mkswing("LIMIT1", "상한가임박", change_pct=25.0)
+    stocks = [good, mine, bad_disc, small, illiq, limit]
+    out = collect.build_swing(stocks, {}, [{"code": "MINE01"}], "2026-07-16")
+    codes = {p["code"] for p in out}
+    assert codes == {"GOOD01"}, codes
+
+
+def test_build_swing_absorbs_screens():
+    """조건검색 5종이 셋업 태그로 흡수되는지 (동일 종목 → 스크린 라벨 부착)."""
+    s = _mkswing("SW0002", "빈집털이주")
+    screens = {"vacancy": [{"code": "SW0002", "name": "빈집털이주", "why": "x"}],
+               "pullback": [], "hotmoney": [], "stealth": [], "gate52": []}
+    out = collect.build_swing([s], screens, [], "2026-07-16")
+    assert out and collect.SCREEN_LABELS["vacancy"] in out[0]["setups"]
+    # 스크린 라벨이 태그보다 앞에 온다
+    assert out[0]["setups"][0] == collect.SCREEN_LABELS["vacancy"]
+
+
+def test_build_swing_min_score_and_overheat():
+    """점수 미달(45↓)은 제외 · 당일 급등(과열)은 진입점수 감점 + 과열주의 태그."""
+    # 수급·촉매 전무 + 진입 이격 큰 종목 → 45 미만
+    weak = _mkswing("WEAK01", "약한후보", f_streak=0, i_streak=0)
+    # 종가를 5일선에서 크게 띄워 진입 이격 → entry 2점
+    weak["price"] = round(weak["closes"][-1] * 1.2)
+    out = collect.build_swing([weak], {}, [], "2026-07-16")
+    assert out == []
+    # 과열: 당일 +18% 급등 → entry ≤5 + 과열주의
+    hot = _mkswing("HOT001", "급등주", change_pct=18.0)
+    out2 = collect.build_swing([hot], {}, [], "2026-07-16")
+    assert out2 and out2[0]["parts"]["entry_pos"] <= 5
+    assert "과열주의" in out2[0]["setups"]
+
+
+def test_build_swing_review():
+    """스윙 성적표: hold_days 전 후보를 현재가로 채점, 초기(기록 부족)엔 None."""
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as td:
+        # 기록 부족(4일) → None
+        for i, day in enumerate(("2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09")):
+            Path(td, day + ".json").write_text(json.dumps(
+                {"swing": [{"code": "AAA", "name": "가", "entry": 10000}]},
+                ensure_ascii=False), encoding="utf-8")
+        stocks = [{"code": "AAA", "price": 11000}]
+        assert collect.build_swing_review(td, stocks, "2026-07-16", hold_days=5) is None
+        # 5일치 채우면 5일 전 후보 채점
+        Path(td, "2026-07-10.json").write_text(json.dumps(
+            {"swing": [{"code": "AAA", "name": "가", "entry": 10000},
+                       {"code": "BBB", "name": "나", "entry": 20000}]},
+            ensure_ascii=False), encoding="utf-8")
+        stocks = [{"code": "AAA", "price": 11000}, {"code": "BBB", "price": 19000}]
+        rv = collect.build_swing_review(td, stocks, "2026-07-16", hold_days=5)
+        assert rv and rv["date"] == "2026-07-06"   # 5개 중 가장 오래된 = 5일 전
+        # 그 날 후보는 AAA 하나 (entry 10000 → 11000 = +10%)
+        assert rv["items"][0]["name"] == "가" and rv["items"][0]["ret_pct"] == 10.0
+        assert rv["hit_rate"] == 100
+
+
+def test_swing_in_sample_schema():
+    """샘플 데이터에 스윙 후보·성적표 키가 있고 직렬화 가능."""
+    data = collect.build_sample()
+    assert "swing" in data and "swing_review" in data
+    assert len(data["swing"]) > 0
+    p = data["swing"][0]
+    for k in ("code", "name", "swing", "setups", "entry", "stop", "target",
+              "ma5", "ma20", "closes"):
+        assert k in p, k
+    assert p["stop"] < p["entry"] < p["target"]
+    json.dumps(data, ensure_ascii=False)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
