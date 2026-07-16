@@ -19,6 +19,8 @@
   --up:#c93a3a; --down:#256abf;            /* 국내 관례: 빨강=상승, 파랑=하락 */
   --good:#0ca30c; --good-text:#006300; --crit:#d03b3b; --watch:#898781;
   --chip-bg:#f0efec;
+  /* 점수 4축 색 (dataviz 검증 팔레트) */
+  --sc-flow:#2a78d6; --sc-val:#1baf7a; --sc-mom:#eda100; --sc-disc:#4a3aa7;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -30,6 +32,7 @@
     --up:#e66767; --down:#3987e5;
     --good:#0ca30c; --good-text:#0ca30c; --crit:#e66767; --watch:#898781;
     --chip-bg:#262624;
+    --sc-flow:#3987e5; --sc-val:#199e70; --sc-mom:#c98500; --sc-disc:#9085e9;
   }
 }
 *{box-sizing:border-box}
@@ -56,7 +59,8 @@ input.memo{width:130px;font-size:12px;font-family:inherit;color:var(--ink-2);
   background:transparent;border:none;border-bottom:1px dashed var(--grid);
   outline:none;padding:2px 0}
 input.memo:focus{border-bottom-color:var(--series-1);color:var(--ink-1)}
-.tile .delta{font-size:13px;font-weight:600;margin-left:6px}
+.tile .val{white-space:nowrap}
+.tile .delta{font-size:13px;font-weight:600;margin-left:5px;white-space:nowrap;display:inline-block}
 .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
 
 nav.chips{position:sticky;top:0;z-index:5;display:flex;gap:8px;overflow-x:auto;
@@ -73,13 +77,41 @@ h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
 /* 아이디어 카드 */
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
 .card{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:14px 15px}
-.card .row1{display:flex;align-items:baseline;gap:8px}
+.card .row1{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
 .card .rank{font-size:12px;font-weight:800;color:var(--series-1-deep)}
-.card .nm{font-size:16px;font-weight:700}
-.card .cd{font-size:11.5px;color:var(--ink-3)}
-.card .px{margin-left:auto;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.card .nm{font-size:16px;font-weight:700;white-space:nowrap}
+.card .cd{font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+.card .px{margin-left:auto;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .scorebar{height:5px;border-radius:4px;background:var(--chip-bg);margin:9px 0 4px;overflow:hidden}
 .scorebar i{display:block;height:100%;border-radius:4px;background:var(--seq-400)}
+/* 점수 분해 막대: 4축이 색 비율로 쌓임 (2px 표면 간격) */
+.sbar{display:flex;height:15px;border-radius:4px;margin:9px 0 4px;background:var(--chip-bg);gap:2px;overflow:hidden}
+.sbar .seg{height:100%;display:flex;align-items:center;justify-content:center;
+  font-size:9.5px;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;min-width:0}
+.sbar .seg-f{background:var(--sc-flow)} .sbar .seg-v{background:var(--sc-val)}
+.sbar .seg-m{background:var(--sc-mom)} .sbar .seg-d{background:var(--sc-disc)}
+.sblegend{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;color:var(--ink-3);margin:2px 0 10px}
+.sblegend span{display:inline-flex;align-items:center;gap:4px}
+.sblegend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.disc-neg{font-size:11px;font-weight:700;color:var(--down)}
+/* 신호 리본: 다른 레이더들이 이 종목에 대해 감지한 것을 카드 상단 한 줄로 */
+.ribbon{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 2px}
+.rchip{font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 9px;
+  display:inline-flex;align-items:center;gap:3px;line-height:1.4}
+.rchip.buy{background:rgba(12,163,12,.14);color:var(--good-text)}
+.rchip.risk{background:rgba(208,59,59,.14);color:var(--crit)}
+.rchip.hot{background:rgba(201,58,58,.12);color:var(--up)}
+.rchip.scr{background:rgba(42,120,214,.14);color:var(--series-1-deep)}
+.rchip.sil{background:var(--chip-bg);color:var(--ink-2)}
+/* 업종 히트맵: 발산 색 타일 (빨강 유입 · 파랑 이탈 · 회색 중립) */
+.heat{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
+.hcell{border-radius:8px;padding:9px 10px;min-height:56px;display:flex;flex-direction:column;
+  justify-content:space-between;border:1px solid var(--ring);cursor:default}
+.hcell .hs{font-size:12px;font-weight:600;line-height:1.2}
+.hcell .hv{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.heatscale{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-3);margin-top:10px}
+.heatscale i{height:9px;flex:1;border-radius:3px;
+  background:linear-gradient(90deg,var(--down),var(--chip-bg),var(--up))}
 .card .sc{font-size:12px;color:var(--ink-2)}
 .card .sc b{color:var(--ink-1)}
 .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
@@ -140,9 +172,9 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 /* 가중치 슬라이더 */
 .sliders{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;
   padding:12px 16px 8px;margin-bottom:12px}
-.slrow{display:grid;grid-template-columns:52px 1fr 46px;align-items:center;gap:10px;padding:3px 0}
-.sllbl{font-size:12.5px;font-weight:600;color:var(--ink-2)}
-.slval{font-size:12px;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums}
+.slrow{display:grid;grid-template-columns:62px 1fr 52px;align-items:center;gap:9px;padding:3px 0}
+.sllbl{font-size:12.5px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.slval{font-size:12px;color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .slrow input[type=range]{width:100%;accent-color:var(--series-1);height:22px}
 .slfoot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:6px 0 4px}
 .slfoot button{white-space:nowrap}
@@ -627,14 +659,21 @@ function priceSpark(closes){
 function tiles(d){
   const k = d.indices?.KOSPI||{}, q = d.indices?.KOSDAQ||{};
   const t = (lbl,o,extra)=>`<div class="tile"><div class="lbl">${lbl}</div>
-    <div class="val">${fmt(o.value,2)}<span class="delta ${cls(o.change_pct)}">
-    ${arrow(o.change_pct)} ${o.change_pct==null?"":Math.abs(o.change_pct).toFixed(2)+"%"}</span></div>${extra||""}</div>`;
+    <div class="val">${fmt(o.value,2)}<span class="delta ${cls(o.change_pct)}">${arrow(o.change_pct)}${o.change_pct==null?"":Math.abs(o.change_pct).toFixed(2)+"%"}</span></div>${extra||""}</div>`;
+  // 5선 오늘 평균 등락 (내 발굴의 오늘 성적)
+  const ideas = d.ideas || [];
+  const chgs = ideas.map(s=>s.change_pct).filter(v=>v!=null);
+  const avg = chgs.length ? chgs.reduce((a,b)=>a+b,0)/chgs.length : null;
+  // 위험 신호: 지뢰 + 악재성 공시
+  const risk = (d.mines||[]).length + (d.disclosures||[]).filter(x=>(x.score||0)<0).length;
+  const heroPick = `<div class="tile"><div class="lbl">5선 오늘 평균</div>
+     <div class="val ${cls(avg)}">${avg==null?"–":(avg>0?"+":"")+avg.toFixed(2)+"%"}</div>
+     <div style="font-size:11px;color:var(--ink-3)">발굴 ${ideas.length}종목 오늘 성적</div></div>`;
+  const heroRisk = `<div class="tile" ${risk?'style="border-color:var(--crit)"':''}><div class="lbl">위험 신호</div>
+     <div class="val ${risk?'':'flat'}" ${risk?'style="color:var(--crit)"':''}>${risk}<span class="delta flat">건</span></div>
+     <div style="font-size:11px;color:var(--ink-3)">${risk?'💣 지뢰·악재 공시':'오늘 감지 없음'}</div></div>`;
   document.getElementById("tiles").innerHTML =
-    t("KOSPI",k,sparkline(d.kospi_trend))+t("KOSDAQ",q)+
-    `<div class="tile"><div class="lbl">스캔 유니버스</div>
-     <div class="val">${fmt(d.universe_size)}<span class="delta flat">종목</span></div></div>`+
-    `<div class="tile"><div class="lbl">공시 시그널</div>
-     <div class="val">${fmt((d.disclosures||[]).length)}<span class="delta flat">건</span></div></div>`;
+    t("KOSPI",k,sparkline(d.kospi_trend))+t("KOSDAQ",q)+heroPick+heroRisk;
 }
 
 /* ---------- 가중치 슬라이더 ---------- */
@@ -819,10 +858,57 @@ document.addEventListener("click", e=>{
         `(${dir>0?"더 보기":"덜 보기"}) · 되돌리기: [기본값]`);
 });
 
+/* 신호 리본: 다른 섹션의 레이더가 이 종목을 짚었는지 교차 표시 (없으면 빈 문자열=0픽셀) */
+function signalRibbon(s, d){
+  const chips = [];
+  const it = (d.insider_trades||[]).find(x=>x.code===s.code);
+  if(it && it.net_amt_100m > 0) chips.push(`<span class="rchip buy">👤 내부자매수 +${it.net_amt_100m}억</span>`);
+  const mine = (d.mines||[]).find(m=>m.code===s.code);
+  if(mine) chips.push(`<span class="rchip risk">💣 위험 ${mine.score}</span>`);
+  const hot = ((d.news_compass||{}).hot_themes||[]).find(t=>(t.stocks||[]).some(x=>x.code===s.code));
+  if(hot) chips.push(`<span class="rchip hot">🔥 ${esc(hot.name)}</span>`);
+  const scr = [];
+  const SC = {vacancy:"빈집털이",pullback:"눌림목",hotmoney:"종합수급",stealth:"몰래매집",gate52:"신고가문앞"};
+  for(const k in SC){ if(((d.screens||{})[k]||[]).some(h=>h.code===s.code)) scr.push(SC[k]); }
+  if(scr.length) chips.push(`<span class="rchip scr">🔎 ${scr.map(esc).join("·")}</span>`);
+  if((d.silence||[]).some(x=>x.code===s.code)) chips.push(`<span class="rchip sil">🤫 침묵</span>`);
+  return chips.length ? `<div class="ribbon">${chips.join("")}</div>` : "";
+}
+
+/* 점수 분해 막대: 수급·밸류·모멘텀·공시(양수) 기여분을 색 비율로. 공시 음수는 별도 표기 */
+function scoreBar(s){
+  const parts = [
+    {k:"f", v:Math.max(0, s.flow_score||0)},
+    {k:"v", v:Math.max(0, s.value_score||0)},
+    {k:"m", v:Math.max(0, s.mom_score||0)},
+    {k:"d", v:Math.max(0, s.disc_score||0)},
+  ];
+  const tot = parts.reduce((a,p)=>a+p.v, 0) || 1;
+  const label = {f:"수급", v:"밸류", m:"모멘텀", d:"공시"};
+  const segs = parts.filter(p=>p.v>0).map(p=>{
+    const w = p.v/tot*100;
+    const txt = w >= 14 ? `${label[p.k]} ${Math.round(p.v)}` : (w >= 7 ? Math.round(p.v) : "");
+    return `<span class="seg seg-${p.k}" style="width:${w.toFixed(1)}%" title="${label[p.k]} ${Math.round(p.v)}점">${txt}</span>`;
+  }).join("");
+  const neg = (s.disc_score||0) < 0 ? ` <span class="disc-neg" title="악재성 공시 감점">공시 ${s.disc_score}</span>` : "";
+  return `<div class="sbar" role="img" aria-label="점수 구성: 수급 ${s.flow_score} 밸류 ${s.value_score} 모멘텀 ${s.mom_score||0} 공시 ${s.disc_score}">${segs}</div>${neg?`<div style="margin:-2px 0 4px">${neg}</div>`:""}`;
+}
+
 function ideaCards(d, override){
   const el = document.getElementById("ideaCards");
   const list = override || d.ideas || [];
   if(!list.length){el.innerHTML='<div class="empty">조건을 만족하는 종목이 없습니다.</div>';return;}
+  // 점수 막대 범례 (색=식별, 색만으로 의미하지 않도록 1회 표시)
+  let lg = document.getElementById("sbLegend");
+  if(!lg){
+    lg = document.createElement("div"); lg.id="sbLegend"; lg.className="sblegend";
+    lg.innerHTML = `<span><i style="background:var(--sc-flow)"></i>수급</span>`+
+      `<span><i style="background:var(--sc-val)"></i>밸류</span>`+
+      `<span><i style="background:var(--sc-mom)"></i>모멘텀</span>`+
+      `<span><i style="background:var(--sc-disc)"></i>공시</span>`+
+      `<span style="color:var(--ink-3)">· 막대 폭 = 각 축의 점수 기여도</span>`;
+    el.parentNode.insertBefore(lg, el);
+  }
   el.innerHTML = list.map((s,i)=>`
   <div class="card">
     <div class="row1"><span class="rank">${i+1}</span>
@@ -833,8 +919,9 @@ function ideaCards(d, override){
       ${(s.news_24h||0)>=10?`<span class="badge-days" title="24시간 기사 ${s.news_24h}건">📰${s.news_24h}</span>`:""}
       <span class="px ${cls(s.change_pct)}">${fmt(s.price)} ${arrow(s.change_pct)}${s.change_pct==null?"":Math.abs(s.change_pct).toFixed(2)+"%"}</span>
     </div>
+    ${signalRibbon(s, d)}
     ${priceSpark(s.closes)}
-    <div class="scorebar"><i style="width:${Math.min(100,s.score)}%"></i></div>
+    ${scoreBar(s)}
     <div class="sc">종합 <b>${s.score}</b> · 수급 ${s.flow_score} · 밸류 ${s.value_score}${s.mom_score!=null?` · 모멘텀 ${s.mom_score}`:""} · 공시 ${s.disc_score>=0?"+":""}${s.disc_score}</div>
     <div class="tags">${(s.reasons||[]).slice(0,4).map(r=>`<span class="tag">${esc(r)}</span>`).join("")}</div>
     <div class="links">${starHtml(s.code)}${linksHtml(s.code)}<span class="fbbtn" data-fb="up" data-code="${s.code}" title="이런 종목 더">👍</span><span class="fbbtn" data-fb="down" data-code="${s.code}" title="이런 종목 덜">👎</span><a class="xlink" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(s.name)}">공시</a></div>
@@ -935,13 +1022,29 @@ function sectorBars(d){
   const rows = Object.entries(agg).map(([k,v])=>({sector:k, amt:Math.round(v)}))
     .sort((a,b)=>b.amt-a.amt);
   const max = Math.max(...rows.map(r=>Math.abs(r.amt)), 1);
-  el.innerHTML = rows.map(r=>{
-    const w = (Math.abs(r.amt)/max*50).toFixed(1);   // 가운데 0축 기준, 한쪽 최대 50%
-    return `<div class="brow" title="${esc(r.sector)} ${who} 5일 순매수 ${fmt(r.amt)}억">
-      <span class="bl">${esc(r.sector)}</span>
-      <span class="btrack diverge"><span class="bfill ${r.amt>=0?"pos":"neg"}" style="width:${w}%"></span></span>
-      <span class="bv ${cls(r.amt)}">${r.amt>0?"+":""}${fmt(r.amt)}</span></div>`;
-  }).join("");
+  el.innerHTML = `<div class="heat">` + rows.map(r=>{
+    const c = divColor(r.amt, max);
+    return `<div class="hcell" style="background:${c.bg};color:${c.fg}"
+      title="${esc(r.sector)} ${who} 5일 순매수 ${fmt(r.amt)}억">
+      <span class="hs">${esc(r.sector)}</span>
+      <span class="hv">${r.amt>0?"+":""}${fmt(r.amt)}<span style="font-size:10px;font-weight:600;opacity:.8">억</span></span>
+    </div>`;
+  }).join("") + `</div>`+
+  `<div class="heatscale"><span>파랑=이탈</span><i></i><span>빨강=유입</span></div>`;
+}
+
+/* 발산 색: 유입(+)=빨강, 이탈(-)=파랑, 0 근처=표면. 강도=|금액|/최대 */
+function divColor(amt, max){
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const t = Math.min(1, Math.abs(amt) / max);
+  // 표면색 → 극단색 보간
+  const surf = dark ? [26,26,25] : [252,252,251];
+  const pole = amt >= 0 ? (dark ? [230,103,103] : [201,58,58])   // up/빨강
+                        : (dark ? [57,135,229] : [37,106,191]);  // down/파랑
+  const mix = surf.map((s,i)=> Math.round(s + (pole[i]-s) * (0.12 + t*0.78)));
+  const bg = `rgb(${mix.join(",")})`;
+  const fg = t > 0.45 ? "#fff" : (dark ? "#fff" : "var(--ink-1)");
+  return {bg, fg};
 }
 
 /* 정렬 가능한 테이블 렌더러 */
