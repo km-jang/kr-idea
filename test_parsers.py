@@ -312,6 +312,52 @@ def test_intraday_snapshot_overwrite():
     assert collect.is_holiday_rerun(done, "2026-07-14", now=evening) is True
 
 
+def test_intraday_snapshot_next_morning_overwrite():
+    """어제 장중 스냅샷이 남았으면 이튿날 아침 자가복구가 확정치로 덮어써야 한다 (2026-07-16 실장애)."""
+    from datetime import datetime
+    snap = {"market_date": "2026-07-16", "generated_at": "2026-07-16 15:28 KST"}
+    next_morning = datetime(2026, 7, 17, 8, 3)   # 개장 전이라 최근거래일은 여전히 7/16
+    assert collect.is_holiday_rerun(snap, "2026-07-16", now=next_morning) is False
+    # 어제 '마감 후 정상 수집분'이면 다음날 아침에는 재수집 불필요 → 스킵
+    done = {"market_date": "2026-07-16", "generated_at": "2026-07-16 19:15 KST"}
+    assert collect.is_holiday_rerun(done, "2026-07-16", now=next_morning) is True
+    # 주말을 건너뛴 월요일 아침에도 금요일 장중 스냅샷은 덮어쓰기 허용
+    fri_snap = {"market_date": "2026-07-10", "generated_at": "2026-07-10 10:00 KST"}
+    mon_morning = datetime(2026, 7, 13, 8, 3)
+    assert collect.is_holiday_rerun(fri_snap, "2026-07-10", now=mon_morning) is False
+
+
+def test_ops_log_record():
+    """실행 성적표(ops.json) 레코드 조립 — 고정 픽스처만 사용."""
+    import ops_log
+    data = {"generated_at": "2026-07-17 19:15 KST"}
+    sent = {"morning": "2026-07-17", "evening": "2026-07-17", "pulse": "2026-07-16"}
+    scans = [{"date": "2026-07-17"}, {"date": "2026-07-16"}]
+    r = ops_log.build_record(data, sent, scans, "2026-07-17", recover="none")
+    assert r["data_final"] is True and r["morning"] is True and r["evening"] is True
+    assert r["pulse"] is False and r["scan"] is True and r["recover"] == "none"
+    # 장중 스냅샷(15:40 이전)은 확정 수집으로 치지 않는다
+    r2 = ops_log.build_record({"generated_at": "2026-07-17 15:28 KST"}, {}, [], "2026-07-17")
+    assert r2["data_final"] is False and r2["morning"] is False and r2["scan"] is False
+    # 빈 입력도 안전
+    r3 = ops_log.build_record({}, None, None, "2026-07-17", recover="fail")
+    assert r3["data_final"] is False and r3["recover"] == "fail"
+
+
+def test_ops_log_append():
+    """장부 추가: 같은 날짜 교체 + 보존 한도 + 정렬. 순수 함수라 파일 불필요."""
+    import ops_log
+    log = [{"date": "2026-07-15", "recover": "none"}, {"date": "2026-07-16", "recover": "fail"}]
+    rec = {"date": "2026-07-16", "recover": "ok"}
+    out = ops_log.append_record(log, rec)
+    assert len(out) == 2 and out[-1]["recover"] == "ok"       # 같은 날짜는 교체
+    assert out[0]["date"] == "2026-07-15"                      # 날짜순 정렬
+    many = [{"date": f"2026-06-{d:02d}"} for d in range(1, 31)]
+    out2 = ops_log.append_record(many, {"date": "2026-07-01"}, keep=30)
+    assert len(out2) == 30 and out2[-1]["date"] == "2026-07-01"  # 한도 유지, 최신 보존
+    assert ops_log.append_record("깨진 장부", {"date": "2026-07-01"}) == [{"date": "2026-07-01"}]
+
+
 def test_load_previous(tmp_path=None):
     import tempfile, os
     with tempfile.TemporaryDirectory() as td:

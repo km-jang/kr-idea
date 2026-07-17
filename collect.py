@@ -1219,9 +1219,11 @@ def apply_idea_streaks(ideas, past_idea_sets):
 
 def is_holiday_rerun(prev, market_date, now=None):
     """직전 발행분과 장 기준일이 같으면 휴장일 재실행 → 갱신 생략.
-    예외: 직전 수집이 같은 날 '장중 스냅샷'(15:40 이전 생성)이고 지금은 마감 후라면,
-    확정치(수급·종가)로 덮어쓰기 위해 재수집을 허용한다.
-    (실사례 2026-07-15: 아침 수동 실행이 저녁 정기 수집을 막았던 문제의 수정)"""
+    예외: 직전 수집이 같은 날 '장중 스냅샷'(15:40 이전 생성)이고 지금은 그 장의 마감 후라면,
+    확정치(수급·종가)로 덮어쓰기 위해 재수집을 허용한다. '마감 후'에는 다음날 이후도 포함
+    (다음날 아침 자가복구가 어제 장중 스냅샷을 확정치로 덮어쓸 수 있게).
+    (실사례 2026-07-15: 아침 수동 실행이 저녁 정기 수집을 막았던 문제 /
+     실사례 2026-07-16: 장중 수동 스냅샷이 이튿날 아침까지 남았던 문제의 수정)"""
     if not (prev and market_date and prev.get("market_date") == market_date):
         return False
     now = now or datetime.now(KST)
@@ -1232,9 +1234,10 @@ def is_holiday_rerun(prev, market_date, now=None):
         return True    # 생성 시각 불명 → 기존 동작(생략) 유지
     intraday_prev = (gen_dt.strftime("%Y-%m-%d") == market_date
                      and gen_dt.hour * 60 + gen_dt.minute < 15 * 60 + 40)
-    after_close = now.hour * 60 + now.minute >= 15 * 60 + 40
+    after_close = (now.strftime("%Y-%m-%d") > gen_dt.strftime("%Y-%m-%d")
+                   or now.hour * 60 + now.minute >= 15 * 60 + 40)
     if intraday_prev and after_close:
-        return False   # 장중 스냅샷 → 마감 확정치로 같은 날 덮어쓰기
+        return False   # 장중 스냅샷 → 마감 확정치로 덮어쓰기 (당일 저녁 또는 익일)
     return True
 
 

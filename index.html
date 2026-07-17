@@ -40,7 +40,13 @@ body{margin:0;background:var(--page);color:var(--ink-1);
   font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 .wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
-header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px;position:relative}
+#opsPanel{position:absolute;top:100%;left:0;z-index:60;background:var(--surface-1);border:1px solid var(--ring);
+  border-radius:10px;padding:10px 14px;box-shadow:0 6px 24px rgba(0,0,0,.14);
+  max-width:calc(100vw - 40px);overflow-x:auto}
+#opsPanel table{border-collapse:collapse;font-size:12px;margin-top:6px}
+#opsPanel td,#opsPanel th{padding:2px 7px;text-align:center;position:static;background:transparent}
+#opsPanel td:first-child{text-align:left;color:var(--ink-2)}
 header.top h1{font-size:20px;font-weight:700;margin:0}
 .stamp{color:var(--ink-3);font-size:12.5px}
 .badge-sample{display:inline-block;font-size:11px;font-weight:700;color:#7a5200;
@@ -294,7 +300,8 @@ table.slim{min-width:0}
 <div class="wrap">
   <header class="top">
     <h1>국내장 아이디어 대시보드</h1>
-    <span id="hdot" style="display:none;width:8px;height:8px;border-radius:50%;flex:0 0 auto"></span>
+    <span id="hdot" style="display:none;width:8px;height:8px;border-radius:50%;flex:0 0 auto;cursor:pointer"></span>
+    <div id="opsPanel" style="display:none"></div>
     <span class="stamp" id="stamp">불러오는 중…</span>
     <span class="badge-sample" id="sampleBadge" style="display:none">샘플 데이터</span>
     <a href="swing.html" style="font-size:12px;color:var(--series-1-deep);text-decoration:none;font-weight:600">📈 스윙 레이더</a>
@@ -1913,8 +1920,40 @@ function healthDot(d){
     color = "#1baf7a"; label = "시스템 정상 작동 중 (기준일 " + d.market_date + ")";
   }
   el.style.background = color;
-  el.title = label;
+  el.title = label + " · 클릭하면 실행 성적표";
   el.style.display = "inline-block";
+  el.onclick = toggleOps;
+}
+
+/* ---------- 실행 성적표 (신호등 클릭 → 최근 5영업일 매트릭스, ops.json) ---------- */
+let OPS = null;
+async function toggleOps(){
+  const p = document.getElementById("opsPanel");
+  if(!p) return;
+  if(p.style.display !== "none"){ p.style.display = "none"; return; }
+  if(OPS === null){
+    try{
+      const res = await fetch("ops.json?t=" + Date.now());
+      OPS = res.ok ? await res.json() : [];
+    }catch(e){ OPS = []; }
+  }
+  const rows = (Array.isArray(OPS) ? OPS : []).slice(-5).reverse();
+  const mark = v => v ? '<span style="color:var(--up);font-weight:700">✓</span>'
+                      : '<span style="color:var(--ink-3)">―</span>';
+  p.innerHTML = rows.length
+    ? '<b style="font-size:12px">🩺 실행 성적표 (최근 ' + rows.length + '영업일)</b>'
+      + '<table><tr><th></th><th>수집</th><th>아침</th><th>점심</th><th>스캔</th><th>저녁</th><th>복구</th></tr>'
+      + rows.map(r => '<tr><td>' + esc((r.date || "").slice(5)) + '</td>'
+          + '<td>' + mark(r.data_final) + '</td><td>' + mark(r.morning) + '</td>'
+          + '<td>' + mark(r.pulse) + '</td><td>' + mark(r.scan) + '</td>'
+          + '<td>' + mark(r.evening) + '</td>'
+          + '<td>' + (r.recover === "ok" ? "🔧 성공"
+                     : r.recover === "fail" ? '<span style="color:var(--crit);font-weight:700">실패</span>'
+                     : '<span style="color:var(--ink-3)">불필요</span>') + '</td></tr>').join("")
+      + '</table><div style="font-size:11px;color:var(--ink-3);margin-top:5px">매일 밤 야간 자가 점검(21:33)이 기록 · ✓=정상 실행 · 복구=자동 복구 작동 여부</div>'
+    : '<b style="font-size:12px">🩺 실행 성적표</b>'
+      + '<div style="font-size:12px;color:var(--ink-3);margin-top:4px">아직 기록이 없습니다 — 야간 자가 점검(21:33)이 매일 밤 기록을 남깁니다.</div>';
+  p.style.display = "block";
 }
 
 function renderAll(d, isHistory){
