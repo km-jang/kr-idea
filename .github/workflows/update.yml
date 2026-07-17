@@ -118,11 +118,13 @@ jobs:
         run: |
           TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
           HAVE=$(python -c "import json;print(json.load(open('data.json')).get('market_date',''))" 2>/dev/null || echo "")
-          if [ "$HAVE" = "$TODAY" ]; then
-            echo "본 수집 완료 확인($HAVE) — 예비 알람 조용히 종료"
+          GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
+          FINAL=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+          if [ "$FINAL" = "yes" ]; then
+            echo "본 수집 완료 확인(마감 후 수집 $GEN) — 예비 알람 조용히 종료"
             exit 0
           fi
-          echo "본 수집 누락 감지(현재 데이터: $HAVE) — 예비 수집 시작"
+          echo "본 수집 누락 감지(현재 데이터: $HAVE / 생성 $GEN) — 예비 수집 시작"
           python test_parsers.py
           python collect.py
           git config user.name "dashboard-bot"
@@ -184,10 +186,13 @@ jobs:
           git add scans.json 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "scan(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && git push)
 
-      - name: 야간 자가 점검 (21:30, 수집 반영 감시)
+      - name: 야간 자가 점검 (21:30, 수집 반영 감시 + 자동 복구)
         if: github.event.schedule == '30 12 * * 1-5'
         continue-on-error: true
         env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
@@ -196,9 +201,29 @@ jobs:
           GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
           FRESH=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
           if [ "$FRESH" = "yes" ]; then echo "자가 점검 통과 (수집 $GEN)"; exit 0; fi
-          MSG="🩺 야간 자가 점검: 오늘 마감 수집이 아직 반영되지 않았습니다 (현재 데이터: $GEN)
-          휴장일이면 정상입니다. 평일이라면 Actions 확인 또는 Run workflow로 수동 수집을 권장합니다.
+          echo "마감 수집 미반영 감지 (현재: $GEN) — 자동 복구 시도"
+          RECOVER=fail
+          NEWGEN=""
+          if python test_parsers.py && python collect.py; then
+            git config user.name "dashboard-bot"
+            git config user.email "actions@github.com"
+            git add data.json history/ 2>/dev/null || git add data.json
+            git diff --cached --quiet || (git commit -m "data(자가복구): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')" && git push)
+            NEWGEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
+            NEWFRESH=$(python -c "g='$NEWGEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+            if [ "$NEWFRESH" = "yes" ]; then
+              RECOVER=ok
+              python notify.py --evening --if-not-sent || true
+            fi
+          fi
+          if [ "$RECOVER" = "ok" ]; then
+            MSG="🩺 야간 자가 점검: 마감 수집 누락을 발견해 자동 복구했습니다 (새 수집: $NEWGEN)
+          저녁 브리핑이 미발송 상태였다면 방금 함께 발송됐습니다."
+          else
+            MSG="🩺 야간 자가 점검: 오늘 마감 수집이 반영되지 않았고 자동 복구도 실패했습니다 (현재 데이터: $GEN)
+          휴장일이면 정상입니다. 평일이라면 Actions 로그 확인 후 Run workflow로 수동 수집을 권장합니다.
           https://github.com/${{ github.repository }}/actions"
+          fi
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
 
