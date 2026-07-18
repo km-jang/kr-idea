@@ -2081,7 +2081,8 @@ function openQsheet(code, name){
   s.innerHTML = `
     <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}
     <div class="qrow">
-      <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">📈 차트</a>
+      <a class="qbtn" href="chart.html?c=${code}">📊 차트 카드</a>
+      <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">📈 네이버 차트</a>
       <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">📰 뉴스</a>
       <a class="qbtn" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(name)}">📄 공시</a>
       <button class="qbtn" onclick="closeQsheet();showDevil('${code}')">😈 반론 보기</button>

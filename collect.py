@@ -312,9 +312,79 @@ def parse_frgn_html(html):
         frgn = to_num(cells[6])
         if close is None or (inst is None and frgn is None):
             continue
-        rows.append({"date": date, "close": close,
+        rows.append({"date": date, "close": close, "vol": to_num(cells[4]) or 0,
                      "inst": inst or 0.0, "frgn": frgn or 0.0})
     return rows  # 페이지 특성상 최신순
+
+
+def fetch_price_history(code, days=120, fetch_page=None, delay=None):
+    """frgn 페이지를 여러 장 이어붙여 장기 종가·거래량 이력 확보.
+    반환: [{date, close, vol}, ...] 과거→현재 순. 차트 카드(chart_pack) 전용."""
+    if fetch_page is None:
+        def fetch_page(page):
+            return get_text(
+                f"https://finance.naver.com/item/frgn.naver?code={code}&page={page}",
+                encoding="euc-kr")
+    rows, page = [], 1
+    while len(rows) < days and page <= 10:
+        prows = parse_frgn_html(fetch_page(page))
+        seen = {r["date"] for r in rows}
+        fresh = [r for r in prows if r["date"] not in seen]
+        if not fresh:
+            break                      # 마지막 페이지 도달(반복 시작) → 종료
+        rows.extend(fresh)
+        page += 1
+        time.sleep(delay if delay is not None else REQUEST_DELAY)
+    rows = rows[:days]
+    rows.reverse()                     # 과거→현재
+    return rows
+
+
+def chart_targets(ideas, swing, watch_codes, limit=35):
+    """차트 카드 대상 종목: 오늘의 5선 + 스윙 후보 + 워치리스트 (중복 제거, 상한)."""
+    codes = []
+    for src in (ideas or [], swing or []):
+        for s in src:
+            c = s.get("code")
+            if c and c not in codes:
+                codes.append(c)
+    for c in watch_codes or []:
+        if c and c not in codes:
+            codes.append(c)
+    return codes[:limit]
+
+
+def read_watchlist_codes(path=None):
+    """watchlist.txt → 6자리 종목코드 리스트 ('#' 주석·빈 줄 무시)."""
+    p = Path(path) if path else (ROOT / "watchlist.txt")
+    try:
+        text = p.read_text(encoding="utf-8")
+    except Exception:
+        return []
+    codes = []
+    for line in text.splitlines():
+        line = line.split("#")[0].strip()
+        m = re.match(r"(\d{6})", line)
+        if m and m.group(1) not in codes:
+            codes.append(m.group(1))
+    return codes
+
+
+def build_chart_pack(codes, name_of, fetch_hist=None, days=120):
+    """대상 종목의 장기 이력 팩 조립. 실패 종목은 건너뜀 (부가 기능 — 수집 전체를 막지 않음)."""
+    pack = {}
+    for c in codes:
+        try:
+            rows = (fetch_hist or fetch_price_history)(c, days)
+            if len(rows) >= 40:        # 최소 60일선 근처는 그릴 수 있어야 수록
+                pack[c] = {
+                    "name": name_of.get(c, ""),
+                    "closes": [round(r["close"]) for r in rows],
+                    "vols": [int(r.get("vol") or 0) for r in rows],
+                }
+        except Exception:
+            continue
+    return pack
 
 
 def flow_metrics(rows, price=None):
@@ -1529,11 +1599,23 @@ def build_sample():
                                {"name": "두산에너빌리티", "entry": 43000, "ret_pct": 8.2},
                                {"name": "한화에어로스페이스", "entry": 890000, "ret_pct": 4.1},
                                {"name": "HD한국조선해양", "entry": 263500, "ret_pct": -2.1}]}
+    chart_pack_sample = {}
+    for s in stocks[:3]:               # 미리보기용 차트 카드 120일 이력
+        base = s["price"] / random.uniform(1.10, 1.35)
+        cs, v = [], base
+        for _ in range(120):
+            v *= random.uniform(0.985, 1.022)
+            cs.append(round(v))
+        cs[-1] = s["price"]
+        chart_pack_sample[s["code"]] = {
+            "name": s["name"], "closes": cs,
+            "vols": [random.randint(80000, 900000) for _ in range(120)]}
     now = datetime.now(KST)
     return assemble(stocks, disclosures, ideas,
                     {"KOSPI": {"value": 3412.68, "change_pct": 0.87},
                      "KOSDAQ": {"value": 812.45, "change_pct": -0.21}},
                     now, sample=True, errors=[], performance=performance,
+                    chart_pack=chart_pack_sample,
                     kospi_trend=trend, sentiment_enabled=True, perf_curve=curve,
                     scan_review=scan_review, strategies=strategies,
                     strategy_race=strategy_race, silence=silence,
@@ -2114,7 +2196,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              sentiment_enabled=False, perf_curve=None, scan_review=None,
              strategies=None, strategy_race=None, silence=None, news_compass=None,
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
-             mines=None, swing=None, swing_review=None):
+             mines=None, swing=None, swing_review=None, chart_pack=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -2172,6 +2254,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "mines": mines or [],
         "swing": swing or [],
         "swing_review": swing_review,
+        "chart_pack": chart_pack or {},
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
@@ -2307,6 +2390,16 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"swing_review: {e}")
         swing_review = None
+    # 차트 카드 팩 — 부가 기능이므로 실패해도 핵심 수집을 막지 않는다
+    try:
+        targets = chart_targets(ideas, swing, read_watchlist_codes())
+        name_of = {s["code"]: s.get("name", "") for s in stocks}
+        chart_pack = build_chart_pack(targets, name_of)
+        if chart_pack:
+            print(f"  → 차트 카드 이력 {len(chart_pack)}종목 (120일)")
+    except Exception as e:
+        errors.append(f"chart_pack: {e}")
+        chart_pack = {}
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")
@@ -2318,7 +2411,7 @@ def run_full(max_universe=None, out_path=None):
                     silence=silence, news_compass=news_compass,
                     insider_watch=insider_watch, graduates=graduates,
                     screens=screens, insider_trades=insider_trades, mines=mines,
-                    swing=swing, swing_review=swing_review)
+                    swing=swing, swing_review=swing_review, chart_pack=chart_pack)
 
 
 def main():
@@ -2329,6 +2422,15 @@ def main():
     args = ap.parse_args()
 
     out = Path(args.out)
+    if not args.sample:                # 휴장일 달력 게이트 (없으면 기존 자동 감지로 동작)
+        try:
+            import holidays_kr
+            reason = holidays_kr.closed_reason()
+            if reason:
+                print(f"오늘은 휴장일({reason}) — 수집을 쉽니다.")
+                return
+        except ImportError:
+            pass
     data = build_sample() if args.sample else run_full(args.max_universe, out_path=out)
     if data is None:          # 휴장일 → 갱신 없음 (정상 종료)
         return

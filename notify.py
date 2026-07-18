@@ -746,9 +746,22 @@ def main():
         print("샘플 데이터 상태 - 발송 생략 (첫 수집 후 발송됩니다)")
         return
 
+    # 휴장일 달력: 저녁 요약은 쉬고, 아침 브리핑엔 안내 한 줄 (모듈 없으면 기존 동작)
+    holiday = None
+    try:
+        import holidays_kr
+        holiday = holidays_kr.closed_reason()
+    except ImportError:
+        pass
+    if holiday and holiday != "주말" and mode == "evening":
+        print(f"휴장일({holiday}) — 저녁 요약 발송 생략")
+        return
+
     msg = (build_weekly_message(data) if args.weekly
            else build_evening_message(data) if args.evening
            else build_message(data))
+    if holiday and holiday != "주말" and mode == "morning":
+        msg = f"📅 오늘은 휴장일입니다 ({holiday}) — 국내장 알림은 다음 거래일에 재개됩니다.\n\n" + msg
 
     if args.dry_run:
         print(msg)

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>📊 차트 카드 — 국내장 아이디어</title>
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --surface-1:#fcfcfb; --page:#f9f9f7; --ring:#e7e5e0;
+  --series-1:#2a78d6; --series-1-deep:#1c5cab;
+  --up:#c93a3a; --down:#256abf; --crit:#d03b3b; --warn:#c9822a;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --surface-1:#1a1a19; --page:#0d0d0d; --ring:#33322f;
+    --series-1:#3987e5; --series-1-deep:#6da7ec;
+    --up:#e66767; --down:#3987e5; --crit:#e66767; --warn:#e0a15a;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:16px 14px 40px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top h1{font-size:19px;font-weight:700;margin:0}
+.stamp{color:var(--ink-3);font-size:12.5px}
+a.back{margin-left:auto;font-size:12px;color:var(--series-1-deep);text-decoration:none;font-weight:600}
+.card{background:var(--surface-1);border:1px solid var(--ring);border-radius:14px;padding:18px 20px;margin-top:10px}
+.hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px}
+.hd h2{font-size:18px;margin:0}
+.cd{color:var(--ink-3);font-size:12.5px}
+.px{font-size:21px;font-weight:800;letter-spacing:-.5px}
+.chg{font-weight:700;font-size:14px}
+.sub{font-size:12px;color:var(--ink-3);margin:4px 0 12px}
+svg{display:block;width:100%;height:auto}
+table.judge{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+table.judge td{padding:7px 8px;border-top:1px solid var(--ring);vertical-align:top}
+table.judge td:first-child{white-space:nowrap;font-weight:700;color:var(--ink-2);width:120px}
+.up{color:var(--up)} .down{color:var(--down)}
+.empty{background:var(--surface-1);border:1px dashed var(--ring);border-radius:12px;
+  padding:22px 18px;font-size:13.5px;color:var(--ink-2);margin-top:10px;line-height:1.7}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.chip{font-size:12.5px;border:1px solid var(--ring);background:var(--surface-1);
+  border-radius:999px;padding:5px 11px;text-decoration:none;color:var(--ink-1)}
+.chip:hover{border-color:var(--series-1)}
+.src{font-size:11px;color:var(--ink-3);margin-top:12px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>📊 차트 카드</h1>
+    <span class="stamp" id="stamp"></span>
+    <a class="back" href="index.html">← 메인 대시보드</a>
+  </header>
+  <div id="body"></div>
+</div>
+
+<script>
+"use strict";
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = v => v==null ? "-" : Math.round(v).toLocaleString("ko-KR");
+const ma = (a,w,i)=> i>=w-1 ? a.slice(i-w+1,i+1).reduce((x,y)=>x+y,0)/w : null;
+
+function analyse(closes){
+  const n = closes.length, last = closes[n-1];
+  const MA20 = closes.map((_,i)=>ma(closes,20,i));
+  const MA60 = n>=60 ? closes.map((_,i)=>ma(closes,60,i)) : closes.map(()=>null);
+  const m20 = MA20[n-1], m60 = MA60[n-1];
+  const resist = Math.max(...closes);                       // 저항 = 기간 전고점
+  const support = Math.min(...closes.slice(-40));           // 지지 = 최근 40일 저점
+  return {last, MA20, MA60, m20, m60, resist, support,
+          stop: m20 ? Math.round(m20*0.99) : null};
+}
+
+function chartSVG(closes, A){
+  const W=800, H=250, padL=6, padR=70, padT=14, padB=8, n=closes.length;
+  const vals = closes.concat(A.MA20.filter(Boolean), A.MA60.filter(Boolean), [A.resist, A.support]);
+  const mn=Math.min(...vals)*0.99, mx=Math.max(...vals)*1.01;
+  const X=i=>padL+i*(W-padL-padR)/(n-1), Y=v=>H-padB-(v-mn)/(mx-mn)*(H-padT-padB);
+  const path=a=>a.map((v,i)=>v==null?"":`${a[i-1]==null?"M":"L"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+  const yR=Y(A.resist), yS=Y(A.support);
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="가격·이동평균 차트">
+    <line x1="${padL}" x2="${W-padR}" y1="${yR}" y2="${yR}" stroke="var(--crit)" stroke-width="1.4" stroke-dasharray="6,4" opacity=".8"/>
+    <text x="${W-padR+4}" y="${yR+4}" font-size="11" fill="var(--crit)">${fmt(A.resist)}</text>
+    <line x1="${padL}" x2="${W-padR}" y1="${yS}" y2="${yS}" stroke="var(--down)" stroke-width="1.1" stroke-dasharray="3,4" opacity=".7"/>
+    <text x="${W-padR+4}" y="${yS+4}" font-size="11" fill="var(--down)">${fmt(A.support)}</text>
+    ${A.m60?`<path d="${path(A.MA60)}" fill="none" stroke="var(--warn)" stroke-width="1.6" opacity=".8"/>`:""}
+    <path d="${path(A.MA20)}" fill="none" stroke="var(--series-1)" stroke-width="1.8"/>
+    <path d="${path(closes)}" fill="none" stroke="var(--ink-1)" stroke-width="1.4" opacity=".8"/>
+    <text x="${padL+2}" y="${padT}" font-size="10.5" fill="var(--ink-3)">─ 주가 · <tspan fill="var(--series-1)">─ 20일선</tspan>${A.m60?` · <tspan fill="var(--warn)">─ 60일선</tspan>`:""} · 빨강 점선=저항(전고점) · 파랑 점선=지지(최근 저점)</text>
+  </svg>`;
+}
+
+/* 판정 4줄 — 전부 계산값 + 고정 문장 (규칙 기반) */
+function judge(A, s, d, days){
+  const {last, m20, m60, resist, support, stop} = A;
+  // 추세
+  let trend;
+  if(m20 && m60 && m20 > m60 && last > m20)
+    trend = `<b>정배열</b> · 현재가가 20·60일선 위 = <span class="up">상승 우위</span>`;
+  else if(m20 && last < m20 && (!m60 || last < m60))
+    trend = `현재가가 20${m60?"·60":""}일선 아래 = <span class="down">하락 우위 · 관망</span>`;
+  else trend = `이동평균선 사이 = <b>혼조 구간</b> (방향 대기)`;
+  // 수급
+  let flow = "수급 데이터 없음 (유니버스 밖)";
+  if(s){
+    const f=s.f_streak||0, i=s.i_streak||0, amt=s.f_5d_amt_100m;
+    const fTxt = f>0?`외국인 <b class="up">${f}일 연속</b> 순매수`:`외국인 순매수 없음`;
+    flow = `${fTxt}${amt!=null?`(5일 ${amt>0?"+":""}${fmt(amt)}억)`:""} · 기관 ${i>0?`<b>${i}일</b> 동행`:"관망"}`;
+  }
+  // 관찰
+  const nearR = last >= resist*0.97;
+  const watch = `지지 <b>${fmt(support)}</b> 유지 여부 · 저항 <b>${fmt(resist)}</b> ${nearR?'<span class="up">돌파 시도 중</span>':"재돌파 여부"}`;
+  // 리스크
+  const mine = ((d||{}).mines||[]).find(m=>m.code===(s||{}).code);
+  const mineTxt = mine ? `<span class="down">💣 위험 신호 ${mine.score}점 — <a href="mine.html" style="color:inherit">상세</a></span>`
+                       : "💣 위험 공시 신호 없음";
+  const risk = `${stop?`20일선(${fmt(m20)}) 이탈 시 손절 검토 — <b class="down">기준 ${fmt(stop)}</b> · `:""}${mineTxt}`;
+  return `<table class="judge">
+    <tr><td>📈 추세</td><td>${trend}</td></tr>
+    <tr><td>💰 수급</td><td>${flow}</td></tr>
+    <tr><td>🔍 관찰 포인트</td><td>${watch}</td></tr>
+    <tr><td>🛡 리스크</td><td>${risk}</td></tr>
+  </table>
+  <div class="src">최근 ${days}일 종가 기준 · 모든 문구는 계산된 지표를 문장 템플릿에 끼운 규칙 기반 자동 해설입니다 (AI API 미사용 · 비용 0원). 투자 판단과 책임은 본인에게 있습니다.</div>`;
+}
+
+function chipList(pack){
+  const codes = Object.keys(pack||{});
+  if(!codes.length) return "";
+  return `<div class="chips">` + codes.map(c=>
+    `<a class="chip" href="chart.html?c=${c}">${esc(pack[c].name||c)}</a>`).join("") + `</div>`;
+}
+
+function render(d){
+  document.getElementById("stamp").textContent =
+    (d.market_date ? d.market_date.replace(/-/g,".")+" 장 마감 기준" : "");
+  const body = document.getElementById("body");
+  const code = new URLSearchParams(location.search).get("c");
+  const pack = d.chart_pack || {};
+
+  if(!code){
+    body.innerHTML = `<div class="empty">종목을 선택하세요 — 오늘 카드가 준비된 종목:
+      ${chipList(pack) || "<br>아직 준비된 카드가 없습니다 (다음 수집부터 생성됩니다)."}</div>`;
+    return;
+  }
+  const p = pack[code];
+  const s = (d.all_stocks||[]).find(x=>x.code===code);
+  if(!p || !(p.closes||[]).length){
+    body.innerHTML = `<div class="empty">
+      <b>${esc((s||{}).name||code)}</b>는 아직 차트 카드 대상이 아닙니다.<br>
+      카드는 <b>오늘의 5선 · 스윙 후보 · 관심종목(워치리스트)</b>에 대해 매일 만들어집니다.<br>
+      → 메인에서 이 종목의 ⭐를 눌러 관심종목에 넣고, 저장소 watchlist.txt에도 코드를 추가하면
+      <b>다음 수집부터</b> 카드가 제공됩니다.</div>
+      <div class="empty" style="border-style:solid">오늘 카드가 준비된 종목 ${Object.keys(pack).length}개:${chipList(pack)}</div>`;
+    return;
+  }
+  const A = analyse(p.closes);
+  const chg = s && s.change_pct != null ? s.change_pct : null;
+  const chgHtml = chg==null ? "" :
+    `<span class="chg ${chg>0?"up":chg<0?"down":""}">${chg>0?"▲":chg<0?"▼":""}${Math.abs(chg).toFixed(2)}%</span>`;
+  body.innerHTML = `<div class="card">
+    <div class="hd">
+      <h2>${esc(p.name||(s||{}).name||code)}</h2><span class="cd">${esc(code)}${s&&s.market?" · "+esc(s.market):""}</span>
+      <span class="px">${fmt(A.last)}</span>${chgHtml}
+    </div>
+    <p class="sub">차트 + 판정 4줄 — 추세·수급·리스크만 남긴 미니멀 브리핑 (매일 갱신)</p>
+    ${chartSVG(p.closes, A)}
+    ${judge(A, s, d, p.closes.length)}
+  </div>`;
+}
+
+fetch("data.json?t="+Date.now())
+  .then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(render)
+  .catch(err=>{
+    document.getElementById("body").innerHTML =
+      `<div class="empty">data.json을 불러오지 못했습니다 (${esc(err.message)}).</div>`;
+  });
+</script>
+</body>
+</html>

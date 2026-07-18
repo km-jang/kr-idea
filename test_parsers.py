@@ -358,6 +358,75 @@ def test_ops_log_append():
     assert ops_log.append_record("깨진 장부", {"date": "2026-07-01"}) == [{"date": "2026-07-01"}]
 
 
+def test_holidays_calendar():
+    """KRX 휴장일 달력 — 제헌절(2026 재지정)·주말·거래일 판정."""
+    import holidays_kr as hk
+    assert hk.closed_reason("2026-07-17") == "제헌절"          # 금요일이지만 휴장
+    assert hk.closed_reason("2026-07-16") is None              # 정상 거래일
+    assert hk.closed_reason("2026-07-18") == "주말"            # 토요일
+    assert hk.closed_reason("2026-12-31") == "연말 휴장"
+    assert hk.closed_reason("2027-03-05") is None              # 미등록 연도 → 거래일 취급(자동 감지 폴백)
+    assert hk.is_trading_day("2026-07-20") is True             # 다음 거래일(월)
+
+
+def _frgn_page_html(days):
+    """frgn 페이지 픽스처: [{date, close, vol, inst, frgn}] → 테이블 HTML."""
+    rows = "".join(
+        f"<tr><td>{d['date']}</td><td>{d['close']:,}</td><td>10</td><td>+0.1%</td>"
+        f"<td>{d['vol']:,}</td><td>{d['inst']}</td><td>{d['frgn']}</td>"
+        f"<td>1,000</td><td>10%</td></tr>" for d in days)
+    return f"<table>{rows}</table>"
+
+
+def test_fetch_price_history_multi_page():
+    """차트 카드용 장기 이력: 여러 페이지 이어붙임 + 중복 제거 + 과거→현재 정렬."""
+    def make(dates):
+        return [{"date": dt, "close": 10000 + i, "vol": 1000 + i, "inst": 1, "frgn": 2}
+                for i, dt in enumerate(dates)]
+    pages = {
+        1: _frgn_page_html(make(["2026.07.16", "2026.07.15", "2026.07.14"])),
+        2: _frgn_page_html(make(["2026.07.14", "2026.07.13"])),   # 첫 행 중복(경계) 포함
+        3: _frgn_page_html(make(["2026.07.13", "2026.07.10"])),
+        4: _frgn_page_html(make(["2026.07.10"])),                 # 새 날짜 없음 → 종료
+    }
+    rows = collect.fetch_price_history("005930", days=10,
+                                       fetch_page=lambda p: pages.get(p, ""), delay=0)
+    dates = [r["date"] for r in rows]
+    assert dates == sorted(dates)                                  # 과거→현재
+    assert len(dates) == len(set(dates)) == 5                      # 중복 제거 (고유 날짜 5개)
+    assert all("vol" in r and "close" in r for r in rows)
+
+
+def test_chart_pack_build():
+    """chart_pack 조립: 대상 선정(중복 제거·상한) + 짧은 이력 제외 + 실패 격리."""
+    ideas = [{"code": "005930"}, {"code": "000660"}]
+    swing = [{"code": "000660"}, {"code": "035420"}]
+    targets = collect.chart_targets(ideas, swing, ["005930", "051910"], limit=3)
+    assert targets == ["005930", "000660", "035420"]               # 순서 유지·중복 제거·상한 3
+
+    def fake_hist(code, days=120):
+        if code == "000660":
+            raise RuntimeError("네트워크 실패 흉내")
+        n = 20 if code == "035420" else 120
+        return [{"date": f"d{i}", "close": 1000 + i, "vol": 10} for i in range(n)]
+    pack = collect.build_chart_pack(["005930", "000660", "035420"],
+                                    {"005930": "삼성전자"}, fetch_hist=fake_hist)
+    assert "005930" in pack and pack["005930"]["name"] == "삼성전자"
+    assert len(pack["005930"]["closes"]) == 120 and len(pack["005930"]["vols"]) == 120
+    assert "000660" not in pack                                    # 실패 종목 격리
+    assert "035420" not in pack                                    # 40일 미만 제외
+
+
+def test_chart_pack_in_sample_schema():
+    """샘플 데이터에 chart_pack 키가 있고 구조가 올바른지."""
+    data = collect.build_sample()
+    assert "chart_pack" in data and len(data["chart_pack"]) >= 1
+    for code, p in data["chart_pack"].items():
+        assert len(code) == 6 and len(p["closes"]) == 120 and len(p["vols"]) == 120
+        break
+    json.dumps(data, ensure_ascii=False)
+
+
 def test_load_previous(tmp_path=None):
     import tempfile, os
     with tempfile.TemporaryDirectory() as td:

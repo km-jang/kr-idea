@@ -229,6 +229,15 @@ def main():
     ap.add_argument("--data", default=str(DATA_PATH))
     args = ap.parse_args()
 
+    try:                               # 휴장일 달력 게이트 (모듈 없으면 기존 동작)
+        import holidays_kr
+        _reason = holidays_kr.closed_reason()
+        if _reason:
+            print(f"휴장일({_reason}) — 스캔·맥박 생략")
+            return
+    except ImportError:
+        pass
+
     try:
         data = json.loads(Path(args.data).read_text(encoding="utf-8"))
     except Exception as exc:
