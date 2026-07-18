@@ -215,6 +215,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "시크릿 없음 - 생략"; exit 0; fi
+          H=$(python holidays_kr.py 2>/dev/null || true)
+          if [ -n "$H" ]; then echo "휴장일($H) — 자가 점검·성적표 기록 생략"; exit 0; fi
           TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
           GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
           FRESH=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
