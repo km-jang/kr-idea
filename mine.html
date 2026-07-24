@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>지뢰탐지기</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="위험 신호가 누적된 종목을 걸러내는 방어 도구 — 아이디어 대시보드의 지뢰탐지 페이지">
+<meta name="description" content="위험 신호가 누적된 종목을 걸러내는 방어 도구 · 아이디어 대시보드의 지뢰탐지 페이지">
 <meta name="theme-color" content="#0b0b0b">
 <link rel="icon" type="image/png" href="icon-192.png">
 <style>
@@ -120,7 +120,7 @@ fetch("data.json?t="+Date.now())
     if(hits.length){
       document.getElementById("myAlert").style.display = "";
       document.getElementById("myAlertBody").innerHTML = hits.map(m=>
-        `<b>${esc(m.name)}</b> 위험 ${m.score}점 — ${(m.reasons||[]).slice(0,2).map(esc).join(" · ")}`
+        `<b>${esc(m.name)}</b> 위험 ${m.score}점 · ${(m.reasons||[]).slice(0,2).map(esc).join(" · ")}`
       ).join("<br>") + `<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px">보유·관심 종목 중 위험 신호가 누적된 종목입니다. 공시 원문을 꼭 확인하세요.</div>`;
     }
     document.getElementById("mineCards").innerHTML = mines.length ? mines.map(m=>`

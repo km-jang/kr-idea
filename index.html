@@ -1343,7 +1343,7 @@ function portSection(d){
   // 지뢰 교차: 보유 종목이 위험 신호 누적 목록에 있으면 최우선 경고
   (d.mines||[]).forEach(m=>{
     if(rows.some(h=>h.code===m.code))
-      notes.unshift(`💣 <b>${esc(m.name)}</b> 위험 신호 ${m.score}점 — ${esc((m.reasons||[])[0]||"")} · <a href="mine.html" style="color:inherit">지뢰탐지기</a>`);
+      notes.unshift(`💣 <b>${esc(m.name)}</b> 위험 신호 ${m.score}점 · ${esc((m.reasons||[])[0]||"")} · <a href="mine.html" style="color:inherit">지뢰탐지기</a>`);
   });
   // 백업 리마인더: 보유 종목이 있는데 30일 넘게 백업(CSV)을 안 눌렀으면
   try{
@@ -1952,7 +1952,7 @@ async function toggleOps(){
                      : '<span style="color:var(--ink-3)">불필요</span>') + '</td></tr>').join("")
       + '</table><div style="font-size:11px;color:var(--ink-3);margin-top:5px">매일 밤 야간 자가 점검(21:33)이 기록 · ✓=정상 실행 · 복구=자동 복구 작동 여부</div>'
     : '<b style="font-size:12px">🩺 실행 성적표</b>'
-      + '<div style="font-size:12px;color:var(--ink-3);margin-top:4px">아직 기록이 없습니다 — 야간 자가 점검(21:33)이 매일 밤 기록을 남깁니다.</div>';
+      + '<div style="font-size:12px;color:var(--ink-3);margin-top:4px">아직 기록이 없습니다. 야간 자가 점검(21:33)이 매일 밤 기록을 남깁니다.</div>';
   p.style.display = "block";
 }
 
@@ -2076,7 +2076,7 @@ function openQsheet(code, name){
   const mine = ((window.DATA||{}).mines||[]).find(m=>m.code===code);
   const mineWarn = mine ? `<div style="font-size:12.5px;color:var(--crit);font-weight:700;
     background:rgba(208,59,59,.1);border-radius:8px;padding:8px 10px;margin-bottom:10px">
-    💣 위험 신호 ${mine.score}점 — ${esc((mine.reasons||[])[0]||"")}
+    💣 위험 신호 ${mine.score}점 · ${esc((mine.reasons||[])[0]||"")}
     <a href="mine.html" style="color:inherit">상세</a></div>` : "";
   s.innerHTML = `
     <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}

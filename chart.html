@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>📊 차트 카드 — 국내장 아이디어</title>
+<title>📊 차트 카드 · 국내장 아이디어</title>
 <link rel="icon" type="image/png" href="icon-192.png">
 <style>
 :root{
@@ -95,7 +95,7 @@ function chartSVG(closes, A){
   </svg>`;
 }
 
-/* 판정 4줄 — 전부 계산값 + 고정 문장 (규칙 기반) */
+/* 판정 4줄: 전부 계산값 + 고정 문장 (규칙 기반) */
 function judge(A, s, d, days){
   const {last, m20, m60, resist, support, stop} = A;
   // 추세
@@ -117,9 +117,9 @@ function judge(A, s, d, days){
   const watch = `지지 <b>${fmt(support)}</b> 유지 여부 · 저항 <b>${fmt(resist)}</b> ${nearR?'<span class="up">돌파 시도 중</span>':"재돌파 여부"}`;
   // 리스크
   const mine = ((d||{}).mines||[]).find(m=>m.code===(s||{}).code);
-  const mineTxt = mine ? `<span class="down">💣 위험 신호 ${mine.score}점 — <a href="mine.html" style="color:inherit">상세</a></span>`
+  const mineTxt = mine ? `<span class="down">💣 위험 신호 ${mine.score}점 · <a href="mine.html" style="color:inherit">상세</a></span>`
                        : "💣 위험 공시 신호 없음";
-  const risk = `${stop?`20일선(${fmt(m20)}) 이탈 시 손절 검토 — <b class="down">기준 ${fmt(stop)}</b> · `:""}${mineTxt}`;
+  const risk = `${stop?`20일선(${fmt(m20)}) 이탈 시 손절 검토, <b class="down">기준 ${fmt(stop)}</b> · `:""}${mineTxt}`;
   return `<table class="judge">
     <tr><td>📈 추세</td><td>${trend}</td></tr>
     <tr><td>💰 수급</td><td>${flow}</td></tr>
@@ -144,7 +144,7 @@ function render(d){
   const pack = d.chart_pack || {};
 
   if(!code){
-    body.innerHTML = `<div class="empty">종목을 선택하세요 — 오늘 카드가 준비된 종목:
+    body.innerHTML = `<div class="empty">종목을 선택하세요. 오늘 카드가 준비된 종목:
       ${chipList(pack) || "<br>아직 준비된 카드가 없습니다 (다음 수집부터 생성됩니다)."}</div>`;
     return;
   }
@@ -168,7 +168,7 @@ function render(d){
       <h2>${esc(p.name||(s||{}).name||code)}</h2><span class="cd">${esc(code)}${s&&s.market?" · "+esc(s.market):""}</span>
       <span class="px">${fmt(A.last)}</span>${chgHtml}
     </div>
-    <p class="sub">차트 + 판정 4줄 — 추세·수급·리스크만 남긴 미니멀 브리핑 (매일 갱신)</p>
+    <p class="sub">차트 + 판정 4줄: 추세·수급·리스크만 남긴 미니멀 브리핑 (매일 갱신)</p>
     ${chartSVG(p.closes, A)}
     ${judge(A, s, d, p.closes.length)}
   </div>`;

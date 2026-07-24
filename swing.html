@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>5일선 스윙 레이더</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="5일 이동평균선을 중심으로 단기(5일 이내) 스윙 후보를 고르는 레이더 — 조건검색 5종 통합, 진입·손절·목표 제시">
+<meta name="description" content="5일 이동평균선을 중심으로 단기(5일 이내) 스윙 후보를 고르는 레이더 · 조건검색 5종 통합, 진입·손절·목표 제시">
 <meta name="theme-color" content="#0b0b0b">
 <link rel="icon" type="image/png" href="icon-192.png">
 <style>
@@ -92,7 +92,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
 
   <div class="bars" style="font-size:13px;line-height:1.8">
     <h3>이 도구가 보는 것</h3>
-    <b>5일 이동평균선</b>을 중심축으로, 향후 <b>5일 이내 단기 스윙</b> 후보를 100점으로 채점합니다 —
+    <b>5일 이동평균선</b>을 중심축으로, 향후 <b>5일 이내 단기 스윙</b> 후보를 100점으로 채점합니다:
     이평선 배열·추세(30) · 외인/기관 수급 연속(25) · 진입 위치(20) · 유동성(15) · 촉매(10).
     기존 <b>조건검색 5종</b>(빈집털이·눌림목·종합수급·몰래매집·신고가문앞)은 이 안에 <b>셋업 태그</b>로 통합돼 있습니다.
     💣지뢰·악재 공시·상한가 임박(추격 위험) 종목은 자동으로 걸러냅니다. 각 후보엔
@@ -222,7 +222,7 @@ fetch("data.json?t="+Date.now())
     if(hits.length){
       document.getElementById("myAlert").style.display = "";
       document.getElementById("myAlertBody").innerHTML = hits.map(p=>
-        `<b>${esc(p.name)}</b> 스윙 ${p.swing}점 — ${(p.setups||[]).slice(0,3).map(esc).join(" · ")}`
+        `<b>${esc(p.name)}</b> 스윙 ${p.swing}점 · ${(p.setups||[]).slice(0,3).map(esc).join(" · ")}`
       ).join("<br>");
     }
 
@@ -234,9 +234,9 @@ fetch("data.json?t="+Date.now())
         const s = byCode[c];
         if(!s || s.price==null || s.ma20==null){ unknown++; return; }
         if(s.price < s.ma20)
-          stop.push(`🔴 <b>${esc(s.name)}</b> · 20일선(생명선) ${fmt(s.ma20)} 이탈 — <span class="down">손절 검토</span>`);
+          stop.push(`🔴 <b>${esc(s.name)}</b> · 20일선(생명선) ${fmt(s.ma20)} 이탈, <span class="down">손절 검토</span>`);
         else if(s.ma5!=null && s.price < s.ma5)
-          warn.push(`🟡 <b>${esc(s.name)}</b> · 5일선 ${fmt(s.ma5)} 이탈 — 단기 주의`);
+          warn.push(`🟡 <b>${esc(s.name)}</b> · 5일선 ${fmt(s.ma5)} 이탈, 단기 주의`);
         else cruise++;
       });
       if(stop.length || warn.length){

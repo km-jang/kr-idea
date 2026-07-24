@@ -233,7 +233,7 @@ def main():
         import holidays_kr
         _reason = holidays_kr.closed_reason()
         if _reason:
-            print(f"휴장일({_reason}) — 스캔·맥박 생략")
+            print(f"휴장일({_reason}): 스캔·맥박 생략")
             return
     except ImportError:
         pass

@@ -434,9 +434,9 @@ def swing_exit_signal(s):
     if not (px and ma20):
         return None
     if px < ma20:
-        return ("stop", f"20일선(생명선) {fmt_num(ma20, 0)} 이탈 — 손절 검토")
+        return ("stop", f"20일선(생명선) {fmt_num(ma20, 0)} 이탈, 손절 검토")
     if ma5 and px < ma5:
-        return ("warn", f"5일선 {fmt_num(ma5, 0)} 이탈 — 단기 주의")
+        return ("warn", f"5일선 {fmt_num(ma5, 0)} 이탈, 단기 주의")
     return None
 
 
@@ -754,14 +754,14 @@ def main():
     except ImportError:
         pass
     if holiday and holiday != "주말" and mode == "evening":
-        print(f"휴장일({holiday}) — 저녁 요약 발송 생략")
+        print(f"휴장일({holiday}): 저녁 요약 발송 생략")
         return
 
     msg = (build_weekly_message(data) if args.weekly
            else build_evening_message(data) if args.evening
            else build_message(data))
     if holiday and holiday != "주말" and mode == "morning":
-        msg = f"📅 오늘은 휴장일입니다 ({holiday}) — 국내장 알림은 다음 거래일에 재개됩니다.\n\n" + msg
+        msg = f"📅 오늘은 휴장일입니다 ({holiday}). 국내장 알림은 다음 거래일에 재개됩니다.\n\n" + msg
 
     if args.dry_run:
         print(msg)
