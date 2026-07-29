@@ -71,12 +71,12 @@
  },
  {
   "date": "2026-07-29",
-  "data_final": false,
-  "data_gen": "2026-07-28 21:12 KST",
-  "morning": false,
-  "pulse": false,
-  "evening": false,
-  "scan": false,
-  "recover": "fail"
+  "data_final": true,
+  "data_gen": "2026-07-29 21:20 KST",
+  "morning": true,
+  "pulse": true,
+  "evening": true,
+  "scan": true,
+  "recover": "none"
  }
 ]
