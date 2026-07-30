@@ -1,8 +1,9 @@
-"""실행 성적표 장부 (ops.json) — 야간 자가 점검이 하루 1회 그날의 자동화 결과를 기록.
+"""실행 성적표 장부 (ops.json) · 야간 자가 점검이 하루 1회 그날의 자동화 결과를 기록.
 
 기록 항목: 마감 수집 반영 여부, 아침/점심/저녁 발송, 종가 스캔, 자가복구 여부.
 대시보드 자가진단(신호등 클릭)에서 최근 5영업일 매트릭스로 표시된다.
-사용: python ops_log.py [none|ok|fail]   (인자 = 그날 자가복구 결과)
+사용: python ops_log.py [none|ok|fail] [YYYY-MM-DD]
+      1번 인자 = 그날 자가복구 결과, 2번 인자 = 기준일(생략 시 자동 판정)
 """
 import json
 import sys
@@ -10,6 +11,27 @@ from datetime import datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
 KEEP_DAYS = 30
+LATE_NIGHT_UNTIL = 6  # 이 시각(KST) 전 실행은 전날 몫으로 본다
+
+
+def base_day(now):
+    """기록 기준일을 정한다. 순수 함수.
+
+    크론이 밀려 자정을 넘겨(새벽에) 실행되면 실행 시각의 날짜는 이미 다음 날이라
+    '오늘 데이터가 없다'는 오판이 난다. 새벽 실행은 전날 몫으로 되돌린다.
+    """
+    if now.hour < LATE_NIGHT_UNTIL:
+        now = now - timedelta(days=1)
+    return now.strftime("%Y-%m-%d")
+
+
+def valid_date(text):
+    """YYYY-MM-DD 형식이면 그대로, 아니면 None. 순수 함수."""
+    try:
+        datetime.strptime(str(text), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+    return str(text)
 
 
 def build_record(data, sent, scans, today, recover="none"):
@@ -48,7 +70,9 @@ def main():
     recover = sys.argv[1] if len(sys.argv) > 1 else "none"
     if recover not in ("none", "ok", "fail"):
         recover = "none"
-    today = datetime.now(KST).strftime("%Y-%m-%d")
+    today = valid_date(sys.argv[2]) if len(sys.argv) > 2 else None
+    if not today:
+        today = base_day(datetime.now(KST))
     record = build_record(
         _load("data.json", {}), _load("sent_log.json", {}),
         _load("scans.json", []), today, recover)
