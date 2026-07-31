@@ -172,6 +172,8 @@ td .cd2{font-size:11px;color:var(--ink-3);margin-left:4px}
 .dbody a:hover .ti{text-decoration:underline}
 .dtime{margin-left:auto;flex:0 0 auto;font-size:11.5px;color:var(--ink-3)}
 
+.disc .colmore{border-top:0}   /* 위 .ditem의 아래 테두리와 겹쳐 줄이 두 겹으로 보이는 것 방지 */
+
 .empty{padding:26px;text-align:center;color:var(--ink-3);font-size:13.5px}
 
 /* 별표 & 검색 & 외부링크 */
@@ -1770,18 +1772,31 @@ function perfSection(d){
     </tr>`).join("")+"</tbody></table></div>";
 }
 
+const DISC_HEAD = 10;   /* 상시 표시 건수. 나머지는 클릭해야 펼쳐진다 (0픽셀 원칙) */
 function discList(d){
   const el = document.getElementById("discList");
   const list = d.disclosures||[];
   if(!list.length){el.innerHTML='<div class="empty">오늘 수집된 공시 시그널이 없습니다. (장 마감 후 갱신됩니다)</div>';return;}
   const mark = {positive:"▲",negative:"▼",watch:"·"};
-  el.innerHTML = list.map(x=>`
+  const row = x=>`
     <div class="ditem">
       <span class="dtag ${x.sentiment}">${mark[x.sentiment]||"·"} ${esc(x.tag)}</span>
       <div class="dbody"><a href="${esc(x.url)}" target="_blank" rel="noopener">
         <span class="co">${esc(x.company)}</span><br><span class="ti">${esc(x.title)}</span></a></div>
       <span class="dtime">${esc(x.time).replace(/\+0900|KST/g,"").trim().slice(0,22)}</span>
-    </div>`).join("");
+    </div>`;
+  const rest = list.slice(DISC_HEAD);
+  el.innerHTML = list.slice(0, DISC_HEAD).map(row).join("")
+    + (rest.length ? `<div class="discrest" hidden>${rest.map(row).join("")}</div>`
+      + `<button type="button" class="colmore" aria-expanded="false">▾ 공시 ${rest.length}건 더보기</button>` : "");
+  const btn = el.querySelector(".colmore");
+  if(btn) btn.onclick = ()=>{
+    const box = el.querySelector(".discrest");
+    const open = box.hidden;
+    box.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.textContent = open ? "▴ 접기" : `▾ 공시 ${rest.length}건 더보기`;
+  };
 }
 
 let TODAY_DATA = null;
