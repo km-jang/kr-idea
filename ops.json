@@ -60,14 +60,24 @@
   "recover": "none"
  },
  {
-  "date": "2026-07-28",
-  "data_final": false,
+  "date": "2026-07-27",
+  "data_final": true,
   "data_gen": "2026-07-27 22:22 KST",
-  "morning": false,
-  "pulse": false,
-  "evening": false,
-  "scan": false,
-  "recover": "fail"
+  "morning": true,
+  "pulse": true,
+  "evening": true,
+  "scan": true,
+  "recover": "none"
+ },
+ {
+  "date": "2026-07-28",
+  "data_final": true,
+  "data_gen": "2026-07-28 21:12 KST",
+  "morning": true,
+  "pulse": true,
+  "evening": true,
+  "scan": true,
+  "recover": "none"
  },
  {
   "date": "2026-07-29",
