@@ -11,11 +11,13 @@ on:
     - cron: "6 3 * * 1-5"     # 매 영업일 12:06 KST - 장중 시황 요약 (점심 맥박)
     - cron: "38 3 * * 1-5"    # 매 영업일 12:38 KST - 점심 맥박 예비 (본 발송 누락 시에만)
     - cron: "7 6 * * 1-5"     # 매 영업일 15:07 KST - 종가 스캔 예비 (본 스캔 누락 시에만)
-    - cron: "33 12 * * 1-5"   # 매 영업일 21:33 KST - 야간 자가 점검 (감시 + 자동 복구 + 실행 성적표)
+    - cron: "3 14 * * 1-5"    # 매 영업일 23:03 KST - 야간 자가 점검 (감시 + 자동 복구 + 실행 성적표)
   workflow_dispatch: {}
 
 # 크론 분(minute)을 정각·5분 배수에서 비켜둔 이유: GitHub 혼잡 시간대 지연·누락 회피 (2026-07-17 안정화)
 # 자정 넘김 보정: 크론이 크게 밀려 00~06시(KST)에 실행되면 기준일을 전날로 되돌린다 (헛경보 차단, 2026-07-30)
+# 야간 점검 21:33 → 23:03 이동 (2026-07-31): 수집 지연 실측이 이틀 연속 2시간 안팎이라
+# 점검이 수집을 추월할 뻔했다(여유 13분·30분). 수집과의 간격을 2시간 20분에서 3시간 50분으로 넓힘
 
 permissions:
   contents: write
@@ -211,8 +213,8 @@ jobs:
           git add scans.json 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "scan(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
-      - name: 야간 자가 점검 (21:33, 감시 + 자동 복구 + 실행 성적표)
-        if: github.event.schedule == '33 12 * * 1-5'
+      - name: 야간 자가 점검 (23:03, 감시 + 자동 복구 + 실행 성적표)
+        if: github.event.schedule == '3 14 * * 1-5'
         continue-on-error: true
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
