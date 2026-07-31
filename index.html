@@ -925,6 +925,7 @@ function ideaCards(d, override){
       <span class="nm">${esc(s.name)}</span><span class="cd">${s.code}</span>
       ${s.idea_days===1?'<span class="badge-new">NEW</span>':
         s.idea_days>1?`<span class="badge-days">${s.idea_days}일째</span>`:""}
+      ${regularBadge(s.code)}
       ${(s.trend_ratio||0)>=3?`<span class="badge-days" title="검색량 30일 평균 대비 ${s.trend_ratio}배">🔍${s.trend_ratio}x</span>`:""}
       ${(s.news_24h||0)>=10?`<span class="badge-days" title="24시간 기사 ${s.news_24h}건">📰${s.news_24h}</span>`:""}
       <span class="px ${cls(s.change_pct)}">${fmt(s.price)} ${arrow(s.change_pct)}${s.change_pct==null?"":Math.abs(s.change_pct).toFixed(2)+"%"}</span>
@@ -1097,7 +1098,30 @@ function makeTable(elId, rows, cols, defaultKey){
   render();
 }
 
-const nameCell = s=>`${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>`;
+/* 🔁 단골: 5선·수급·밸류·스윙 중 두 곳 이상에 동시에 뜬 종목.
+   새로 수집하는 데이터 없이 오늘 목록끼리 대조해서 계산한다. 해당 없으면 빈 문자열(0픽셀). */
+let REGULARS = {};
+function buildRegulars(d){
+  const seen = {};
+  [["5선", d.ideas], ["수급", d.flow_scan], ["밸류", d.value_screen], ["스윙", d.swing]]
+    .forEach(([label, list])=>{
+      const done = {};
+      (list||[]).forEach(s=>{
+        const c = s && s.code;
+        if(!c || done[c]) return;      // 한 목록 안의 중복은 1회만
+        done[c] = 1;
+        (seen[c] = seen[c] || []).push(label);
+      });
+    });
+  REGULARS = {};
+  for(const c in seen) if(seen[c].length >= 2) REGULARS[c] = seen[c];
+}
+function regularBadge(code){
+  const g = REGULARS[code];
+  return g ? `<span class="badge-days" title="${g.join(" · ")} ${g.length}곳에 동시 등장">🔁${g.length}</span>` : "";
+}
+
+const nameCell = s=>`${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>${regularBadge(s.code)}`;
 const streakCell = (n,hi)=>`<span class="streak${(n||0)>=hi?" hi":""}">${n||0}일</span>`;
 const pctCell = s=>`<span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span>`;
 const signAmt = v=>v==null?"–":`<span class="${cls(v)}">${fmt(v)}</span>`;
@@ -1978,6 +2002,7 @@ function renderAll(d, isHistory){
     (d.generated_at ? " · "+d.generated_at.replace(/^\d{4}-\d{2}-\d{2} /,"")+" 수집" : "");
   document.getElementById("sampleBadge").style.display = d.sample ? "" : "none";
   healthDot(d);
+  buildRegulars(d);   // 표·카드가 그려지기 전에 단골 목록을 먼저 만든다
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
   sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
   curveChart(d); raceChart(d); portSection(d); silenceSection(d); compassSection(d);
