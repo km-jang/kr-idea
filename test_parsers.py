@@ -1562,7 +1562,47 @@ def test_swing_in_sample_schema():
     json.dumps(data, ensure_ascii=False)
 
 
-if __name__ == "__main__":
+def test_ops_log_base_day():
+    """기준일 보정: 크론이 밀려 새벽에 실행되면 전날 몫으로 기록한다 (헛경보 차단, 2026-07-30)."""
+    import ops_log
+    from datetime import datetime, timedelta, timezone
+    kst = timezone(timedelta(hours=9))
+    # 00~05시 실행은 전날로 되돌린다 (7/28 밤 점검이 7/29 00:26에 실행된 실사고)
+    assert ops_log.base_day(datetime(2026, 7, 29, 0, 26, tzinfo=kst)) == "2026-07-28"
+    assert ops_log.base_day(datetime(2026, 7, 29, 5, 59, tzinfo=kst)) == "2026-07-28"
+    # 06시부터는 그날 그대로
+    assert ops_log.base_day(datetime(2026, 7, 29, 6, 0, tzinfo=kst)) == "2026-07-29"
+    assert ops_log.base_day(datetime(2026, 7, 29, 21, 33, tzinfo=kst)) == "2026-07-29"
+    assert ops_log.base_day(datetime(2026, 7, 29, 23, 50, tzinfo=kst)) == "2026-07-29"
+    # 월·연 경계도 넘어간다
+    assert ops_log.base_day(datetime(2026, 8, 1, 0, 10, tzinfo=kst)) == "2026-07-31"
+    assert ops_log.base_day(datetime(2026, 1, 1, 0, 10, tzinfo=kst)) == "2025-12-31"
+
+
+def test_ops_log_base_day_fixes_false_alarm():
+    """7/28 실사고 재현: 보정 전엔 전부 X, 보정 후엔 전부 O가 된다."""
+    import ops_log
+    data = {"generated_at": "2026-07-28 21:12 KST"}
+    sent = {"morning": "2026-07-28", "pulse": "2026-07-28", "evening": "2026-07-28"}
+    scans = [{"date": "2026-07-28"}]
+    bad = ops_log.build_record(data, sent, scans, "2026-07-29", recover="fail")
+    assert bad["data_final"] is False and bad["morning"] is False and bad["scan"] is False
+    good = ops_log.build_record(data, sent, scans, "2026-07-28", recover="none")
+    assert good["data_final"] is True and good["morning"] is True and good["scan"] is True
+    # 같은 날짜 재기록이면 오점이 정상으로 교체된다
+    merged = ops_log.append_record([{"date": "2026-07-28", "recover": "fail"}], good)
+    assert len(merged) == 1 and merged[0]["recover"] == "none"
+
+
+def test_ops_log_valid_date():
+    """기준일 인자 검증: 형식이 맞을 때만 쓰고, 아니면 자동 판정으로 돌아간다."""
+    import ops_log
+    assert ops_log.valid_date("2026-07-28") == "2026-07-28"
+    assert ops_log.valid_date("2026-02-30") is None   # 없는 날짜
+    assert ops_log.valid_date("20260728") is None
+    assert ops_log.valid_date("어제") is None
+    assert ops_log.valid_date("") is None
+    assert ops_log.valid_date(None) is Noneif __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
     for fn in fns:
