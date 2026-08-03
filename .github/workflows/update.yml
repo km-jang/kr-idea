@@ -18,6 +18,9 @@ on:
 # 자정 넘김 보정: 크론이 크게 밀려 00~06시(KST)에 실행되면 기준일을 전날로 되돌린다 (헛경보 차단, 2026-07-30)
 # 야간 점검 21:33 → 23:03 이동 (2026-07-31): 수집 지연 실측이 이틀 연속 2시간 안팎이라
 # 점검이 수집을 추월할 뻔했다(여유 13분·30분). 수집과의 간격을 2시간 20분에서 3시간 50분으로 넓힘
+# 블랙박스 (2026-08-04): 수집·테스트 출력을 run_log.txt/recover_log.txt에 담아, 실패 시
+# 🚨·🩺 텔레그램에 오류 마지막 줄을 동봉한다. 7/31·8/3 연속 수집 실패 때 로그 접근이
+# 병목이었던 것의 재발 방지. 이 tee·tail 로직을 지우지 말 것 (PLAYBOOK 2.7절과 한 세트)
 
 permissions:
   contents: write
@@ -42,7 +45,9 @@ jobs:
 
       - name: 오프라인 테스트
         if: github.event.schedule == '13 10 * * 1-5' || github.event_name == 'workflow_dispatch'
-        run: python test_parsers.py
+        run: |
+          python test_parsers.py 2>&1 | tee run_log.txt
+          exit ${PIPESTATUS[0]}
 
       - name: 데이터 수집
         if: github.event.schedule == '13 10 * * 1-5' || github.event_name == 'workflow_dispatch'
@@ -50,7 +55,9 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-        run: python collect.py
+        run: |
+          python collect.py 2>&1 | tee run_log.txt
+          exit ${PIPESTATUS[0]}
 
       - name: 커밋 & 푸시
         if: github.event.schedule == '13 10 * * 1-5' || github.event_name == 'workflow_dispatch'
@@ -240,7 +247,12 @@ jobs:
           if [ "$FRESH" != "yes" ]; then
             echo "마감 수집 미반영 감지 (현재: $GEN), 자동 복구 시도"
             RECOVER=fail
-            if python test_parsers.py && python collect.py; then
+            set +e
+            { python test_parsers.py && python collect.py ; } > recover_log.txt 2>&1
+            ROK=$?
+            set -e
+            cat recover_log.txt
+            if [ "$ROK" = "0" ]; then
               git config user.name "dashboard-bot"
               git config user.email "actions@github.com"
               git add data.json history/ 2>/dev/null || git add data.json
@@ -264,8 +276,11 @@ jobs:
             MSG="🩺 야간 자가 점검: 마감 수집 누락을 발견해 자동 복구했습니다 (새 수집: $NEWGEN)
           저녁 브리핑이 미발송 상태였다면 방금 함께 발송됐습니다."
           elif [ "$RECOVER" = "fail" ]; then
+            ERRT=$(tail -n 6 recover_log.txt 2>/dev/null | tail -c 600)
             MSG="🩺 야간 자가 점검: $TODAY 마감 수집이 반영되지 않았고 자동 복구도 실패했습니다 (현재 데이터: $GEN)
-          휴장일이면 정상입니다. 평일이라면 Actions 로그 확인 후 Run workflow로 수동 수집을 권장합니다.
+          [오류 마지막 줄]
+          ${ERRT:-복구 시도 로그 없음}
+          휴장일이면 정상입니다. 평일이라면 위 오류 줄을 그대로 복사해 AI에게 주세요 (PLAYBOOK 2.7절).
           https://github.com/${{ github.repository }}/actions"
           else
             exit 0
@@ -293,9 +308,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "시크릿 없음 - 통보 생략"; exit 0; fi
+          TAILT=$(tail -n 8 run_log.txt 2>/dev/null | tail -c 800)
           MSG="🚨 자동화 실행 실패 ($(TZ=Asia/Seoul date '+%m/%d %H:%M KST'))
-          어떤 단계가 실패했는지 GitHub Actions 로그를 확인하세요.
-          복구 방법: 저장소의 PLAYBOOK.md 참고
+          [오류 마지막 줄]
+          ${TAILT:-오류 로그 없음: 수집·테스트 외 단계 실패 (Actions 로그 확인)}
+          위 오류 줄을 그대로 복사해 AI에게 주면 바로 진단됩니다 (PLAYBOOK 2.7절).
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
