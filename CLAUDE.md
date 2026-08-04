@@ -100,6 +100,10 @@ AI 세션에서 git push가 막혀 있을 수 있다. 그 경우 배포 절차:
   `Add file → Upload files`로 덮어쓰기 (같은 파일명 자동 교체)
 - `.github/` 안의 파일은 드래그 업로드가 안 되므로, 웹 편집 링크
   (`github.com/km-jang/kr-idea/edit/main/.github/workflows/update.yml`)로 붙여넣기 안내
+- **코드 파일(.py·.html 등)은 조각 붙여넣기(부분 삽입) 절대 금지. 전체 파일 교체만.**
+  웹 편집기에서 Ctrl+A → Delete → 전체 붙여넣기. 부분 삽입은 줄바꿈 하나만 증발해도
+  전체 자동화가 선다 (2026-07-31 실사고: test_parsers.py 조각 삽입에서 마지막 줄바꿈이
+  사라져 SyntaxError → 수집이 이틀 전면 중단. 테스트 게이트가 설계대로 수집을 차단했다)
 - 전달 전 반드시: 테스트 전체 통과 + (UI 변경 시) 로컬 렌더링 확인
 - 반영 후 `raw.githubusercontent.com`으로 파일 일치 검증 (캐시 지연 몇 분 감안)
 
