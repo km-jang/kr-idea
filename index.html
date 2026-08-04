@@ -1246,11 +1246,20 @@ function scanReview(d){
   const r = d.scan_review;
   if(!r || !r.items) return "";
   const pn = v => `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
+  // 종목명 클릭 → 퀵메뉴(차트·뉴스·공시). scan_review엔 code가 없어서
+  // all_stocks에서 이름으로 찾는다. 못 찾으면 예전처럼 맨글자 (구 데이터 하위호환)
+  const byName = {};
+  (d.all_stocks || []).forEach(s => { if(s && s.name) byName[s.name] = s.code; });
+  const nm = i => {
+    const c = i.code || byName[i.name];
+    return c ? `<span class="qn" data-c="${c}" data-n="${esc(i.name)}">${esc(i.name)}</span>`
+             : esc(i.name);
+  };
   return `<div class="bars" style="margin-bottom:12px">
     <h3>🔔 종가매매 스캔 성적 (${esc(r.date.slice(5).replace("-","/"))} 14:50 후보 → 다음 종가)</h3>
     <div style="font-size:13.5px;color:var(--ink-2);line-height:1.9">
       평균 ${pn(r.avg_ret_pct)} · ${r.items.map(i=>
-        `${esc(i.name)} ${pn(i.ret_pct)}`).join(" · ")}
+        `${nm(i)} ${pn(i.ret_pct)}`).join(" · ")}
     </div></div>`;
 }
 
