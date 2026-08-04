@@ -1602,7 +1602,9 @@ def test_ops_log_valid_date():
     assert ops_log.valid_date("20260728") is None
     assert ops_log.valid_date("어제") is None
     assert ops_log.valid_date("") is None
-    assert ops_log.valid_date(None) is Noneif __name__ == "__main__":
+    assert ops_log.valid_date(None) is None
+    
+if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
     for fn in fns:
