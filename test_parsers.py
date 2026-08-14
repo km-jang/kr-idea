@@ -1603,7 +1603,59 @@ def test_ops_log_valid_date():
     assert ops_log.valid_date("어제") is None
     assert ops_log.valid_date("") is None
     assert ops_log.valid_date(None) is None
-    
+
+
+# ---------------------------------------------------------------------------
+# V5.4) 검색식 ETF 제외 + 성적 요약
+# ---------------------------------------------------------------------------
+
+def test_screens_exclude_index_products():
+    """검색식 5종 공통 ETF 제외: 같은 조건이면 개별 종목만 잡히고 ETF는 걸러진다."""
+    base = {"price": 50000, "change_pct": 0.5, "mktcap_100m": 50000,
+            "near_52w_pct": 98.5, "f_5d_amt_100m": 120.0}
+    stocks = [
+        dict(base, code="069500", name="KODEX 200"),
+        dict(base, code="102110", name="TIGER 200"),
+        dict(base, code="005930", name="삼성전자"),
+    ]
+    out = collect.build_screens(stocks, "__no_such_dir__", "2026-08-14")
+    names = [h["name"] for h in out["gate52"]]
+    assert "삼성전자" in names, names
+    assert "KODEX 200" not in names and "TIGER 200" not in names, names
+
+
+def test_is_index_product():
+    assert collect.is_index_product("KODEX 미국S&P500")
+    assert collect.is_index_product("TIGER 단기통안채")
+    assert not collect.is_index_product("삼성전자")
+    assert not collect.is_index_product("")
+    assert not collect.is_index_product(None)
+
+
+def test_screen_stats_from_fixture():
+    """검색식 성적 요약: 고정 픽스처 히스토리 2일치로 다음날 승률 계산 검증."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        d1 = {"market_date": "2026-08-01",
+              "screens": {"vacancy": [{"code": "000001", "name": "가상A"},
+                                      {"code": "000002", "name": "가상B"}],
+                          "gate52": []},
+              "all_stocks": [{"code": "000001", "price": 100},
+                             {"code": "000002", "price": 200}]}
+        d2 = {"market_date": "2026-08-02", "screens": {},
+              "all_stocks": [{"code": "000001", "price": 110},
+                             {"code": "000002", "price": 190}]}
+        for fname, doc in (("2026-08-01.json", d1), ("2026-08-02.json", d2)):
+            (Path(td) / fname).write_text(
+                json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        st = collect.build_screen_stats(td)
+        v = st["vacancy"]
+        assert v["days"] == 1 and v["hits"] == 2, st
+        assert v["n1"] == 2 and v["win1"] == 1, st       # 100→110 상승, 200→190 하락
+        assert st["gate52"]["hits"] == 0, st             # 빈 기록은 세지 않음
+        assert collect.build_screen_stats("__no_such_dir__") == {}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

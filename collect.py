@@ -1628,6 +1628,10 @@ def build_sample():
                                {"code": "035720", "name": "카카오",
                                 "exit_date": "2026-07-08", "ret_pct": -4.2}],
                     screens=screens_sample,
+                    screen_stats={"vacancy": {"days": 9, "hits": 16,
+                                              "win1": 10, "n1": 15},
+                                  "gate52": {"days": 13, "hits": 24,
+                                             "win1": 9, "n1": 23}},
                     insider_trades=[
                         {"code": "035760", "name": "CJ ENM", "price": 71200,
                          "change_pct": 0.71, "mktcap_100m": 15600,
@@ -1866,6 +1870,18 @@ SCREEN_LABELS = {"vacancy": "🏦 빈집털이", "pullback": "🎯 대장주 눌
                  "hotmoney": "🔥 종합 수급", "stealth": "🤫 몰래 매집",
                  "gate52": "🚪 신고가 문앞"}
 
+# 검색식 공통 ETF 제외 (V5.4): 검색식은 개별 종목 발굴이 목적인데 지수 상품이 섞이면
+# 잡음이 된다 (2026-08-06 신고가 문앞에 채권 ETF가 실제로 잡힌 사례).
+# 이름 앞머리(운용사 브랜드) 기준으로 거른다. 새 브랜드가 생기면 여기에 추가.
+ETF_NAME_PREFIXES = ("KODEX", "TIGER", "RISE", "PLUS", "ACE", "SOL", "KIWOOM",
+                     "HANARO", "ARIRANG", "KOSEF", "KoAct", "TIMEFOLIO", "WON",
+                     "BNK", "FOCUS", "KCGI", "히어로즈", "마이다스", "에셋플러스")
+
+
+def is_index_product(name):
+    """ETF 등 지수 상품 이름 판별. 검색식(build_screens)에서만 사용."""
+    return (name or "").strip().startswith(ETF_NAME_PREFIXES)
+
 
 def history_turnovers(hist_dir, days=5):
     """히스토리에서 종목별 최근 일별 거래대금(억) 목록 {code: [..]}."""
@@ -1901,6 +1917,8 @@ def build_screens(stocks, hist_dir, market_date, cfg=None):
         code, px = s.get("code"), s.get("price")
         if not code or not px:
             continue
+        if is_index_product(s.get("name")):
+            continue                     # 검색식 5종 공통: ETF 제외 (V5.4)
         mkt = s.get("mktcap_100m") or 0
         chg = s.get("change_pct")
         vol = s.get("volume") or 0
@@ -1965,6 +1983,46 @@ def build_screens(stocks, hist_dir, market_date, cfg=None):
     for k in out:
         out[k] = out[k][:5]
     return out
+
+
+def build_screen_stats(hist_dir, max_days=20):
+    """검색식별 최근 성적 요약 (V5.4, 대시보드 ⚙ 설정 표시용).
+    히스토리의 screens 기록과 다음 기록일 종가(all_stocks)로 다음날 승률을 센다.
+    반환: {screen: {"days": 표시일수, "hits": 적중건수,
+                    "win1": 다음날 상승 건수, "n1": 판정 가능 표본}}
+    data.json에는 "screen_stats" 키로 추가만 된다 (절대 규칙 1 무해).
+    부가 기능이므로 어떤 실패에도 빈 dict를 돌려주고 수집을 막지 않는다."""
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-(max_days + 1):]
+    except Exception:
+        return {}
+    days = []
+    for f in files:
+        try:
+            days.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    if len(days) < 2:
+        return {}
+    px = [{s.get("code"): s.get("price")
+           for s in d.get("all_stocks") or [] if s.get("code")} for d in days]
+    stats = {}
+    for i, d in enumerate(days):
+        for key, items in (d.get("screens") or {}).items():
+            st = stats.setdefault(key, {"days": 0, "hits": 0, "win1": 0, "n1": 0})
+            if not items:
+                continue
+            st["days"] += 1
+            st["hits"] += len(items)
+            if i + 1 >= len(days):
+                continue                 # 마지막 날은 다음날 종가가 아직 없다
+            for it in items:
+                p0, p1 = px[i].get(it.get("code")), px[i + 1].get(it.get("code"))
+                if p0 and p1:
+                    st["n1"] += 1
+                    if p1 > p0:
+                        st["win1"] += 1
+    return stats
 
 
 def build_insider_watch(disclosures, min_count=None):
@@ -2196,7 +2254,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              sentiment_enabled=False, perf_curve=None, scan_review=None,
              strategies=None, strategy_race=None, silence=None, news_compass=None,
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
-             mines=None, swing=None, swing_review=None, chart_pack=None):
+             mines=None, swing=None, swing_review=None, chart_pack=None,
+             screen_stats=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -2250,6 +2309,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "insider_watch": insider_watch or [],
         "graduates": graduates or [],
         "screens": screens or {},
+        "screen_stats": screen_stats or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -2377,6 +2437,12 @@ def run_full(max_universe=None, out_path=None):
     hits = sum(len(v) for v in screens.values())
     if hits:
         print(f"  → 조건 검색 적중 {hits}건")
+    # 검색식 성적 요약 — 부가 기능이므로 실패해도 핵심 수집을 막지 않는다 (V5.4)
+    try:
+        screen_stats = build_screen_stats(hist_dir)
+    except Exception as e:
+        errors.append(f"screen_stats: {e}")
+        screen_stats = {}
     # 스윙은 부가 기능 — 버그가 나도 핵심 대시보드 수집을 막지 않도록 방어
     try:
         swing = build_swing(stocks, screens, mines, market_date)
@@ -2411,7 +2477,8 @@ def run_full(max_universe=None, out_path=None):
                     silence=silence, news_compass=news_compass,
                     insider_watch=insider_watch, graduates=graduates,
                     screens=screens, insider_trades=insider_trades, mines=mines,
-                    swing=swing, swing_review=swing_review, chart_pack=chart_pack)
+                    swing=swing, swing_review=swing_review, chart_pack=chart_pack,
+                    screen_stats=screen_stats)
 
 
 def main():
@@ -2427,7 +2494,7 @@ def main():
             import holidays_kr
             reason = holidays_kr.closed_reason()
             if reason:
-                print(f"오늘은 휴장일({reason}) — 수집을 쉽니다.")
+                print(f"오늘은 휴장일({reason}) · 수집을 쉽니다.")
                 return
         except ImportError:
             pass
