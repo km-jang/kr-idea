@@ -246,7 +246,7 @@ section.folded > *:not(h2){display:none}
   padding:13px 16px;margin-bottom:14px;font-size:13.5px;line-height:1.8;display:none}
 #brief3 b{font-weight:700}
 
-.colmore{display:block;width:100%;font-size:12px;font-weight:600;color:var(--ink-2);
+.colmore,.rowmore{display:block;width:100%;font-size:12px;font-weight:600;color:var(--ink-2);
   background:var(--chip-bg);border:none;border-top:1px solid var(--ring);padding:9px;
   cursor:pointer;font-family:inherit}
 table.slim{min-width:0}
@@ -1107,11 +1107,15 @@ function divColor(amt, max){
 
 /* 정렬 가능한 테이블 렌더러 */
 const isNarrow = () => window.matchMedia("(max-width:520px)").matches;
-function makeTable(elId, rows, cols, defaultKey){
+function makeTable(elId, rows, cols, defaultKey, headN){
+  /* headN (V5.5 화면 다이어트): 지정하면 상시 headN행만 표시 + "더보기" 버튼.
+     정렬은 전체 목록 기준으로 한 뒤 자르므로, 어떤 열로 정렬해도 진짜 상위가 보인다.
+     CSV 저장은 이 함수와 무관하게 전체 목록을 내려받는다. */
   const el = document.getElementById(elId);
   let key = defaultKey, dir = -1;
   const hasCore = cols.some(c=>c.core);
   let full = !(hasCore && isNarrow());   // 좁은 화면 + 핵심 열 지정 시 다이어트 모드로 시작
+  let showAll = !headN || rows.length <= headN;
   function render(){
     const ac = full ? cols : cols.filter(c=>c.core);
     if(!ac.some(c=>c.k===key)){ key = defaultKey; dir = -1; }
@@ -1120,12 +1124,23 @@ function makeTable(elId, rows, cols, defaultKey){
       if(x==null) return 1; if(y==null) return -1;
       return (x<y?-1:x>y?1:0)*dir;
     });
+    const view = showAll ? sorted : sorted.slice(0, headN);
     el.classList.toggle("slim", !full);
     el.innerHTML = "<thead><tr>" + ac.map(c=>
       `<th data-k="${c.k}" class="${c.k===key?"sorted":""}">${c.h}${c.k===key?(dir<0?" ↓":" ↑"):""}</th>`
     ).join("") + "</tr></thead><tbody>" +
-    sorted.map(s=>"<tr>"+ac.map(c=>`<td>${c.f(s)}</td>`).join("")+"</tr>").join("") +
+    view.map(s=>"<tr>"+ac.map(c=>`<td>${c.f(s)}</td>`).join("")+"</tr>").join("") +
     "</tbody>";
+    let rbtn = el.parentNode.querySelector(".rowmore");
+    if(headN && rows.length > headN){
+      if(!rbtn){
+        rbtn = document.createElement("button");
+        rbtn.type = "button"; rbtn.className = "rowmore";   /* colmore와 클래스 분리 (열 토글 로직과 충돌 방지) */
+        el.parentNode.appendChild(rbtn);
+      }
+      rbtn.textContent = showAll ? `▴ 상위 ${headN}개만 보기` : `▾ ${rows.length - headN}종목 더보기`;
+      rbtn.onclick = ()=>{ showAll = !showAll; render(); };
+    } else if(rbtn){ rbtn.remove(); }
     el.querySelectorAll("th").forEach(th=>th.onclick=()=>{
       const k=th.dataset.k;
       if(k===key) dir=-dir; else {key=k;dir=-1;}
@@ -1198,7 +1213,7 @@ function flowTable(d){
     {k:"flow_delta",h:"Δ전일",f:s=>s.flow_delta==null?"–":
       `<span class="${cls(s.flow_delta)}">${s.flow_delta>0?"+":""}${s.flow_delta}</span>`+
       (s.flow_delta>=8?' <span class="badge-new">급등</span>':"")},
-  ], "flow_score");
+  ], "flow_score", LIST_HEAD);
 }
 
 function valueTable(d){
@@ -1212,7 +1227,7 @@ function valueTable(d){
     {k:"f_streak",h:"외인 연속",f:s=>streakCell(s.f_streak,5)},
     {k:"value_score",h:"밸류점수",f:s=>`<b>${s.value_score??"–"}</b>`,core:true},
     {k:"score",h:"종합",f:s=>`<b>${s.score??"–"}</b>`},
-  ], "value_score");
+  ], "value_score", LIST_HEAD);
 }
 
 /* ---------- CSV 내보내기 ---------- */
@@ -1442,6 +1457,9 @@ function portSection(d){
 }
 
 /* ---------- 🎮 모의 투자 (전부 브라우저 안에서, 서버 전송 없음) ---------- */
+/* V5.5: 소유자 결정(2026-08-14)으로 섹션 숨김. 코드·거래 기록(브라우저 저장)은
+   전부 보존되므로 아래 SHOW_PAPER를 true로 바꾸면 그대로 되살아난다. */
+const SHOW_PAPER = false;
 const PAPER_KEY = "kr_idea_paper";
 const FEE_BUY = 0.00015, FEE_SELL = 0.00215;   // 수수료·세금 근사
 const getPaper = () => { try { return JSON.parse(localStorage.getItem(PAPER_KEY)); } catch(e){ return null; } };
@@ -1844,16 +1862,28 @@ function perfSection(d){
     `</div>
     <div class="tblwrap"><table>
     <thead><tr><th>선정일</th><th>5선 평균</th><th>KOSPI</th><th style="text-align:left">종목별</th></tr></thead><tbody>`+
-    (p.records||[]).map(r=>`<tr>
+    (p.records||[]).map((r,i)=>`<tr${i>=PERF_HEAD?' class="perfrest" hidden':''}>
       <td>${r.date.slice(5).replace("-","/")}</td>
       <td>${pn(r.avg_ret_pct)}</td>
       <td>${pn(r.kospi_ret_pct)}</td>
       <td class="pnames" style="text-align:left">${(r.ideas||[]).map(x=>
         `${esc(x.name)} <span class="${cls(x.ret_pct)}">${x.ret_pct>0?"+":""}${x.ret_pct}%</span>`).join(" · ")}</td>
-    </tr>`).join("")+"</tbody></table></div>";
+    </tr>`).join("")+"</tbody></table></div>"+
+    ((p.records||[]).length > PERF_HEAD
+      ? `<button type="button" class="colmore" id="perfMore" aria-expanded="false">▾ 지난 기록 ${(p.records||[]).length - PERF_HEAD}일 더보기</button>` : "");
+  const pm = el.querySelector("#perfMore");
+  if(pm) pm.onclick = ()=>{
+    const rows = el.querySelectorAll(".perfrest");
+    const open = rows.length && rows[0].hidden;
+    rows.forEach(tr=>{ tr.hidden = !open; });
+    pm.setAttribute("aria-expanded", open ? "true" : "false");
+    pm.textContent = open ? "▴ 최근 5일만 보기" : `▾ 지난 기록 ${rows.length}일 더보기`;
+  };
 }
 
 const DISC_HEAD = 10;   /* 상시 표시 건수. 나머지는 클릭해야 펼쳐진다 (0픽셀 원칙) */
+const LIST_HEAD = 10;   /* V5.5 화면 다이어트: 수급 스캐너·밸류 스크리너 상시 표시 종목 수 */
+const PERF_HEAD = 5;    /* V5.5 화면 다이어트: 성과 트래킹 일별 기록 상시 표시 일수 */
 function discList(d){
   const el = document.getElementById("discList");
   const list = d.disclosures||[];
@@ -1886,6 +1916,10 @@ const FOLD_KEY = "kr_idea_fold";
 function initFold(){
   let saved = {};
   try{ saved = JSON.parse(localStorage.getItem(FOLD_KEY) || "{}"); }catch(e){}
+  /* V5.5: 처음 방문(또는 접기 기록이 없는 섹션)은 기본 접힘.
+     제목을 클릭해 펼치면 그 선택이 기억된다. */
+  const DEFAULT_FOLDED = ["senti"];
+  DEFAULT_FOLDED.forEach(id=>{ if(!(id in saved)) saved[id] = true; });
   const save = ()=>{ try{ localStorage.setItem(FOLD_KEY, JSON.stringify(saved)); }catch(e){} };
   document.querySelectorAll("section[id]").forEach(sec=>{
     const h2 = sec.querySelector(":scope > h2");
@@ -2066,7 +2100,8 @@ function renderAll(d, isHistory){
   screensBox(d); brief3(d); sectionBadges(d);
   if(!isHistory){
     TODAY_DATA = d;
-    initSliders(d); initSearch(d); initHistory(d); initPort(d); initPaper(d);
+    initSliders(d); initSearch(d); initHistory(d); initPort(d);
+    if(SHOW_PAPER) initPaper(d);
   } else {
     ideaCards(d);   // 과거 보기에선 슬라이더 미적용 원본 5선
   }
@@ -2198,6 +2233,11 @@ document.addEventListener("click", e=>{
   if(qn && qn.dataset.c){ e.preventDefault(); openQsheet(qn.dataset.c, qn.dataset.n || qn.textContent); }
 });
 
+if(!SHOW_PAPER){
+  const ps = document.getElementById("paper");
+  if(ps) ps.remove();
+  document.querySelectorAll('nav.chips a[href="#paper"]').forEach(a=>a.remove());
+}
 initFold();
 
 fetch("data.json?t="+Date.now())
