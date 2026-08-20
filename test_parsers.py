@@ -1656,6 +1656,36 @@ def test_screen_stats_from_fixture():
         assert collect.build_screen_stats("__no_such_dir__") == {}
 
 
+def test_chase_stats_from_fixture():
+    """S4 추격 통계: 스캔 급등주를 종가 추격 시 다음날 성적 집계 검증."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        scans = [
+            {"date": "2026-08-01", "time": "15:01",
+             "candidates": [{"code": "000001", "name": "가상A", "price": 99, "chg": 8.0},
+                            {"code": "000002", "name": "가상B", "price": 198, "chg": 12.0}]},
+            {"date": "2026-08-02", "time": "15:02", "candidates": []},   # 빈 스캔은 무시
+        ]
+        sp = os.path.join(td, "scans.json")
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump(scans, f, ensure_ascii=False)
+        hd = os.path.join(td, "hist"); os.makedirs(hd)
+        d1 = {"market_date": "2026-08-01",
+              "all_stocks": [{"code": "000001", "price": 100},
+                             {"code": "000002", "price": 200}]}
+        d2 = {"market_date": "2026-08-02",
+              "all_stocks": [{"code": "000001", "price": 105},
+                             {"code": "000002", "price": 190}]}
+        for fname, doc in (("2026-08-01.json", d1), ("2026-08-02.json", d2)):
+            (Path(hd) / fname).write_text(
+                json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        st = collect.build_chase_stats(sp, hd)
+        # 종가 100→105 상승, 200→190 하락: 표본 2, 승 1, 평균 (5% - 5%)/2 = 0
+        assert st["n"] == 2 and st["win"] == 1, st
+        assert abs(st["avg_pct"] - 0.0) < 0.01, st
+        assert collect.build_chase_stats("__no_file__", hd) == {}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

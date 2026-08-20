@@ -1274,6 +1274,44 @@ def build_scan_review(scans_path, stocks, market_date):
             "items": items}
 
 
+def build_chase_stats(scans_path, hist_dir, max_records=60):
+    """S4 추격 통계 (V5.6): 종가매매 스캔이 잡은 '급등 마감' 후보를 그날 확정 종가에
+    추격매수했다고 가정하고, 다음 기록일 종가로 채점한 누적 통계.
+    반환: {"n": 표본, "win": 다음날 상승 건수, "avg_pct": 평균 수익률} 또는 {}.
+    data.json엔 "chase_stats" 키 추가만 (절대 규칙 1 무해). 부가 기능이므로
+    어떤 실패에도 빈 dict를 돌려주고 수집을 막지 않는다."""
+    try:
+        records = json.loads(Path(scans_path).read_text(encoding="utf-8"))
+        files = sorted(Path(hist_dir).glob("*.json"))
+    except Exception:
+        return {}
+    days = []
+    for f in files:
+        try:
+            days.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    dates = [d.get("market_date") for d in days]
+    px = [{s.get("code"): s.get("price")
+           for s in d.get("all_stocks") or [] if s.get("code")} for d in days]
+    rets = []
+    for r in records[-max_records:]:
+        dt = r.get("date")
+        if dt not in dates:
+            continue
+        i = dates.index(dt)
+        if i + 1 >= len(days):
+            continue                     # 다음 종가가 아직 없는 최신 스캔
+        for c in r.get("candidates") or []:
+            p0, p1 = px[i].get(c.get("code")), px[i + 1].get(c.get("code"))
+            if p0 and p1:
+                rets.append((p1 / p0 - 1) * 100)
+    if not rets:
+        return {}
+    return {"n": len(rets), "win": sum(1 for x in rets if x > 0),
+            "avg_pct": round(sum(rets) / len(rets), 2)}
+
+
 def apply_idea_streaks(ideas, past_idea_sets):
     """아이디어 종목별 연속 선정일수(idea_days) 계산. 오늘 포함 1부터 시작."""
     for s in ideas:
@@ -1632,6 +1670,7 @@ def build_sample():
                                               "win1": 10, "n1": 15},
                                   "gate52": {"days": 13, "hits": 24,
                                              "win1": 9, "n1": 23}},
+                    chase_stats={"n": 26, "win": 11, "avg_pct": -0.82},
                     insider_trades=[
                         {"code": "035760", "name": "CJ ENM", "price": 71200,
                          "change_pct": 0.71, "mktcap_100m": 15600,
@@ -2255,7 +2294,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              strategies=None, strategy_race=None, silence=None, news_compass=None,
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
              mines=None, swing=None, swing_review=None, chart_pack=None,
-             screen_stats=None):
+             screen_stats=None, chase_stats=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -2310,6 +2349,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "graduates": graduates or [],
         "screens": screens or {},
         "screen_stats": screen_stats or {},
+        "chase_stats": chase_stats or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -2443,6 +2483,12 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"screen_stats: {e}")
         screen_stats = {}
+    # 추격 통계 (S4) — 부가 기능, 실패해도 수집을 막지 않는다 (V5.6)
+    try:
+        chase_stats = build_chase_stats(ROOT / "scans.json", hist_dir)
+    except Exception as e:
+        errors.append(f"chase_stats: {e}")
+        chase_stats = {}
     # 스윙은 부가 기능 — 버그가 나도 핵심 대시보드 수집을 막지 않도록 방어
     try:
         swing = build_swing(stocks, screens, mines, market_date)
@@ -2478,7 +2524,7 @@ def run_full(max_universe=None, out_path=None):
                     insider_watch=insider_watch, graduates=graduates,
                     screens=screens, insider_trades=insider_trades, mines=mines,
                     swing=swing, swing_review=swing_review, chart_pack=chart_pack,
-                    screen_stats=screen_stats)
+                    screen_stats=screen_stats, chase_stats=chase_stats)
 
 
 def main():

@@ -1318,12 +1318,18 @@ function scanReview(d){
     return c ? `<span class="qn" data-c="${c}" data-n="${esc(i.name)}">${esc(i.name)}</span>`
              : esc(i.name);
   };
+  /* 🏃 추격 통계 (S4, V5.6): 스캔 급등주를 종가 추격매수했을 때의 누적 성적.
+     표본 10건부터 조건부 한 줄 표시 (0픽셀), 구 데이터엔 키가 없어도 무해 */
+  const cs = d.chase_stats || {};
+  const chase = (cs.n >= 10)
+    ? `<div style="font-size:12px;color:var(--ink-3);margin-top:5px">🏃 추격 통계: 스캔 급등주 ${cs.n}건을 종가에 쫓아가 다음날까지 들었다면 평균 <span class="${cls(cs.avg_pct)}">${cs.avg_pct>0?"+":""}${cs.avg_pct}%</span> · 승률 ${Math.round(cs.win/cs.n*100)}%</div>`
+    : "";
   return `<div class="bars" style="margin-bottom:12px">
     <h3>🔔 종가매매 스캔 성적 (${esc(r.date.slice(5).replace("-","/"))} 14:50 후보 → 다음 종가)</h3>
     <div style="font-size:13.5px;color:var(--ink-2);line-height:1.9">
       평균 ${pn(r.avg_ret_pct)} · ${r.items.map(i=>
         `${nm(i)} ${pn(i.ret_pct)}`).join(" · ")}
-    </div></div>`;
+    </div>${chase}</div>`;
 }
 
 
@@ -2218,6 +2224,7 @@ function openQsheet(code, name){
       <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">📰 뉴스</a>
       <a class="qbtn" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(name)}">📄 공시</a>
       <button class="qbtn" onclick="closeQsheet();showDevil('${code}')">😈 반론 보기</button>
+      <button class="qbtn" data-cmp="${code}" data-cmpn="${esc(name)}">⚖️ ${CMP_PICK && CMP_PICK.code !== code ? "비교 보기 (vs "+esc(CMP_PICK.name)+")" : "비교에 담기"}</button>
       <button class="qbtn" style="grid-column:1/-1" onclick="closeQsheet();copyAIPrompt('${code}', '${esc(name)}')">🤖 AI 리스크 스캔 (프롬프트 복사 → Claude/Gemini에 붙여넣기)</button>
     </div>
     <button class="qclose" onclick="closeQsheet()">닫기</button>`;
@@ -2228,7 +2235,72 @@ function closeQsheet(){
   document.getElementById("qsheet").style.display = "none";
   document.getElementById("qsheetBack").style.display = "none";
 }
+
+/* ---------- ⚖️ 종목 비교기 (S5, V5.6) ---------- */
+/* 퀵메뉴에서 한 종목을 담고, 다른 종목의 퀵메뉴에서 비교를 누르면 나란히 표.
+   기존 data.json(all_stocks)만 재활용. 담긴 종목은 새로고침하면 초기화. */
+let CMP_PICK = null;
+function cmpAdd(code, name){
+  if(CMP_PICK && CMP_PICK.code !== code){
+    const a = CMP_PICK; CMP_PICK = null;
+    openCompare(a, {code, name});
+    return;
+  }
+  CMP_PICK = {code, name};
+  closeQsheet();
+  toast(`⚖️ ${name} 담김 · 비교할 종목명을 클릭한 뒤 '비교 보기'를 누르세요`);
+}
+function openCompare(a, b){
+  const d = window.DATA || {};
+  const m = {};
+  allStocks(d).forEach(s=>{ if(s && s.code) m[s.code] = s; });
+  const A = m[a.code], B = m[b.code];
+  if(!A || !B){ closeQsheet(); toast("시세 데이터가 없는 종목이라 비교할 수 없어요"); return; }
+  const fp = v => v==null ? "·" : v;
+  const pct = v => v==null ? "·" : `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
+  const rows = [
+    ["현재가", s=>fmt(s.price), null],
+    ["등락률", s=>pct(s.change_pct), null],
+    ["시총(억)", s=>fmt(s.mktcap_100m), s=>s.mktcap_100m],
+    ["종합점수", s=>fp(s.score), s=>s.score],
+    ["수급", s=>fp(s.flow_score), s=>s.flow_score],
+    ["밸류", s=>fp(s.value_score), s=>s.value_score],
+    ["모멘텀", s=>fp(s.mom_score), s=>s.mom_score],
+    ["외인 연속", s=>(s.f_streak||0)+"일", s=>s.f_streak||0],
+    ["기관 연속", s=>(s.i_streak||0)+"일", s=>s.i_streak||0],
+    ["외인 5일(억)", s=>fmt(s.f_5d_amt_100m), s=>s.f_5d_amt_100m],
+    ["PER", s=>fp(s.per), s=>s.per==null?null:-s.per],
+    ["PBR", s=>fp(s.pbr), s=>s.pbr==null?null:-s.pbr],
+    ["배당률", s=>s.dvr==null?"·":s.dvr+"%", s=>s.dvr],
+    ["52주 위치", s=>s.near_52w_pct==null?"·":s.near_52w_pct+"%", null],
+  ];
+  const cell = (v, isWin) => `<td style="text-align:right;padding:5px 6px;overflow:hidden;${isWin?"font-weight:800":""}">${v}</td>`;
+  const body = rows.map(([label, show, val])=>{
+    let wa=false, wb=false;
+    if(val){
+      const va = val(A), vb = val(B);
+      if(va!=null && vb!=null && va!==vb){ wa = va>vb; wb = vb>va; }
+    }
+    return `<tr><td style="padding:5px 2px;color:var(--ink-3);font-size:11px">${label}</td>${cell(show(A),wa)}${cell(show(B),wb)}</tr>`;
+  }).join("");
+  const s = document.getElementById("qsheet");
+  s.innerHTML = `
+    <h3>⚖️ 종목 비교</h3>
+    <div style="max-height:60vh;overflow-y:auto"><table style="width:100%;min-width:0;border-collapse:collapse;font-size:12.5px;table-layout:fixed">
+      <colgroup><col style="width:31%"><col style="width:34.5%"><col style="width:34.5%"></colgroup>
+      <thead><tr><th></th>
+        <th style="text-align:right;padding:5px 6px;font-size:11.5px;word-break:keep-all;overflow-wrap:anywhere"><span class="qn" data-c="${A.code}" data-n="${esc(A.name)}">${esc(A.name)}</span></th>
+        <th style="text-align:right;padding:5px 6px;font-size:11.5px;word-break:keep-all;overflow-wrap:anywhere"><span class="qn" data-c="${B.code}" data-n="${esc(B.name)}">${esc(B.name)}</span></th>
+      </tr></thead><tbody>${body}</tbody></table></div>
+    <div style="font-size:11px;color:var(--ink-3);margin-top:6px">굵은 값 = 더 나은 쪽 (PER·PBR은 낮은 쪽이 저평가) · 종목명을 누르면 퀵 메뉴 · 현재가·순매수는 원·억 단위</div>
+    <button class="qclose" onclick="closeQsheet()">닫기</button>`;
+  s.style.display = "block";
+  document.getElementById("qsheetBack").style.display = "block";
+}
+
 document.addEventListener("click", e=>{
+  const cb = e.target.closest("[data-cmp]");
+  if(cb){ cmpAdd(cb.dataset.cmp, cb.dataset.cmpn); return; }
   const qn = e.target.closest(".qn");
   if(qn && qn.dataset.c){ e.preventDefault(); openQsheet(qn.dataset.c, qn.dataset.n || qn.textContent); }
 });
