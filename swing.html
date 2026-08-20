@@ -204,11 +204,20 @@ fetch("data.json?t="+Date.now())
       document.getElementById("reviewSub").textContent =
         `${(rv.date||"").replace(/-/g,".")} 후보를 ${rv.hold_days||5}영업일 뒤(현재가)로 채점`;
       const avg = rv.avg_ret_pct;
+      /* 성적표 종목명 클릭 → 네이버 차트 (swing_review엔 code가 없어 all_stocks에서
+         이름으로 찾는다. 못 찾으면 예전처럼 맨글자 · 메인의 종가매매 성적과 같은 방식) */
+      const byName = {};
+      (d.all_stocks || []).forEach(s => { if(s && s.name) byName[s.name] = s.code; });
+      const nm = it => {
+        const c = byName[it.name];
+        return c ? `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${c}">${esc(it.name)}</a>`
+                 : esc(it.name);
+      };
       document.getElementById("reviewBox").innerHTML =
         `<div><span class="big ${avg>0?"up":avg<0?"down":"flat"}">${avg>0?"+":""}${avg}%</span> <span class="lbl">평균 수익률</span></div>
          <div><span class="big">${rv.hit_rate}%</span> <span class="lbl">적중률(플러스 비율)</span></div>
          <div class="items">${rv.items.map(it=>
-            `${esc(it.name)} <span class="${it.ret_pct>0?"up":it.ret_pct<0?"down":"flat"}">${it.ret_pct>0?"+":""}${it.ret_pct}%</span>`
+            `${nm(it)} <span class="${it.ret_pct>0?"up":it.ret_pct<0?"down":"flat"}">${it.ret_pct>0?"+":""}${it.ret_pct}%</span>`
          ).join(" · ")}</div>`;
     }
 

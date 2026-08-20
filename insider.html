@@ -131,7 +131,7 @@ fetch("data.json?t="+Date.now())
     document.getElementById("buyCards").innerHTML =
       buys.length ? buys.map(x=>card(x,"buy")).join("")
       : '<div class="empty">최근 14일 내 내부자 매수 우세 종목이 없습니다.' +
-        (it.length===0 ? '<br><span style="font-size:11.5px">이 페이지는 DART 키 등록 후 저녁 수집부터 채워집니다.</span>' : '') + '</div>';
+        (it.length===0 ? '<br><span style="font-size:11.5px">보고가 없는 조용한 기간에는 원래 비어 있습니다 · 만약 DART 키를 아직 등록하지 않았다면 등록 후 저녁 수집부터 채워집니다.</span>' : '') + '</div>';
     document.getElementById("sellCards").innerHTML =
       sells.length ? sells.map(x=>card(x,"sell")).join("")
       : '<div class="empty">매도 우세 종목이 없습니다.</div>';
