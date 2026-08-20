@@ -132,7 +132,12 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python notify.py --weekly
+        run: |
+          python notify.py --weekly
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 주간 결산 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 예비 수집·발송 (19:43, 본 수집 누락 시에만)
         if: github.event.schedule == '43 10 * * 1-5'
