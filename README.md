@@ -29,6 +29,7 @@
 | `swing.html` `dividend.html` `insider.html` `mine.html` | 하위 페이지: 스윙 레이더 · 배당 공장 · 내부자 · 지뢰 탐지 |
 | `chart.html` | 차트 카드 (120일 차트 + 판정, 퀵 메뉴에서 진입) |
 | `pair.html` | 동료주 발굴기 (그림자 페어 · 연산은 브라우저) |
+| `backtest.html` | 백테스트 실험실 (가중치 조합의 과거 성과 재계산 · 연산은 브라우저) |
 | `data.json` | 최신 수집 결과 (자동 갱신) |
 | `history/*.json` | 일별 보관 (성과 트래킹·추세·동료주의 재료, 삭제 금지) |
 | `collect.py` | 수집·점수화 파이프라인 — **튜닝은 여기 상단 CONFIG** |

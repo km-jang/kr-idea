@@ -1718,6 +1718,32 @@ def test_swing_stats_from_fixture():
         assert collect.build_swing_stats(os.path.join(td, "없음")) == {}
 
 
+def test_kill_watch_from_fixture():
+    """S16 킬 스위치: 시간 무반응·거래대금 급감 판정 검증."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        hd = os.path.join(td, "hist"); os.makedirs(hd)
+        # d1에 두 종목 포착 → d2~d4 경과 → 오늘(d5) 판정
+        mk = lambda c, px, vol: {"code": c, "price": px, "volume": vol}
+        d1 = {"market_date": "2026-08-03",
+              "swing": [{"code": "A", "name": "무반응주", "entry": 10000},
+                        {"code": "B", "name": "달린주", "entry": 20000}],
+              "all_stocks": [mk("A", 10000, 100000), mk("B", 20000, 100000)]}
+        rest = {"market_date": "", "swing": [], "all_stocks": []}
+        for i, day in enumerate(("2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06")):
+            doc = d1 if i == 0 else dict(rest, market_date=day)
+            (Path(hd) / f"{day}.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        today = [mk("A", 10050, 30000),    # +0.5% 무반응 + 대금 30% (양쪽 스위치)
+                 mk("B", 22400, 90000)]    # +12% 잘 달림 (무혐의)
+        kw = collect.build_kill_watch(hd, today, "2026-08-07")
+        assert len(kw) == 1 and kw[0]["code"] == "A", kw
+        assert kw[0]["days"] == 4 and set(kw[0]["flags"]) == {"time", "volume"}, kw
+        # 포착 이틀째 무반응은 아직 무혐의 (시간 스위치는 4영업일부터)
+        kw2 = collect.build_kill_watch(hd, today, "2026-08-05")
+        assert all("time" not in k["flags"] for k in kw2), kw2
+    assert collect.build_kill_watch("/없는폴더", [], "2026-08-07") == []
+
+
 def test_holidays_2027():
     """2027년 휴장일 선등록 검증 (2026-08-21 월력요항 기준. 12월 KRX 공지 대조 예정)."""
     import holidays_kr as h

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>백테스트 실험실</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="가중치 슬라이더 조합이 지난 기록에서 어떤 성적이었을지 브라우저에서 재계산 · 전략 리그와 같은 산식, 비용 0원">
+<meta name="theme-color" content="#0b0b0b">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --ring:rgba(11,11,11,.10);
+  --series-1:#2a78d6; --series-1-deep:#1c5cab;
+  --up:#c93a3a; --down:#256abf; --crit:#d03b3b; --warn:#c9822a;
+  --chip-bg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --series-1:#3987e5; --series-1-deep:#6da7ec;
+    --up:#e66767; --down:#3987e5; --crit:#e66767; --warn:#e0a15a;
+    --chip-bg:#262624;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top h1{font-size:20px;font-weight:700;margin:0;white-space:nowrap}
+.stamp{color:var(--ink-3);font-size:12.5px}
+a.backlink{font-size:12.5px;color:var(--series-1-deep);text-decoration:none;margin-left:auto;white-space:nowrap}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
+.bars{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:16px;margin-bottom:12px}
+.bars h3{font-size:13.5px;font-weight:700;margin:0 0 8px;color:var(--ink-2)}
+.btn{display:inline-block;border:0;border-radius:10px;padding:10px 22px;font-size:14.5px;font-weight:700;
+  background:var(--series-1);color:#fff;cursor:pointer;font-family:inherit}
+.btn:disabled{opacity:.5;cursor:default}
+.preset{border:1px solid var(--ring);background:var(--chip-bg);color:var(--ink-2);border-radius:99px;
+  padding:5px 14px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+.preset.on{background:var(--series-1);color:#fff;border-color:transparent}
+.slrow{display:grid;grid-template-columns:76px 1fr 56px;gap:10px;align-items:center;margin:7px 0}
+.slrow .lb{font-size:13px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.slrow .val{font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-3);white-space:nowrap}
+input[type=range]{width:100%;accent-color:var(--series-1)}
+.stats{display:flex;flex-wrap:wrap;gap:8px 26px;align-items:baseline}
+.stats .big{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.stats .lbl{font-size:11.5px;color:var(--ink-3)}
+.empty{color:var(--ink-3);font-size:13px;padding:22px;text-align:center;
+  background:var(--surface-1);border:1px solid var(--ring);border-radius:12px}
+.leg{font-size:11px;color:var(--ink-3);margin-top:5px;display:flex;gap:14px;flex-wrap:wrap}
+.leg i{font-style:normal;display:inline-flex;align-items:center;gap:5px}
+.leg b{display:inline-block;width:16px;height:0;border-top-width:2.5px;border-top-style:solid}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
+  font-size:11.5px;color:var(--ink-3);line-height:1.7}
+@media (max-width:520px){
+  body{font-size:14px}
+  .wrap{padding:10px 10px 50px}
+  header.top h1{font-size:17px}
+  .stats{gap:6px 18px} .stats .big{font-size:20px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>🧪 백테스트 실험실</h1>
+    <span class="stamp" id="stamp">준비 중…</span>
+    <a class="backlink" href="index.html">← 메인 대시보드</a>
+  </header>
+
+  <div class="bars" style="font-size:13px;line-height:1.8">
+    <h3>이 도구가 보는 것</h3>
+    수급·밸류·모멘텀·공시 <b>가중치를 내 마음대로 바꿨다면, 지난 기록에서 5선이 어떤 성적을 냈을지</b>를
+    이 브라우저 안에서 그대로 재계산합니다 (매일 종가에 5선을 갈아타는 방식 · 전략 리그와 같은 산식 · 서버 비용 0원).<br>
+    <span style="color:var(--warn);font-weight:600">⚠️ 과최적화 경고: 성적이 좋게 나올 때까지 슬라이더를 움직이면
+    그건 예측이 아니라 "과거 맞추기"입니다.</span>
+    <span style="color:var(--ink-3)">가설을 먼저 세우고(예: "요즘 장은 수급이 답이다") 그 설정 하나를 검증하는 용도로 쓰세요.
+    수수료·세금·체결 미끄러짐은 반영되지 않으며, 과거 성적은 미래를 보장하지 않습니다.</span>
+  </div>
+
+  <div class="bars" id="runBox">
+    <button class="btn" id="runBtn">기록 불러와서 실험 시작</button>
+    <span id="runNote" style="font-size:12px;color:var(--ink-3);margin-left:10px">
+      동료주 발굴기와 같은 일별 기록을 씁니다 · 한 번 받으면 저장된 사본으로 즉시 재계산</span>
+    <div id="prog" style="display:none;margin-top:10px;font-size:13px;color:var(--ink-2)"></div>
+  </div>
+
+  <section id="labSec" style="display:none">
+    <div class="bars">
+      <h3>가중치 조합 <span style="font-weight:400;color:var(--ink-3)">· 100% = 현행 기본값, 움직이면 즉시 재계산</span></h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px" id="presets"></div>
+      <div class="slrow"><span class="lb">수급</span><input type="range" id="wf" min="0" max="200" step="10" value="100"><span class="val" id="wfv">100%</span></div>
+      <div class="slrow"><span class="lb">밸류</span><input type="range" id="wv" min="0" max="200" step="10" value="100"><span class="val" id="wvv">100%</span></div>
+      <div class="slrow"><span class="lb">모멘텀</span><input type="range" id="wm" min="0" max="200" step="10" value="100"><span class="val" id="wmv">100%</span></div>
+      <div class="slrow"><span class="lb">공시</span><input type="range" id="wd" min="0" max="200" step="10" value="100"><span class="val" id="wdv">100%</span></div>
+    </div>
+
+    <div class="bars">
+      <h3 id="statTitle">이 설정의 지난 성적</h3>
+      <div class="stats" id="statRow"></div>
+      <div style="margin-top:12px"><svg id="chart" viewBox="0 0 600 220" preserveAspectRatio="none" style="width:100%;height:220px;display:block"></svg>
+        <div class="leg">
+          <i><b style="border-color:var(--series-1)"></b>내 설정 5선</i>
+          <i><b style="border-color:var(--ink-3);border-top-style:dashed"></b>KOSPI</i>
+          <i><b style="border-color:var(--warn);border-top-style:dotted"></b>기본형(현행)</i>
+        </div></div>
+      <div id="verdict" style="font-size:12.5px;margin-top:10px;line-height:1.7"></div>
+    </div>
+  </section>
+  <div id="labEmpty" class="empty" style="display:none"></div>
+
+  <footer>
+    자료: 이 사이트가 매일 저장하는 일별 기록(history) · 산식: 종목별 (수급×w1 + 밸류×w2 + 모멘텀×w3 + 공시×w4) 상위 5종목을
+    다음 날 종가로 평가해 매일 갈아타기 (시총 3,000억·거래대금 30억 필터, 악재 공시 제외 · collect.py의 5선 선정과 동일)<br>
+    통계 실험 도구이며 매수·매도 추천이 아닙니다. 표본이 짧을수록 우연이 큽니다. ·
+    <a href="index.html" style="color:var(--series-1-deep)">메인 대시보드로</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const $ = id => document.getElementById(id);
+const pctCls = v => v>0 ? "up" : v<0 ? "down" : "flat";
+const pctTxt = v => `<span class="${pctCls(v)}">${v>0?"+":""}${v.toFixed(2)}%</span>`;
+
+/* collect.py STRATEGY_PRESETS와 동일 (전략 리그 산식 미러링) */
+const PRESETS = {
+  "기본형":   {f:1.0, v:1.0, m:1.0, d:1.0},
+  "수급형":   {f:1.5, v:0.7, m:1.2, d:1.0},
+  "가치형":   {f:0.7, v:1.6, m:0.6, d:1.2},
+  "모멘텀형": {f:1.1, v:0.6, m:2.0, d:0.8},
+};
+/* collect.py pick_ideas_weighted와 동일한 선정 규칙 */
+const RULE = { top_n: 5, min_mktcap: 3000, min_turnover: 30 };
+
+let DAYS = [];          // [{date, kospiChg, map: Map(code → {p, f, v, m, dsc, mc, to})}]
+let BASE_CURVE = null;  // 기본형 곡선 (비교 기준)
+
+async function load(){
+  const btn = $("runBtn"), prog = $("prog");
+  btn.disabled = true; prog.style.display = "";
+  try{
+    prog.textContent = "오늘 데이터 확인 중…";
+    const base = await fetch("data.json?t="+Date.now()).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
+    $("stamp").textContent = (base.market_date||"").replace(/-/g,".") + " 기준" + (base.sample ? " · 샘플" : "");
+    /* 날짜 목록: 최근 3개월 평일 전수 시도, 없는 날은 404로 건너뜀 (pair.html과 동일 방식) */
+    const dates = [];
+    {
+      const end = new Date((base.market_date||"") + "T00:00:00Z");
+      if(isNaN(end)) throw new Error("market_date 없음");
+      const start = new Date(end); start.setUTCDate(start.getUTCDate() - 92);
+      const floor = new Date("2026-07-14T00:00:00Z");
+      for(let t = (start > floor ? start : floor); t <= end; t.setUTCDate(t.getUTCDate()+1)){
+        const dow = t.getUTCDay();
+        if(dow === 0 || dow === 6) continue;
+        dates.push(t.toISOString().slice(0,10));
+      }
+    }
+    DAYS = [];
+    for(let i=0;i<dates.length;i++){
+      prog.textContent = `일별 기록 내려받는 중 · ${i+1} / ${dates.length} (${dates[i]})`;
+      try{
+        const r = await fetch(`history/${dates[i]}.json`);
+        if(!r.ok) continue;
+        const d = await r.json();
+        const all = d.all_stocks || [];
+        if(!all.length) continue;
+        const map = new Map();
+        all.forEach(s=>{
+          if(!s.code || s.price == null) return;
+          map.set(s.code, { p: s.price,
+            f: s.flow_score||0, v: s.value_score||0, m: s.mom_score||0, dsc: s.disc_score||0,
+            mc: s.mktcap_100m||0, to: (s.price*(s.volume||0))/1e8 });
+        });
+        DAYS.push({ date: dates[i],
+          kospiChg: (((d.indices||{}).KOSPI)||{}).change_pct ?? null, map });
+      }catch(e){ /* 결번은 건너뜀 */ }
+    }
+    if(DAYS.length < 6){
+      prog.innerHTML = `기록이 ${DAYS.length}일뿐이라 아직 실험할 수 없습니다 (최소 6일). 매일 저녁 수집이 하루씩 채워줍니다.`;
+      btn.disabled = false; return;
+    }
+    prog.style.display = "none";
+    btn.textContent = "기록 다시 불러오기";
+    btn.disabled = false;
+    $("labSec").style.display = "";
+    BASE_CURVE = simulate(PRESETS["기본형"]).curve;
+    initControls();
+    recompute();
+  }catch(err){
+    prog.textContent = "불러오기에 실패했습니다 (" + esc(err.message) + "). 잠시 후 다시 시도해 주세요.";
+    btn.disabled = false;
+  }
+}
+
+function pickTop(day, w){
+  const out = [];
+  for(const [code, s] of day.map){
+    if(s.mc < RULE.min_mktcap || s.dsc < 0) continue;      // 소형·악재 제외 (5선과 동일)
+    if(s.to && s.to < RULE.min_turnover) continue;         // 거래대금 필터
+    const adj = s.f*w.f + s.v*w.v + s.m*w.m + s.dsc*w.d;
+    if(adj > 0) out.push({code, p: s.p, adj});
+  }
+  out.sort((a,b)=>b.adj-a.adj);
+  return out.slice(0, RULE.top_n);
+}
+
+function simulate(w){
+  let port = 100, kospi = 100, peak = 100, mdd = 0, wins = 0, n = 0;
+  const curve = [{d: DAYS[0].date, p: 100, k: 100}];
+  for(let i=0;i<DAYS.length-1;i++){
+    const picks = pickTop(DAYS[i], w);
+    const nx = DAYS[i+1];
+    const rets = [];
+    picks.forEach(pk=>{
+      const s = nx.map.get(pk.code);
+      if(s && s.p && pk.p) rets.push(s.p/pk.p - 1);
+    });
+    const r = rets.length ? rets.reduce((a,b)=>a+b,0)/rets.length : 0;
+    port *= 1 + r; n++;
+    if(r > 0) wins++;
+    if(nx.kospiChg != null) kospi *= 1 + nx.kospiChg/100;
+    peak = Math.max(peak, port);
+    mdd = Math.max(mdd, (peak - port)/peak*100);
+    curve.push({d: nx.date, p: port, k: kospi});
+  }
+  return {curve, cum: port-100, kospiCum: kospi-100, win: wins, n, mdd};
+}
+
+function weights(){
+  return { f: +$("wf").value/100, v: +$("wv").value/100, m: +$("wm").value/100, d: +$("wd").value/100 };
+}
+function matchPreset(w){
+  for(const name in PRESETS){
+    const p = PRESETS[name];
+    if(["f","v","m","d"].every(k=>Math.abs(p[k]-w[k])<0.001)) return name;
+  }
+  return null;
+}
+
+function recompute(){
+  const w = weights();
+  ["wf","wv","wm","wd"].forEach(id=>{ $(id+"v").textContent = $(id).value + "%"; });
+  const cur = matchPreset(w);
+  document.querySelectorAll(".preset").forEach(b=>b.classList.toggle("on", b.dataset.name===cur));
+  const r = simulate(w);
+  const excess = r.cum - r.kospiCum;
+  const grade = r.n >= 30 ? "" :
+    ` <span style="color:var(--warn);font-weight:700">🌱 표본 ${r.n}일 · 참고용</span>`;
+  $("statTitle").innerHTML = `이 설정의 지난 성적 <span style="font-weight:400;color:var(--ink-3)">(${esc(DAYS[0].date.slice(5))} ~ ${esc(DAYS[DAYS.length-1].date.slice(5))})</span>${grade}`;
+  $("statRow").innerHTML = `
+    <div><span class="big ${pctCls(r.cum)}">${r.cum>0?"+":""}${r.cum.toFixed(1)}%</span> <span class="lbl">누적 수익률</span></div>
+    <div><span class="big ${pctCls(r.kospiCum)}">${r.kospiCum>0?"+":""}${r.kospiCum.toFixed(1)}%</span> <span class="lbl">같은 기간 KOSPI</span></div>
+    <div><span class="big ${pctCls(excess)}">${excess>0?"+":""}${excess.toFixed(1)}%p</span> <span class="lbl">KOSPI 대비</span></div>
+    <div><span class="big">${Math.round(r.win/Math.max(r.n,1)*100)}%</span> <span class="lbl">플러스 마감일 비율</span></div>
+    <div><span class="big down">-${r.mdd.toFixed(1)}%</span> <span class="lbl">최대 하락폭(MDD)</span></div>`;
+  drawChart(r.curve);
+  const baseCum = BASE_CURVE ? BASE_CURVE[BASE_CURVE.length-1].p - 100 : null;
+  let vs = "";
+  if(baseCum != null && !("기본형"===cur)){
+    const diff = r.cum - baseCum;
+    vs = `현행 기본형(${baseCum>0?"+":""}${baseCum.toFixed(1)}%)과 비교하면 ${pctTxt(diff)}p ${diff>0?"앞섭니다":"뒤집니다"}. `;
+  }
+  $("verdict").innerHTML = vs +
+    `<span style="color:var(--ink-3)">한 조합이 좋아 보여도 표본 ${r.n}일의 우연일 수 있습니다.
+    실제 가중치 반영은 튜닝 사이클 규칙(전략 리그 5주 우승 → CONFIG 승격)을 따르세요.</span>`;
+}
+
+function drawChart(curve){
+  const W=600, H=220, pad=10;
+  const vals = curve.flatMap(c=>[c.p, c.k]).concat(BASE_CURVE ? BASE_CURVE.map(c=>c.p) : []);
+  const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx-mn)||1;
+  const X = i => pad + i*(W-2*pad)/(curve.length-1);
+  const Y = v => H-pad-(v-mn)/rng*(H-2*pad);
+  const path = key => curve.map((c,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(c[key]).toFixed(1)}`).join("");
+  const basePath = BASE_CURVE ? BASE_CURVE.map((c,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(c.p).toFixed(1)}`).join("") : "";
+  const y100 = Y(100).toFixed(1);
+  $("chart").innerHTML = `
+    <line x1="${pad}" y1="${y100}" x2="${W-pad}" y2="${y100}" stroke="var(--grid)" stroke-width="1"/>
+    ${basePath?`<path d="${basePath}" fill="none" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="2,4" opacity="0.9"/>`:""}
+    <path d="${path('k')}" fill="none" stroke="var(--ink-3)" stroke-width="1.6" stroke-dasharray="5,4" opacity="0.9"/>
+    <path d="${path('p')}" fill="none" stroke="var(--series-1)" stroke-width="2.5" stroke-linejoin="round"/>`;
+}
+
+function initControls(){
+  $("presets").innerHTML = Object.keys(PRESETS).map(nm=>
+    `<button class="preset" data-name="${esc(nm)}">${esc(nm)}</button>`).join("");
+  document.querySelectorAll(".preset").forEach(b=>b.onclick = ()=>{
+    const p = PRESETS[b.dataset.name];
+    $("wf").value = p.f*100; $("wv").value = p.v*100; $("wm").value = p.m*100; $("wd").value = p.d*100;
+    recompute();
+  });
+  ["wf","wv","wm","wd"].forEach(id=>$(id).addEventListener("input", recompute));
+}
+
+$("runBtn").onclick = load;
+</script>
+</body>
+</html>

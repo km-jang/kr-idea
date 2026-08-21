@@ -112,6 +112,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <div class="bars" id="exitBox" style="font-size:13.5px;line-height:1.95"></div>
   </section>
 
+  <section id="killSec" style="display:none">
+    <h2>⏱ 킬 스위치</h2>
+    <p class="sub">시간·거래대금 규율: 포착 후 무반응이거나 관심이 식은 최근 스윙 후보 (걸린 날만 표시 · 재료 소멸 판단은 퀵 메뉴의 🤖 AI 리스크 스캔으로)</p>
+    <div class="bars" id="killBox" style="font-size:13.5px;line-height:2"></div>
+  </section>
+
   <section id="reviewSec" style="display:none">
     <h2>📋 지난 스윙 성적표</h2>
     <p class="sub" id="reviewSub"></p>
@@ -135,6 +141,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
 const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt = v => v==null ? "-" : Math.round(v).toLocaleString("ko-KR");
 const WARN_TAGS = new Set(["과열주의"]);
+let KILLMAP = {};   // code → kill_watch 항목 (S16, 카드 태그용)
 
 function swingChart(p){
   const cs = (p.closes||[]).slice();
@@ -163,10 +170,13 @@ function swingChart(p){
 }
 
 function card(p){
-  const tags = (p.setups||[]).map(t=>{
+  let tags = (p.setups||[]).map(t=>{
     const cls = WARN_TAGS.has(t) ? "tag warn" : "tag";
     return `<span class="${cls}">${esc(t)}</span>`;
   }).join("");
+  const k = KILLMAP[p.code];   // S16: 킬 스위치 걸린 후보엔 경고 태그
+  if(k && k.flags.includes("time")) tags += `<span class="tag warn">⏱ ${k.days}일 무반응</span>`;
+  if(k && k.flags.includes("volume")) tags += `<span class="tag warn">🔇 대금 급감</span>`;
   const chg = p.chg;
   const chgHtml = chg==null ? "" :
     `<span class="${chg>0?"up":chg<0?"down":"flat"}" style="font-size:11.5px;font-weight:600"> ${chg>0?"▲":chg<0?"▼":""}${Math.abs(chg).toFixed(1)}%</span>`;
@@ -227,6 +237,25 @@ fetch("data.json?t="+Date.now())
       mycodes = (JSON.parse(localStorage.getItem("kr_idea_port")||"[]")).map(h=>h.code)
         .concat(JSON.parse(localStorage.getItem("kr_idea_watchlist")||"[]"));
     }catch(e){}
+
+    // ⏱ 킬 스위치 (S16): 시간·거래대금 규율에 걸린 최근 스윙 후보 (조건부 표시)
+    const kw = d.kill_watch || [];
+    kw.forEach(k=>{ KILLMAP[k.code] = k; });
+    if(kw.length){
+      const myset = new Set(mycodes);
+      const rows = kw.slice().sort((a,b)=>(myset.has(b.code)-myset.has(a.code)) || b.days-a.days);
+      document.getElementById("killSec").style.display = "";
+      document.getElementById("killBox").innerHTML = rows.map(k=>{
+        const parts = [];
+        if(k.flags.includes("time"))
+          parts.push(`⏱ 포착 ${esc((k.picked||"").slice(5))} 후 ${k.days}영업일째 ${k.ret_pct>0?"+":""}${k.ret_pct}% <span class="down">무반응 · 회수 검토</span>`);
+        if(k.flags.includes("volume"))
+          parts.push(`🔇 거래대금이 포착일의 ${Math.round((k.vol_ratio||0)*100)}% <span class="down">관심 식음</span>`);
+        const held = myset.has(k.code) ? ' <span class="tag warn">보유·관심</span>' : "";
+        return `<b><a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${k.code}">${esc(k.name)}</a></b>${held} · ${parts.join(" · ")}`;
+      }).join("<br>") +
+      `<div style="font-size:11.5px;color:var(--ink-3);margin-top:8px">스윙은 짧은 승부입니다. 시간이 지났는데 안 가는 종목은 이유가 있습니다 · 기준: 포착 후 ${4}영업일↑ 등락 ±2% 미만, 대금 40% 이하 (튜닝: collect.py CONFIG_SWING의 kill_*)</div>`;
+    }
     const hits = swing.filter(p=>mycodes.includes(p.code));
     if(hits.length){
       document.getElementById("myAlert").style.display = "";

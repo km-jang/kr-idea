@@ -1704,6 +1704,9 @@ def build_sample():
                                              "win1": 9, "n1": 23}},
                     chase_stats={"n": 26, "win": 11, "avg_pct": -0.82},
                     swing_stats={"n": 48, "win": 26, "avg_pct": 0.94, "days": 6},
+                    kill_watch=[{"code": "005380", "name": "현대차", "picked": "2026-07-03",
+                                 "days": 5, "ret_pct": 0.4, "vol_ratio": 0.31,
+                                 "flags": ["time", "volume"]}],
                     insider_trades=[
                         {"code": "035760", "name": "CJ ENM", "price": 71200,
                          "change_pct": 0.71, "mktcap_100m": 15600,
@@ -2170,7 +2173,76 @@ CONFIG_SWING = {
     "target_rr": 2.0,        # 목표 = 손절폭 × 배수 (손익비 2:1)
     "min_score": 45,         # 후보 최소 스윙 점수
     "top_n": 8,              # 최대 후보 수
+    # 킬 스위치 (S16, V5.7): 스윙 규율 — 걸린 종목만 kill_watch로 표시
+    "kill_window": 10,       # 최근 몇 개 스냅샷의 스윙 후보를 추적할지
+    "kill_days": 4,          # ⏱ 시간 스위치: 포착 후 이 영업일 이상 지났는데
+    "kill_flat_pct": 2.0,    #    등락이 이 % 미만(무반응)이면 회수 경고
+    "kill_vol_drop": 0.40,   # 🔇 대금 스위치: 오늘 거래대금이 포착일의 이 비율 이하면 경고
 }
+
+
+def build_kill_watch(hist_dir, stocks, market_date, cfg=None):
+    """S16 킬 스위치 ①시간 ②거래대금 (V5.7): 최근 스윙 후보의 규율 판정.
+
+    최근 kill_window개 스냅샷의 swing 목록에서 종목별 최초 포착(날짜·진입가·그날 거래대금)을
+    찾고 오늘 종가·거래대금과 비교한다. 현행 청산 도우미(이평선 이탈만 점검)에 없는
+    시간·관심 축을 보강한다 (IDEAS S16, Gemini 4차 검수에서 프레임만 채택).
+      ⏱ time: 포착 후 kill_days영업일 이상 지났는데 등락 |kill_flat_pct|% 미만 (무반응)
+      🔇 volume: 오늘 거래대금이 포착일의 kill_vol_drop 이하 (관심 식음)
+    걸린 종목만 반환 (조건부 표시 · 0픽셀). 반환:
+    [{code,name,picked,days,ret_pct,vol_ratio,flags}] · 부가 기능이므로 실패 시 []."""
+    cfg = cfg or CONFIG_SWING
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))
+    except Exception:
+        return []
+    if market_date:
+        files = [f for f in files if f.stem < market_date]
+    files = files[-cfg["kill_window"]:]
+    first = {}                                   # code → 최초 포착 정보
+    for f in files:                              # 날짜 오름차순
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        turn = {s.get("code"): (s.get("price") or 0) * (s.get("volume") or 0) / 1e8
+                for s in d.get("all_stocks") or []}
+        for p in d.get("swing") or []:
+            c = p.get("code")
+            if not c or c in first:
+                continue
+            if is_index_product(p.get("name")):
+                continue                 # 과거 포착분에 남은 ETF는 추적 제외 (V5.7부터 후보 자체 제외)
+            first[c] = {"name": p.get("name"), "picked": f.stem,
+                        "entry": p.get("entry"), "turn0": turn.get(c) or 0,
+                        "after": 0}
+    if not first:
+        return []
+    for f in files:                              # 포착 이후 경과 영업일 수
+        for c, info in first.items():
+            if f.stem > info["picked"]:
+                info["after"] += 1
+    today = {s.get("code"): s for s in stocks if s.get("code")}
+    out = []
+    for c, info in first.items():
+        s = today.get(c)
+        if not s or not s.get("price") or not info.get("entry"):
+            continue
+        days = info["after"] + 1                 # 오늘 포함 경과 영업일
+        ret = (s["price"] / info["entry"] - 1) * 100
+        turn_now = s["price"] * (s.get("volume") or 0) / 1e8
+        vol_ratio = round(turn_now / info["turn0"], 2) if info["turn0"] >= 10 else None
+        flags = []
+        if days >= cfg["kill_days"] and abs(ret) < cfg["kill_flat_pct"]:
+            flags.append("time")
+        if vol_ratio is not None and vol_ratio <= cfg["kill_vol_drop"]:
+            flags.append("volume")
+        if flags:
+            out.append({"code": c, "name": info["name"], "picked": info["picked"],
+                        "days": days, "ret_pct": round(ret, 2),
+                        "vol_ratio": vol_ratio, "flags": flags})
+    out.sort(key=lambda x: (-len(x["flags"]), -x["days"]))
+    return out[:12]
 
 
 def _swing_ma(closes, n, back=0):
@@ -2341,7 +2413,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              strategies=None, strategy_race=None, silence=None, news_compass=None,
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
              mines=None, swing=None, swing_review=None, chart_pack=None,
-             screen_stats=None, chase_stats=None, swing_stats=None):
+             screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -2398,6 +2470,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "screen_stats": screen_stats or {},
         "chase_stats": chase_stats or {},
         "swing_stats": swing_stats or {},
+        "kill_watch": kill_watch or [],
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -2556,6 +2629,14 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"swing_stats: {e}")
         swing_stats = {}
+    # 킬 스위치 (S16, V5.7) — 부가 기능, 실패해도 수집을 막지 않는다
+    try:
+        kill_watch = build_kill_watch(hist_dir, stocks, market_date)
+        if kill_watch:
+            print(f"  → 킬 스위치 경고 {len(kill_watch)}종목")
+    except Exception as e:
+        errors.append(f"kill_watch: {e}")
+        kill_watch = []
     # 차트 카드 팩 — 부가 기능이므로 실패해도 핵심 수집을 막지 않는다
     try:
         targets = chart_targets(ideas, swing, read_watchlist_codes())
@@ -2579,7 +2660,7 @@ def run_full(max_universe=None, out_path=None):
                     screens=screens, insider_trades=insider_trades, mines=mines,
                     swing=swing, swing_review=swing_review, chart_pack=chart_pack,
                     screen_stats=screen_stats, chase_stats=chase_stats,
-                    swing_stats=swing_stats)
+                    swing_stats=swing_stats, kill_watch=kill_watch)
 
 
 def main():
