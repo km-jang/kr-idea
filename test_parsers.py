@@ -856,6 +856,7 @@ def test_scan_record_and_review():
         rv = collect.build_scan_review(p, stocks, "2026-07-11")
         assert rv and rv["date"] == "2026-07-10"
         assert abs(rv["avg_ret_pct"] - 8.0) < 0.01
+        assert rv["items"][0]["code"] == "A"        # V5.7: code 동봉 (종가클릭용)
         # 오늘 날짜 스캔은 채점 제외
         rv2 = collect.build_scan_review(p, stocks, "2026-07-10")
         assert rv2 is None
@@ -1689,6 +1690,25 @@ def test_chase_stats_from_fixture():
         assert st["n"] == 2 and st["win"] == 1, st
         assert abs(st["avg_pct"] - 0.0) < 0.01, st
         assert collect.build_chase_stats("__no_file__", hd) == {}
+
+
+def test_swing_stats_from_fixture():
+    """V5.7 스윙 누적 통계: 회차(date) 기준 중복 제거 + 오늘 회차 합산 검증."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        hd = os.path.join(td, "hist"); os.makedirs(hd)
+        rv1 = {"date": "2026-08-01", "hold_days": 5, "items": [
+            {"name": "가", "ret_pct": 2.0}, {"name": "나", "ret_pct": -1.0}]}
+        d1 = {"market_date": "2026-08-05", "swing_review": rv1}
+        d2 = {"market_date": "2026-08-06", "swing_review": rv1}   # 같은 회차 반복 → 1번만
+        for fn, doc in (("2026-08-05.json", d1), ("2026-08-06.json", d2)):
+            (Path(hd) / fn).write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        today = {"date": "2026-08-07", "items": [{"name": "다", "ret_pct": 3.0}]}
+        st = collect.build_swing_stats(hd, today)
+        # 회차 2개(8/1, 8/7) · 표본 3 · 승 2 · 평균 (2 - 1 + 3)/3 = 1.33
+        assert st["days"] == 2 and st["n"] == 3 and st["win"] == 2, st
+        assert abs(st["avg_pct"] - 1.33) < 0.01, st
+        assert collect.build_swing_stats(os.path.join(td, "없음")) == {}
 
 
 def test_holidays_2027():

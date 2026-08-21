@@ -145,9 +145,14 @@ function grade(n){
 function nvLink(code, name){
   return `<a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">${esc(name)}</a>`;
 }
-/* 우선주·같은 회사 짝 판별: 한쪽 이름이 다른 쪽의 접두이면 (삼성전자 / 삼성전자우) 제외 */
+/* 우선주 짝 판별: 삼성전자 / 삼성전자우 처럼 같은 회사의 본주·우선주만 제외.
+   LG → LG화학 같은 그룹주 짝은 동료주의 핵심이므로 제외하지 않는다. */
+const PREF_SUFFIX = ["우", "우B", "1우", "1우B", "2우B", "3우B", "우선주"];
 function sameCompany(a, b){
-  return a.startsWith(b) || b.startsWith(a);
+  const s = a.length <= b.length ? a : b;
+  const l = a.length <= b.length ? b : a;
+  if(a === b || !l.startsWith(s)) return a === b;
+  return PREF_SUFFIX.includes(l.slice(s.length).trim());
 }
 function corr(xs, ys){
   const n = xs.length;

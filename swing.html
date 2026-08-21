@@ -209,7 +209,7 @@ fetch("data.json?t="+Date.now())
       const byName = {};
       (d.all_stocks || []).forEach(s => { if(s && s.name) byName[s.name] = s.code; });
       const nm = it => {
-        const c = byName[it.name];
+        const c = it.code || byName[it.name];   /* V5.7부터 code 동봉, 없으면 이름 매칭 폴백 */
         return c ? `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${c}">${esc(it.name)}</a>`
                  : esc(it.name);
       };

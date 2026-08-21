@@ -1267,7 +1267,7 @@ def build_scan_review(scans_path, stocks, market_date):
     for c in last["candidates"]:
         p0, p1 = c.get("price"), price_map.get(c.get("code"))
         if p0 and p1:
-            items.append({"name": c["name"], "scan_price": p0,
+            items.append({"name": c["name"], "code": c.get("code"), "scan_price": p0,
                           "ret_pct": round((p1 / p0 - 1) * 100, 2)})
     if not items:
         return None
@@ -1312,6 +1312,36 @@ def build_chase_stats(scans_path, hist_dir, max_records=60):
         return {}
     return {"n": len(rets), "win": sum(1 for x in rets if x > 0),
             "avg_pct": round(sum(rets) / len(rets), 2)}
+
+
+def build_swing_stats(hist_dir, today_review=None):
+    """스윙 누적 통계 (V5.7): history에 남은 일별 swing_review(회차별 채점)를 회차 날짜
+    기준으로 중복 없이 모아 전체 표본의 승률·평균을 집계. 최신 1회차만 보이던 스윙 성적을
+    신뢰도 통지표에서 누적으로 볼 수 있게 한다.
+    반환: {"n": 표본, "win": 상승 건수, "avg_pct": 평균 수익률, "days": 회차 수} 또는 {}.
+    data.json엔 "swing_stats" 키 추가만 (절대 규칙 1 무해). 부가 기능이므로
+    어떤 실패에도 빈 dict를 돌려주고 수집을 막지 않는다."""
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))
+    except Exception:
+        return {}
+    cohorts = {}
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        rv = d.get("swing_review")
+        if rv and rv.get("date") and rv.get("items"):
+            cohorts[rv["date"]] = rv["items"]
+    if today_review and today_review.get("date") and today_review.get("items"):
+        cohorts[today_review["date"]] = today_review["items"]
+    rets = [it["ret_pct"] for items in cohorts.values() for it in items
+            if it.get("ret_pct") is not None]
+    if not rets:
+        return {}
+    return {"n": len(rets), "win": sum(1 for x in rets if x > 0),
+            "avg_pct": round(sum(rets) / len(rets), 2), "days": len(cohorts)}
 
 
 def apply_idea_streaks(ideas, past_idea_sets):
@@ -1673,6 +1703,7 @@ def build_sample():
                                   "gate52": {"days": 13, "hits": 24,
                                              "win1": 9, "n1": 23}},
                     chase_stats={"n": 26, "win": 11, "avg_pct": -0.82},
+                    swing_stats={"n": 48, "win": 26, "avg_pct": 0.94, "days": 6},
                     insider_trades=[
                         {"code": "035760", "name": "CJ ENM", "price": 71200,
                          "change_pct": 0.71, "mktcap_100m": 15600,
@@ -2284,7 +2315,8 @@ def build_swing_review(hist_dir, stocks, market_date, hold_days=5):
             ret = round((p1 / e - 1) * 100, 2)
             if ret > 0:
                 hit += 1
-            items.append({"name": p.get("name"), "entry": e, "ret_pct": ret})
+            items.append({"name": p.get("name"), "code": p.get("code"),
+                          "entry": e, "ret_pct": ret})
     if not items:
         return None
     return {"date": day, "hold_days": hold_days,
@@ -2299,7 +2331,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              strategies=None, strategy_race=None, silence=None, news_compass=None,
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
              mines=None, swing=None, swing_review=None, chart_pack=None,
-             screen_stats=None, chase_stats=None):
+             screen_stats=None, chase_stats=None, swing_stats=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -2355,6 +2387,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "screens": screens or {},
         "screen_stats": screen_stats or {},
         "chase_stats": chase_stats or {},
+        "swing_stats": swing_stats or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -2507,6 +2540,12 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"swing_review: {e}")
         swing_review = None
+    # 스윙 누적 통계 (V5.7) — 부가 기능, 실패해도 수집을 막지 않는다
+    try:
+        swing_stats = build_swing_stats(hist_dir, swing_review)
+    except Exception as e:
+        errors.append(f"swing_stats: {e}")
+        swing_stats = {}
     # 차트 카드 팩 — 부가 기능이므로 실패해도 핵심 수집을 막지 않는다
     try:
         targets = chart_targets(ideas, swing, read_watchlist_codes())
@@ -2529,7 +2568,8 @@ def run_full(max_universe=None, out_path=None):
                     insider_watch=insider_watch, graduates=graduates,
                     screens=screens, insider_trades=insider_trades, mines=mines,
                     swing=swing, swing_review=swing_review, chart_pack=chart_pack,
-                    screen_stats=screen_stats, chase_stats=chase_stats)
+                    screen_stats=screen_stats, chase_stats=chase_stats,
+                    swing_stats=swing_stats)
 
 
 def main():

@@ -2358,9 +2358,11 @@ function openTrust(){
       rows.push([SCREEN_LABELS_UI[k], "·", "집계 준비 중", trustGrade(0)]);
     }
   }
-  /* ④ 스윙 레이더 (최근 회차 청산 성적) */
-  const sw = d.swing_review;
-  rows.push(sw && (sw.items||[]).length
+  /* ④ 스윙 레이더: 누적 통계(swing_stats, V5.7)가 있으면 그걸, 없으면 최근 회차만 */
+  const ss = d.swing_stats, sw = d.swing_review;
+  if(ss && ss.n){
+    rows.push(["📈 스윙 레이더", `${ss.n}건 (${ss.days}회차)`, `5일 보유 승률 ${Math.round(ss.win/ss.n*100)}% · 평균 ${pctTxt(ss.avg_pct)}`, trustGrade(ss.n)]);
+  } else rows.push(sw && (sw.items||[]).length
     ? ["📈 스윙 레이더", `최근 회차 ${sw.items.length}종목`, `${sw.hold_days}일 보유 승률 ${sw.hit_rate}% · 평균 ${pctTxt(sw.avg_ret_pct)}`, trustGrade(sw.items.length)]
     : ["📈 스윙 레이더", "·", "기록 없음", trustGrade(0)]);
   /* ⑤ 종가 스캔 (최근 1일 채점) */
