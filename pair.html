@@ -128,7 +128,13 @@ const isEtf = n => { const t=(n||"").trim(); return t.includes("ETN") || ETF_PRE
 
 /* 튜닝 파라미터 (브라우저 연산이라 자유롭게 조정 가능) */
 const CFG = {
-  top_liquid: 250,     // 거래대금 상위 몇 종목까지 짝 후보로 볼지
+  min_turnover: 50,    // 짝 후보 거래대금 하한(억). 고정 순위(상위 250) 대신 하한 방식:
+                       // 장이 활발하면 탐색 범위가 저절로 넓어지고, 저유동성 잡음은 항상 차단
+                       // (2026-08-21 실험: 하한 없이 420종목으로 늘리면 상위 30짝의 2/3가
+                       //  하루 대금 50억 미만 종목의 우연 상관으로 도배됨)
+  wide_after_days: 40, // 표본이 이 일수를 넘으면 하한을 완화 (상관 추정이 안정되는 시점)
+  min_turnover_wide: 30, // 완화 시 하한(억) · 오늘 기준 260 → 약 320종목 효과
+  top_liquid: 400,     // 안전 상한 (하한 통과 종목이 폭증해도 연산량 보호)
   min_days: 15,        // 종목이 기록에 최소 며칠 있어야 하는지
   min_lag_corr: 0.55,  // 시차 궁합(상관계수) 하한
   lead_margin: 0.15,   // 시차 궁합이 같은날 궁합보다 이만큼 높아야 "따라 움직임"으로 인정
@@ -137,7 +143,7 @@ const CFG = {
 };
 
 const $ = id => document.getElementById(id);
-let PAIRS = [], NAMES = {};
+let PAIRS = [], NAMES = {}, FLOOR_APPLIED = CFG.min_turnover;
 
 function grade(n){
   if(n >= 30) return '<span class="grade" style="color:var(--up)">✅ 믿을 만</span>';
@@ -215,10 +221,14 @@ async function run(){
     /* 유니버스: 최신일 거래대금 상위 + ETF 제외 */
     const latest = days[days.length-1].stocks;
     /* 우선주·ETN 제외: 코드 끝자리가 '0'이 아니면 보통주가 아니다 (삼성전자우 005935 등).
-       우선주는 본주의 그림자라 동료주로는 중복 신호일 뿐이다. */
+       우선주는 본주의 그림자라 동료주로는 중복 신호일 뿐이다.
+       거래대금 하한은 표본이 쌓이면 자동 완화된다 (판별력이 생긴 만큼만 범위 확대). */
+    const floorNow = days.length >= CFG.wide_after_days ? CFG.min_turnover_wide : CFG.min_turnover;
+    FLOOR_APPLIED = floorNow;
     const cand = latest
       .filter(s => s.code && s.name && !isEtf(s.name) && s.price && s.volume
-                   && String(s.code).endsWith("0"))
+                   && String(s.code).endsWith("0")
+                   && s.price * s.volume / 1e8 >= floorNow)
       .sort((a,b)=>(b.price*b.volume)-(a.price*a.volume))
       .slice(0, CFG.top_liquid);
     NAMES = {}; cand.forEach(s => NAMES[s.code] = s.name);
@@ -279,7 +289,7 @@ function renderPairs(){
     $("pairTbl").parentElement.style.display = "none";
     $("pairEmpty").style.display = "";
     $("pairEmpty").innerHTML = q
-      ? "그 이름이 들어간 짝이 없습니다. 짝은 거래대금 상위 " + CFG.top_liquid + "종목 안에서만 찾습니다."
+      ? "그 이름이 들어간 짝이 없습니다. 짝은 하루 거래대금 " + FLOOR_APPLIED + "억 이상인 보통주 안에서만 찾습니다 (저유동성 잡음 차단 · 기록이 쌓이면 자동으로 넓어집니다)."
       : "조건을 만족하는 짝이 아직 없습니다.<br><span style='font-size:11.5px'>기록이 쌓이면(표본 확대) 문턱을 넘는 짝이 나타날 수 있습니다.</span>";
     return;
   }
