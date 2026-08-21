@@ -529,7 +529,9 @@ table.slim{min-width:0}
     본 페이지는 공개 데이터(네이버 증권, DART 전자공시)를 자동 수집·요약한 <b>투자 참고 자료</b>이며,
     특정 종목의 매수·매도 추천이 아닙니다. 데이터는 지연되거나 오류가 있을 수 있으며,
     투자 판단과 책임은 투자자 본인에게 있습니다.<br>
-    자동 갱신: 매 영업일 19시 (GitHub Actions) · 소스: 네이버 증권 · DART RSS
+    자동 갱신: 매 영업일 19시 (GitHub Actions) · 소스: 네이버 증권 · DART RSS ·
+    <a href="#" onclick="openTrust();return false" style="color:inherit;font-weight:600">📋 신호 신뢰도 통지표</a> ·
+    <a href="pair.html" style="color:inherit;font-weight:600">🤝 동료주 발굴기</a>
   </footer>
 </div>
 
@@ -1200,7 +1202,7 @@ document.addEventListener("click", e=>{
 });
 
 function flowTable(d){
-  makeTable("flowTbl", mktFilter(d.flow_scan), [
+  makeTable("flowTbl", mktFilter(d.flow_scan).filter(s=>!isEtf(s.name)), [
     {k:"name",h:"종목",f:nameCell,core:true},
     {k:"price",h:"현재가",f:s=>fmt(s.price)},
     {k:"change_pct",h:"등락률",f:pctCell,core:true},
@@ -1890,6 +1892,19 @@ function perfSection(d){
 const DISC_HEAD = 10;   /* 상시 표시 건수. 나머지는 클릭해야 펼쳐진다 (0픽셀 원칙) */
 const LIST_HEAD = 10;   /* V5.5 화면 다이어트: 수급 스캐너·밸류 스크리너 상시 표시 종목 수 */
 const PERF_HEAD = 5;    /* V5.5 화면 다이어트: 성과 트래킹 일별 기록 상시 표시 일수 */
+/* V5.7 ETF 절충안: 개별 종목 도구(수급 스캐너 표)에서만 ETF 제외, 자금 흐름 막대는 유지.
+   목록은 collect.py의 ETF_NAME_PREFIXES와 같은 내용 유지 (새 브랜드 추가 시 양쪽 함께) */
+const ETF_PREFIXES = ["KODEX","TIGER","RISE","PLUS","ACE","SOL","KIWOOM",
+  "HANARO","ARIRANG","KOSEF","KoAct","TIMEFOLIO","WON",
+  "BNK","FOCUS","KCGI","히어로즈","마이다스","에셋플러스"];
+const isEtf = n => ETF_PREFIXES.some(p => (n||"").trim().startsWith(p));
+/* V5.7 공시 날짜: DART 원시 표기 "20260813" → "8/13" */
+function discTime(t){
+  const s = String(t||"");
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return `${+m[2]}/${+m[3]}`;
+  return s.replace(/\+0900|KST/g,"").trim().slice(0,22);
+}
 function discList(d){
   const el = document.getElementById("discList");
   const list = d.disclosures||[];
@@ -1900,7 +1915,7 @@ function discList(d){
       <span class="dtag ${x.sentiment}">${mark[x.sentiment]||"·"} ${esc(x.tag)}</span>
       <div class="dbody"><a href="${esc(x.url)}" target="_blank" rel="noopener">
         <span class="co">${esc(x.company)}</span><br><span class="ti">${esc(x.title)}</span></a></div>
-      <span class="dtime">${esc(x.time).replace(/\+0900|KST/g,"").trim().slice(0,22)}</span>
+      <span class="dtime">${esc(discTime(x.time))}</span>
     </div>`;
   const rest = list.slice(DISC_HEAD);
   el.innerHTML = list.slice(0, DISC_HEAD).map(row).join("")
@@ -2086,9 +2101,9 @@ async function toggleOps(){
           + '<td>' + (r.recover === "ok" ? "🔧 성공"
                      : r.recover === "fail" ? '<span style="color:var(--crit);font-weight:700">실패</span>'
                      : '<span style="color:var(--ink-3)">불필요</span>') + '</td></tr>').join("")
-      + '</table><div style="font-size:11px;color:var(--ink-3);margin-top:5px">매일 밤 야간 자가 점검(21:33)이 기록 · ✓=정상 실행 · 복구=자동 복구 작동 여부</div>'
+      + '</table><div style="font-size:11px;color:var(--ink-3);margin-top:5px">매일 밤 야간 자가 점검(23:03)이 기록 · ✓=정상 실행 · 복구=자동 복구 작동 여부 · <a href="#" onclick="openTrust();return false" style="color:inherit;font-weight:700">📋 신호 신뢰도 통지표</a></div>'
     : '<b style="font-size:12px">🩺 실행 성적표</b>'
-      + '<div style="font-size:12px;color:var(--ink-3);margin-top:4px">아직 기록이 없습니다. 야간 자가 점검(21:33)이 매일 밤 기록을 남깁니다.</div>';
+      + '<div style="font-size:12px;color:var(--ink-3);margin-top:4px">아직 기록이 없습니다. 야간 자가 점검(23:03)이 매일 밤 기록을 남깁니다.</div>';
   p.style.display = "block";
 }
 
@@ -2225,6 +2240,7 @@ function openQsheet(code, name){
       <a class="qbtn" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(name)}">📄 공시</a>
       <button class="qbtn" onclick="closeQsheet();showDevil('${code}')">😈 반론 보기</button>
       <button class="qbtn" data-cmp="${code}" data-cmpn="${esc(name)}">⚖️ ${CMP_PICK && CMP_PICK.code !== code ? "비교 보기 (vs "+esc(CMP_PICK.name)+")" : "비교에 담기"}</button>
+      <a class="qbtn" href="pair.html?c=${code}">🤝 동료주 찾기</a>
       <button class="qbtn" style="grid-column:1/-1" onclick="closeQsheet();copyAIPrompt('${code}', '${esc(name)}')">🤖 AI 리스크 스캔 (프롬프트 복사 → Claude/Gemini에 붙여넣기)</button>
     </div>
     <button class="qclose" onclick="closeQsheet()">닫기</button>`;
@@ -2293,6 +2309,91 @@ function openCompare(a, b){
         <th style="text-align:right;padding:5px 6px;font-size:11.5px;word-break:keep-all;overflow-wrap:anywhere"><span class="qn" data-c="${B.code}" data-n="${esc(B.name)}">${esc(B.name)}</span></th>
       </tr></thead><tbody>${body}</tbody></table></div>
     <div style="font-size:11px;color:var(--ink-3);margin-top:6px">굵은 값 = 더 나은 쪽 (PER·PBR은 낮은 쪽이 저평가) · 종목명을 누르면 퀵 메뉴 · 현재가·순매수는 원·억 단위</div>
+    <button class="qclose" onclick="closeQsheet()">닫기</button>`;
+  s.style.display = "block";
+  document.getElementById("qsheetBack").style.display = "block";
+}
+
+/* ---------- 📋 신호 신뢰도 통지표 (S17, V5.7) ----------
+   시스템의 모든 신호 성적을 한 장에 모은 자기 감사 보드. 전부 data.json 재활용(0원).
+   표본이 적으면 "아직 못 믿음"을 정직하게 표기한다 (안티 FOMO). */
+function trustGrade(n){
+  if(!n) return {t:"기록 없음", c:"var(--ink-3)", w:400};
+  if(n >= 30) return {t:"✅ 믿을 만", c:"var(--up)", w:700};
+  if(n >= 10) return {t:"⚠️ 참고만", c:"#eda100", w:700};
+  return {t:"🌱 표본 부족", c:"var(--ink-3)", w:700};
+}
+function openTrust(){
+  const d = window.DATA || {};
+  const rows = [];
+  const pctTxt = v => v==null ? "·" : `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
+  /* ① 5선 (오늘의 아이디어) · 누적 수익률 vs KOSPI */
+  const pc = d.perf_curve || [];
+  if(pc.length >= 2){
+    const last = pc[pc.length-1];
+    const port = Math.round((last.port-100)*100)/100, kospi = Math.round((last.kospi-100)*100)/100;
+    rows.push(["⭐ 오늘의 5선", `${pc.length}일`, `누적 ${pctTxt(port)} · KOSPI ${pctTxt(kospi)}`, trustGrade(pc.length)]);
+  } else rows.push(["⭐ 오늘의 5선", "·", "기록 없음", trustGrade(0)]);
+  /* ② 전략 리그 1위 */
+  const curves = (d.strategy_race||{}).curves || {};
+  let best = null, bestN = 0;
+  for(const nm in curves){
+    const c = curves[nm]; if(!c || !c.length) continue;
+    const r = Math.round((c[c.length-1].v-100)*100)/100;
+    bestN = Math.max(bestN, c.length);
+    if(!best || r > best.r) best = {nm, r};
+  }
+  rows.push(best
+    ? ["🏁 전략 리그 1위", `${bestN}일`, `${esc(best.nm)} ${pctTxt(best.r)}`, trustGrade(bestN)]
+    : ["🏁 전략 리그", "·", "기록 없음", trustGrade(0)]);
+  /* ③ 검색식 5종 (screen_stats) · 꺼둔 것도 성적은 계속 쌓인다 */
+  const on = getScreensOn();
+  for(const k in SCREEN_LABELS_UI){
+    const st = (d.screen_stats||{})[k];
+    if(st && st.n1){
+      const pct = Math.round(st.win1/st.n1*100);
+      rows.push([SCREEN_LABELS_UI[k] + (on[k]?"":' <span style="font-size:10.5px;color:var(--ink-3)">(꺼짐)</span>'),
+        `${st.n1}건`, `다음날 승률 ${pct}% · 적중 ${st.hits}건`, trustGrade(st.n1)]);
+    } else {
+      rows.push([SCREEN_LABELS_UI[k], "·", "집계 준비 중", trustGrade(0)]);
+    }
+  }
+  /* ④ 스윙 레이더 (최근 회차 청산 성적) */
+  const sw = d.swing_review;
+  rows.push(sw && (sw.items||[]).length
+    ? ["📈 스윙 레이더", `최근 회차 ${sw.items.length}종목`, `${sw.hold_days}일 보유 승률 ${sw.hit_rate}% · 평균 ${pctTxt(sw.avg_ret_pct)}`, trustGrade(sw.items.length)]
+    : ["📈 스윙 레이더", "·", "기록 없음", trustGrade(0)]);
+  /* ⑤ 종가 스캔 (최근 1일 채점) */
+  const sr = d.scan_review;
+  rows.push(sr && (sr.items||[]).length
+    ? ["🌆 종가 스캔", `최근일 ${sr.items.length}종목`, `다음날 평균 ${pctTxt(sr.avg_ret_pct)} (${esc((sr.date||"").slice(5))})`, trustGrade(sr.items.length)]
+    : ["🌆 종가 스캔", "·", "기록 없음", trustGrade(0)]);
+  /* ⑥ 추격 통계 (스캔 급등주를 종가에 따라붙으면?) */
+  const ch = d.chase_stats;
+  rows.push(ch && ch.n
+    ? ["🏃 추격 통계", `${ch.n}건`, `다음날 승률 ${Math.round(ch.win/ch.n*100)}% · 평균 ${pctTxt(ch.avg_pct)}`, trustGrade(ch.n)]
+    : ["🏃 추격 통계", "·", "집계 준비 중", trustGrade(0)]);
+  const body = rows.map(([nm, n, perf, g]) =>
+    `<tr>
+      <td style="padding:6px 2px;font-size:12px;word-break:keep-all">${nm}</td>
+      <td style="padding:6px 4px;font-size:11.5px;color:var(--ink-3);text-align:right;white-space:nowrap">${n}</td>
+      <td style="padding:6px 4px;font-size:12px;text-align:right;white-space:normal;word-break:keep-all">${perf}</td>
+      <td style="padding:6px 2px;font-size:11.5px;text-align:right;white-space:nowrap;color:${g.c};font-weight:${g.w}">${g.t}</td>
+    </tr>`).join("");
+  const s = document.getElementById("qsheet");
+  s.innerHTML = `
+    <h3>📋 신호 신뢰도 통지표</h3>
+    <div style="max-height:62vh;overflow:auto"><table style="width:100%;min-width:0;border-collapse:collapse;table-layout:auto">
+      <thead><tr>
+        <th style="text-align:left;padding:4px 2px;font-size:11px;color:var(--ink-3)">신호</th>
+        <th style="text-align:right;padding:4px 4px;font-size:11px;color:var(--ink-3)">표본</th>
+        <th style="text-align:right;padding:4px 4px;font-size:11px;color:var(--ink-3)">성적</th>
+        <th style="text-align:right;padding:4px 2px;font-size:11px;color:var(--ink-3)">신뢰</th>
+      </tr></thead><tbody>${body}</tbody></table></div>
+    <div style="font-size:11px;color:var(--ink-3);margin-top:6px;line-height:1.6">
+      표본 30건 이상 ✅ · 10건 이상 ⚠️ · 그 미만 🌱 표본 부족 ·
+      표본이 적은 신호는 성적이 좋아도 우연일 수 있습니다.
+      모든 성적은 자동 집계이며 매수·매도 추천이 아닙니다.</div>
     <button class="qclose" onclick="closeQsheet()">닫기</button>`;
   s.style.display = "block";
   document.getElementById("qsheetBack").style.display = "block";

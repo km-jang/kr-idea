@@ -46,6 +46,17 @@ CONFIG_SCAN = {
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
+# 종가매매도 개별 종목 발굴 도구: ETF 제외 (2026-08-21 소유자 절충안).
+# 목록은 collect.py의 ETF_NAME_PREFIXES와 같은 내용을 유지할 것 (새 브랜드 추가 시 양쪽 함께).
+ETF_NAME_PREFIXES = ("KODEX", "TIGER", "RISE", "PLUS", "ACE", "SOL", "KIWOOM",
+                     "HANARO", "ARIRANG", "KOSEF", "KoAct", "TIMEFOLIO", "WON",
+                     "BNK", "FOCUS", "KCGI", "히어로즈", "마이다스", "에셋플러스")
+
+
+def is_index_product(name):
+    """ETF 등 지수 상품 이름 판별 (collect.py와 동일 규칙)."""
+    return (name or "").strip().startswith(ETF_NAME_PREFIXES)
+
 
 def fetch_realtime(codes, chunk=20):
     """네이버 실시간 API - 여러 종목 묶음 조회 → {코드: {price, high, volume, chg}}"""
@@ -99,6 +110,8 @@ def scan_candidates(universe, quotes, cfg=None):
         q = quotes.get(s.get("code"))
         if not q or not q.get("price"):
             continue
+        if is_index_product(s.get("name")):
+            continue                     # ETF 제외 (개별 종목 발굴 목적)
         chg, price, high = q.get("chg"), q["price"], q.get("high")
         if chg is None or not (cfg["chg_min"] <= chg <= cfg["chg_max"]):
             continue

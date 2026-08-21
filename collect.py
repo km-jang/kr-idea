@@ -1111,6 +1111,8 @@ def detect_debuts(stocks, baselines):
         base = baselines.get(s["code"])
         if n is None or base is None:
             continue
+        if is_index_product(s.get("name")):
+            continue                     # 뉴스 데뷔도 개별 종목 발굴 도구: ETF 제외 (V5.7 절충안)
         if base <= CONFIG["compass_debut_prev_max"] and n >= CONFIG["compass_debut_today_min"]:
             out.append({"code": s["code"], "name": s["name"], "news_24h": n,
                         "news_pos": s.get("news_pos"), "news_neg": s.get("news_neg"),
@@ -1918,7 +1920,10 @@ ETF_NAME_PREFIXES = ("KODEX", "TIGER", "RISE", "PLUS", "ACE", "SOL", "KIWOOM",
 
 
 def is_index_product(name):
-    """ETF 등 지수 상품 이름 판별. 검색식(build_screens)에서만 사용."""
+    """ETF 등 지수 상품 이름 판별. 개별 종목 발굴 도구에서 사용:
+    검색식(build_screens)·뉴스 데뷔(detect_debuts). 종가 스캔(closing_scan.py)과
+    수급 스캐너 표(index.html)는 같은 접두사 목록을 복제해 쓴다.
+    자금 흐름 막대(외인 순매수)는 ETF 유지 (2026-08-21 소유자 절충안 확정)."""
     return (name or "").strip().startswith(ETF_NAME_PREFIXES)
 
 

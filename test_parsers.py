@@ -725,12 +725,15 @@ def test_closing_scan_logic():
          "mktcap_100m": 5000},
         {"code": "A00004", "name": "소형종목", "price": 10000, "volume": 100000,
          "mktcap_100m": 500},
+        {"code": "A00005", "name": "KODEX 레버리지", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000},
     ]
     quotes = {
         "A00001": {"price": 10700, "high": 10800, "volume": 900000, "chg": 7.0},   # 통과 (대금 96억)
         "A00002": {"price": 10500, "high": 11500, "volume": 900000, "chg": 5.0},   # 고가유지 미달
         "A00003": {"price": 12500, "high": 12600, "volume": 900000, "chg": 25.0},  # 과열 제외
         "A00004": {"price": 10700, "high": 10800, "volume": 900000, "chg": 7.0},   # 시총 미달
+        "A00005": {"price": 10700, "high": 10800, "volume": 900000, "chg": 7.0},   # ETF 제외 (V5.7)
     }
     cands = cs.scan_candidates(universe, quotes)
     assert len(cands) == 1 and cands[0]["name"] == "강한종목"
@@ -956,8 +959,10 @@ def test_debut_detection():
         {"code": "B", "name": "원래유명", "news_24h": 12},   # 평소에도 많음 → 제외
         {"code": "C", "name": "기준없음", "news_24h": 5},    # 기준선 없음 → 제외
         {"code": "D", "name": "여전히조용", "news_24h": 1},  # 오늘도 조용 → 제외
+        {"code": "E", "name": "TIGER 2차전지", "news_24h": 6},  # ETF → 제외 (V5.7)
     ]
     baselines["D"] = 0.3
+    baselines["E"] = 0.2
     out = collect.detect_debuts(stocks, baselines)
     assert [d["name"] for d in out] == ["데뷔주"]
     assert out[0]["heads"] == ["계약 체결"]
@@ -1684,6 +1689,24 @@ def test_chase_stats_from_fixture():
         assert st["n"] == 2 and st["win"] == 1, st
         assert abs(st["avg_pct"] - 0.0) < 0.01, st
         assert collect.build_chase_stats("__no_file__", hd) == {}
+
+
+def test_holidays_2027():
+    """2027년 휴장일 선등록 검증 (2026-08-21 월력요항 기준. 12월 KRX 공지 대조 예정)."""
+    import holidays_kr as h
+    closed = ["2027-01-01", "2027-02-08", "2027-02-09", "2027-03-01",
+              "2027-05-03", "2027-05-05", "2027-05-13", "2027-07-19",
+              "2027-08-16", "2027-09-14", "2027-09-15", "2027-09-16",
+              "2027-10-04", "2027-10-11", "2027-12-27", "2027-12-31"]
+    for d in closed:
+        assert h.closed_reason(d), f"{d} 휴장이어야 함"
+    # 평일 거래일이어야 하는 날 (현충일 6/6은 일요일이라 대체 없음, 6/7 정상 거래)
+    open_days = ["2027-01-04", "2027-02-10", "2027-05-04", "2027-06-07",
+                 "2027-07-16", "2027-09-17", "2027-10-05", "2027-12-28", "2027-12-30"]
+    for d in open_days:
+        assert h.closed_reason(d) is None, f"{d} 거래일이어야 함: {h.closed_reason(d)}"
+    # 주말 자동 판정 유지
+    assert h.closed_reason("2027-02-06") == "주말"
 
 
 if __name__ == "__main__":

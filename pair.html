@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>동료주 발굴기</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="어제 A가 오르면 오늘 B가 따라 움직이는 짝(그림자 페어)을 히스토리에서 자동 발굴 · 연산은 브라우저에서, 비용 0원">
+<meta name="theme-color" content="#0b0b0b">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+:root{
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink-1:#0b0b0b; --ink-2:#52514e; --ink-3:#898781;
+  --grid:#e1e0d9; --ring:rgba(11,11,11,.10);
+  --series-1:#2a78d6; --series-1-deep:#1c5cab;
+  --up:#c93a3a; --down:#256abf; --crit:#d03b3b; --warn:#c9822a;
+  --chip-bg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink-1:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --series-1:#3987e5; --series-1-deep:#6da7ec;
+    --up:#e66767; --down:#3987e5; --crit:#e66767; --warn:#e0a15a;
+    --chip-bg:#262624;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink-1);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
+header.top h1{font-size:20px;font-weight:700;margin:0;white-space:nowrap}
+.stamp{color:var(--ink-3);font-size:12.5px}
+a.backlink{font-size:12.5px;color:var(--series-1-deep);text-decoration:none;margin-left:auto;white-space:nowrap}
+section{margin:26px 0}
+h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
+.sub{font-size:12.5px;color:var(--ink-3);margin:0 0 12px}
+.up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--ink-3)}
+.bars{background:var(--surface-1);border:1px solid var(--ring);border-radius:12px;padding:16px;margin-bottom:12px}
+.bars h3{font-size:13.5px;font-weight:700;margin:0 0 8px;color:var(--ink-2)}
+.btn{display:inline-block;border:0;border-radius:10px;padding:10px 22px;font-size:14.5px;font-weight:700;
+  background:var(--series-1);color:#fff;cursor:pointer;font-family:inherit}
+.btn:disabled{opacity:.5;cursor:default}
+.tblwrap{overflow-x:auto}
+table{width:100%;min-width:0;border-collapse:collapse;font-size:13px}
+th{font-size:11px;color:var(--ink-3);font-weight:600;text-align:right;padding:6px 8px;border-bottom:1px solid var(--grid);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td{padding:7px 8px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td a{color:inherit;text-decoration:underline dotted}
+.grade{font-size:11.5px;font-weight:700;white-space:nowrap}
+.empty{color:var(--ink-3);font-size:13px;padding:22px;text-align:center;
+  background:var(--surface-1);border:1px solid var(--ring);border-radius:12px}
+input.flt{font-family:inherit;font-size:13px;padding:7px 12px;border:1px solid var(--ring);
+  border-radius:9px;background:var(--surface-1);color:var(--ink-1);width:220px;max-width:100%}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
+  font-size:11.5px;color:var(--ink-3);line-height:1.7}
+@media (max-width:520px){
+  body{font-size:14px}
+  .wrap{padding:10px 10px 50px}
+  header.top h1{font-size:17px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>🤝 동료주 발굴기</h1>
+    <span class="stamp" id="stamp">준비 중…</span>
+    <a class="backlink" href="index.html">← 메인 대시보드</a>
+  </header>
+
+  <div class="bars" style="font-size:13px;line-height:1.8">
+    <h3>이 도구가 보는 것</h3>
+    <b>"어제 A가 오르면, 오늘 B가 따라 움직인다"</b>는 짝(그림자 페어)을 쌓아둔 일별 기록에서 자동으로 찾습니다.
+    시장 전체가 같이 오른 날의 착시를 빼기 위해 <b>그날 시장 평균 대비 초과 움직임</b>만으로 궁합을 계산하고,
+    ETF와 우선주 짝(본주·우선주)은 뻔한 짝이라 제외합니다. 연산은 전부 이 브라우저 안에서 이뤄집니다(서버 비용 0원).<br>
+    <span style="color:var(--ink-3)">솔직한 한계: 이 도구는 5만 개가 넘는 짝을 한꺼번에 훑기 때문에, 기록이 짧은 지금은
+    <b>순전한 우연</b>도 상위에 올라올 수 있습니다. 재미로 관찰만 하세요. 기록이 쌓일수록(표본 30일 이상)
+    신뢰 등급이 올라갑니다. 매수·매도 신호가 아닙니다.</span>
+  </div>
+
+  <div class="bars" id="runBox">
+    <button class="btn" id="runBtn">동료주 분석 시작</button>
+    <span id="runNote" style="font-size:12px;color:var(--ink-3);margin-left:10px">
+      첫 실행은 일별 기록(하루 약 0.5MB, 최근 3개월치)을 내려받아 20~60초쯤 걸립니다 · 두 번째부터는 저장된 사본을 써서 빠릅니다</span>
+    <div id="prog" style="display:none;margin-top:10px;font-size:13px;color:var(--ink-2)"></div>
+  </div>
+
+  <section id="todaySec" style="display:none">
+    <h2>👀 오늘의 관찰 대상</h2>
+    <p class="sub">가장 최근 거래일에 선행 종목이 시장보다 크게 움직인 짝 · 통계가 맞다면 동료가 따라 움직였는지 오늘 확인해볼 수 있습니다 (관찰용)</p>
+    <div class="bars" id="todayBox" style="font-size:13.5px;line-height:2"></div>
+  </section>
+
+  <section id="pairSec" style="display:none">
+    <h2>발굴된 동료주 짝</h2>
+    <p class="sub">시차 궁합(어제 A → 오늘 B)이 높은 순 · 같은날 궁합보다 시차 궁합이 뚜렷이 높은 짝만 표시
+      <input class="flt" id="flt" type="search" placeholder="종목명으로 거르기" style="margin-left:8px"></p>
+    <div class="bars tblwrap"><table id="pairTbl">
+      <thead><tr><th>선행 (어제)</th><th>동료 (오늘)</th><th>시차 궁합</th><th>같은날 궁합</th><th>표본</th><th>신뢰</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div id="pairEmpty" class="empty" style="display:none"></div>
+  </section>
+
+  <footer>
+    자료: 이 사이트가 매일 저장하는 일별 기록(history) · 궁합 = 시장 평균 대비 초과 등락률의 상관계수를 백분율로 표시 ·
+    표본 30일 이상 ✅ 믿을 만 · 10일 이상 ⚠️ 참고만 · 그 미만 🌱 표본 부족<br>
+    통계적 관찰 도구이며 매수·매도 추천이 아닙니다. 과거의 짝이 미래에도 이어진다는 보장은 없습니다. ·
+    <a href="index.html" style="color:var(--series-1-deep)">메인 대시보드로</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const cls = v => v>0 ? "up" : v<0 ? "down" : "flat";
+/* ETF 제외 목록: collect.py의 ETF_NAME_PREFIXES와 같은 내용 유지 (새 브랜드 추가 시 함께) */
+const ETF_PREFIXES = ["KODEX","TIGER","RISE","PLUS","ACE","SOL","KIWOOM",
+  "HANARO","ARIRANG","KOSEF","KoAct","TIMEFOLIO","WON",
+  "BNK","FOCUS","KCGI","히어로즈","마이다스","에셋플러스"];
+const isEtf = n => ETF_PREFIXES.some(p => (n||"").trim().startsWith(p));
+
+/* 튜닝 파라미터 (브라우저 연산이라 자유롭게 조정 가능) */
+const CFG = {
+  top_liquid: 250,     // 거래대금 상위 몇 종목까지 짝 후보로 볼지
+  min_days: 15,        // 종목이 기록에 최소 며칠 있어야 하는지
+  min_lag_corr: 0.55,  // 시차 궁합(상관계수) 하한
+  lead_margin: 0.15,   // 시차 궁합이 같은날 궁합보다 이만큼 높아야 "따라 움직임"으로 인정
+  max_rows: 30,        // 표에 보여줄 최대 짝 수
+  today_move: 2.0,     // "오늘의 관찰": 최근일 선행 종목의 초과 등락률(%) 문턱
+};
+
+const $ = id => document.getElementById(id);
+let PAIRS = [], NAMES = {};
+
+function grade(n){
+  if(n >= 30) return '<span class="grade" style="color:var(--up)">✅ 믿을 만</span>';
+  if(n >= 10) return '<span class="grade" style="color:#eda100">⚠️ 참고만</span>';
+  return '<span class="grade" style="color:var(--ink-3)">🌱 표본 부족</span>';
+}
+function nvLink(code, name){
+  return `<a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">${esc(name)}</a>`;
+}
+/* 우선주·같은 회사 짝 판별: 한쪽 이름이 다른 쪽의 접두이면 (삼성전자 / 삼성전자우) 제외 */
+function sameCompany(a, b){
+  return a.startsWith(b) || b.startsWith(a);
+}
+function corr(xs, ys){
+  const n = xs.length;
+  if(n < 3) return null;
+  let sx=0, sy=0;
+  for(let i=0;i<n;i++){ sx+=xs[i]; sy+=ys[i]; }
+  const mx=sx/n, my=sy/n;
+  let cxy=0, cxx=0, cyy=0;
+  for(let i=0;i<n;i++){
+    const dx=xs[i]-mx, dy=ys[i]-my;
+    cxy+=dx*dy; cxx+=dx*dx; cyy+=dy*dy;
+  }
+  if(cxx<=0 || cyy<=0) return null;
+  return cxy/Math.sqrt(cxx*cyy);
+}
+
+async function run(){
+  const btn = $("runBtn"), prog = $("prog");
+  btn.disabled = true; prog.style.display = "";
+  try{
+    prog.textContent = "오늘 데이터 확인 중…";
+    const base = await fetch("data.json?t="+Date.now()).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
+    $("stamp").textContent = (base.market_date||"").replace(/-/g,".") + " 기준" + (base.sample ? " · 샘플" : "");
+    /* 날짜 목록: 최근 3개월의 평일을 전부 시도하고 없는 날(휴장·결번)은 404로 건너뛴다.
+       (data.json의 날짜 목록은 20~60일로 잘려 있어 그대로 쓰면 표본이 영영 안 늘어난다)
+       all_stocks가 쌓이기 시작한 2026-07-14 이전으로는 내려가지 않는다. */
+    const dates = [];
+    {
+      /* 시간대 영향이 없도록 전부 UTC 기준으로 계산한다 */
+      const end = new Date((base.market_date||"") + "T00:00:00Z");
+      if(isNaN(end)) throw new Error("market_date 없음");
+      const start = new Date(end); start.setUTCDate(start.getUTCDate() - 92);
+      const floor = new Date("2026-07-14T00:00:00Z");
+      for(let t = (start > floor ? start : floor); t <= end; t.setUTCDate(t.getUTCDate()+1)){
+        const dow = t.getUTCDay();
+        if(dow === 0 || dow === 6) continue;   // 주말 제외
+        dates.push(t.toISOString().slice(0,10));
+      }
+    }
+    /* 일별 기록 내려받기 (없는 날은 조용히 건너뜀 · 캐시버스터 없이 받아 브라우저 캐시 재사용) */
+    const days = [];
+    for(let i=0;i<dates.length;i++){
+      prog.textContent = `일별 기록 내려받는 중 · ${i+1} / ${dates.length} (${dates[i]})`;
+      try{
+        const r = await fetch(`history/${dates[i]}.json`);
+        if(!r.ok) continue;
+        const d = await r.json();
+        if((d.all_stocks||[]).length) days.push({date: dates[i], stocks: d.all_stocks});
+      }catch(e){ /* 결번(미수집일)은 건너뜀 */ }
+    }
+    if(days.length < CFG.min_days){
+      prog.innerHTML = `기록이 ${days.length}일뿐이라 아직 분석할 수 없습니다 (최소 ${CFG.min_days}일). 매일 저녁 수집이 하루씩 채워줍니다.`;
+      btn.disabled = false; return;
+    }
+    prog.textContent = `짝 계산 중… (${days.length}일 기록)`;
+    await new Promise(res=>setTimeout(res, 30));   // 진행 문구가 화면에 그려질 틈
+
+    /* 유니버스: 최신일 거래대금 상위 + ETF 제외 */
+    const latest = days[days.length-1].stocks;
+    const cand = latest
+      .filter(s => s.code && s.name && !isEtf(s.name) && s.price && s.volume)
+      .sort((a,b)=>(b.price*b.volume)-(a.price*a.volume))
+      .slice(0, CFG.top_liquid);
+    NAMES = {}; cand.forEach(s => NAMES[s.code] = s.name);
+    const codes = cand.map(s=>s.code);
+
+    /* 날짜별 등락률 행렬 + 그날 시장 평균 → 초과 등락률 */
+    const series = {};                       // code → [초과등락률 or null] (날짜 순)
+    codes.forEach(c => series[c] = new Array(days.length).fill(null));
+    days.forEach((day, di) => {
+      const m = {};
+      day.stocks.forEach(s => { if(s.code && s.change_pct != null) m[s.code] = s.change_pct; });
+      const present = codes.filter(c => m[c] != null);
+      if(!present.length) return;
+      const avg = present.reduce((a,c)=>a+m[c], 0) / present.length;
+      present.forEach(c => { series[c][di] = m[c] - avg; });
+    });
+    const okCodes = codes.filter(c => series[c].filter(v=>v!=null).length >= CFG.min_days);
+
+    /* 시차 상관: A의 d일 초과등락 vs B의 d+1일 초과등락 */
+    PAIRS = [];
+    for(const a of okCodes){
+      const sa = series[a];
+      for(const b of okCodes){
+        if(a === b || sameCompany(NAMES[a], NAMES[b])) continue;
+        const sb = series[b];
+        const xs=[], ys=[], xs0=[], ys0=[];
+        for(let i=0;i<days.length-1;i++){
+          if(sa[i]!=null && sb[i+1]!=null){ xs.push(sa[i]); ys.push(sb[i+1]); }
+          if(sa[i]!=null && sb[i]!=null){ xs0.push(sa[i]); ys0.push(sb[i]); }
+        }
+        if(xs.length < CFG.min_days) continue;
+        const lag = corr(xs, ys);
+        if(lag == null || lag < CFG.min_lag_corr) continue;
+        const same = corr(xs0, ys0);
+        if(same != null && lag - same < CFG.lead_margin) continue;   // 그냥 같이 움직이는 짝은 제외
+        PAIRS.push({a, b, lag, same: same==null?0:same, n: xs.length});
+      }
+    }
+    PAIRS.sort((x,y)=>y.lag-x.lag);
+    prog.style.display = "none";
+    btn.textContent = "다시 분석";
+    btn.disabled = false;
+    renderPairs();
+    renderToday(days);
+  }catch(err){
+    prog.textContent = "분석에 실패했습니다 (" + esc(err.message) + "). 잠시 후 다시 시도해 주세요.";
+    btn.disabled = false;
+  }
+}
+
+function renderPairs(){
+  const q = ($("flt").value||"").trim();
+  const rows = PAIRS.filter(p => !q || NAMES[p.a].includes(q) || NAMES[p.b].includes(q))
+    .slice(0, CFG.max_rows);
+  $("pairSec").style.display = "";
+  const tb = $("pairTbl").querySelector("tbody");
+  if(!rows.length){
+    $("pairTbl").parentElement.style.display = "none";
+    $("pairEmpty").style.display = "";
+    $("pairEmpty").innerHTML = q
+      ? "그 이름이 들어간 짝이 없습니다. 짝은 거래대금 상위 " + CFG.top_liquid + "종목 안에서만 찾습니다."
+      : "조건을 만족하는 짝이 아직 없습니다.<br><span style='font-size:11.5px'>기록이 쌓이면(표본 확대) 문턱을 넘는 짝이 나타날 수 있습니다.</span>";
+    return;
+  }
+  $("pairTbl").parentElement.style.display = "";
+  $("pairEmpty").style.display = "none";
+  tb.innerHTML = rows.map(p => `<tr>
+    <td>${nvLink(p.a, NAMES[p.a])}</td>
+    <td>${nvLink(p.b, NAMES[p.b])} <span style="color:var(--ink-3);font-size:11px">이(가) 다음날</span></td>
+    <td><b>${Math.round(p.lag*100)}%</b></td>
+    <td style="color:var(--ink-3)">${Math.round(p.same*100)}%</td>
+    <td style="color:var(--ink-3)">${p.n}일</td>
+    <td>${grade(p.n)}</td>
+  </tr>`).join("");
+}
+
+function renderToday(days){
+  const last = days[days.length-1];
+  const lastMap = {};
+  last.stocks.forEach(s => { if(s.code && s.change_pct != null) lastMap[s.code] = s.change_pct; });
+  const present = Object.keys(NAMES).filter(c => lastMap[c] != null);
+  if(!present.length) return;
+  const avg = present.reduce((a,c)=>a+lastMap[c], 0) / present.length;
+  const hits = [];
+  const seen = new Set();
+  for(const p of PAIRS){
+    const ex = lastMap[p.a] != null ? lastMap[p.a] - avg : null;
+    if(ex == null || ex < CFG.today_move) continue;
+    const key = p.a + ">" + p.b;
+    if(seen.has(key)) continue;
+    seen.add(key);
+    hits.push({...p, ex});
+    if(hits.length >= 5) break;
+  }
+  if(!hits.length) return;
+  $("todaySec").style.display = "";
+  $("todayBox").innerHTML = hits.map(h =>
+    `${nvLink(h.a, NAMES[h.a])} <span class="${cls(h.ex)}">시장보다 +${h.ex.toFixed(1)}%p</span> (${esc(last.date.slice(5))})
+     → 통계상 다음날 ${nvLink(h.b, NAMES[h.b])} <span style="color:var(--ink-3);font-size:11.5px">시차 궁합 ${Math.round(h.lag*100)}% · ${grade(h.n)}</span>`
+  ).join("<br>") +
+  `<div style="font-size:11.5px;color:var(--ink-3);margin-top:8px">관찰용입니다. 추격 매수 전에 메인의 🏃 추격 통계를 먼저 보세요.</div>`;
+}
+
+$("runBtn").onclick = run;
+$("flt").addEventListener("input", renderPairs);
+/* 퀵메뉴에서 ?c=코드 로 진입하면 그 종목으로 자동 필터 준비 (분석은 버튼으로 시작) */
+(function(){
+  const c = new URLSearchParams(location.search).get("c");
+  if(c) fetch("data.json").then(r=>r.json()).then(d=>{
+    const s = (d.all_stocks||[]).find(x=>x.code===c);
+    if(s){ $("flt").value = s.name; }
+  }).catch(()=>{});
+})();
+</script>
+</body>
+</html>
