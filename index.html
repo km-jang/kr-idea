@@ -1897,7 +1897,8 @@ const PERF_HEAD = 5;    /* V5.5 화면 다이어트: 성과 트래킹 일별 기
 const ETF_PREFIXES = ["KODEX","TIGER","RISE","PLUS","ACE","SOL","KIWOOM",
   "HANARO","ARIRANG","KOSEF","KoAct","TIMEFOLIO","WON",
   "BNK","FOCUS","KCGI","히어로즈","마이다스","에셋플러스"];
-const isEtf = n => ETF_PREFIXES.some(p => (n||"").trim().startsWith(p));
+/* 판별은 '접두사 + 공백' + ETN 포함: BNK금융지주 같은 일반 종목 오탐 방지 (collect.py와 동일 규칙) */
+const isEtf = n => { const t=(n||"").trim(); return t.includes("ETN") || ETF_PREFIXES.some(p => t.startsWith(p+" ")); };
 /* V5.7 공시 날짜: DART 원시 표기 "20260813" → "8/13" */
 function discTime(t){
   const s = String(t||"");
@@ -2382,9 +2383,12 @@ function openTrust(){
       <td style="padding:6px 4px;font-size:12px;text-align:right;white-space:normal;word-break:keep-all">${perf}</td>
       <td style="padding:6px 2px;font-size:11.5px;text-align:right;white-space:nowrap;color:${g.c};font-weight:${g.w}">${g.t}</td>
     </tr>`).join("");
+  const hb = document.getElementById("histBanner");
+  const histNote = (hb && hb.style.display !== "none")
+    ? `<div style="font-size:11.5px;color:#7a5200;background:#fdedc3;border-radius:8px;padding:6px 10px;margin-bottom:8px">📅 지난 기록(${esc((d.market_date||"").replace(/-/g,"."))}) 기준의 성적입니다</div>` : "";
   const s = document.getElementById("qsheet");
   s.innerHTML = `
-    <h3>📋 신호 신뢰도 통지표</h3>
+    <h3>📋 신호 신뢰도 통지표</h3>${histNote}
     <div style="max-height:62vh;overflow:auto"><table style="width:100%;min-width:0;border-collapse:collapse;table-layout:auto">
       <thead><tr>
         <th style="text-align:left;padding:4px 2px;font-size:11px;color:var(--ink-3)">신호</th>

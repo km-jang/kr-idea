@@ -1954,8 +1954,15 @@ def is_index_product(name):
     """ETF 등 지수 상품 이름 판별. 개별 종목 발굴 도구에서 사용:
     검색식(build_screens)·뉴스 데뷔(detect_debuts). 종가 스캔(closing_scan.py)과
     수급 스캐너 표(index.html)는 같은 접두사 목록을 복제해 쓴다.
-    자금 흐름 막대(외인 순매수)는 ETF 유지 (2026-08-21 소유자 절충안 확정)."""
-    return (name or "").strip().startswith(ETF_NAME_PREFIXES)
+    자금 흐름 막대(외인 순매수)는 ETF 유지 (2026-08-21 소유자 절충안 확정).
+    판별은 '접두사 + 공백'이다: ETF 상품명은 "KODEX 200"처럼 브랜드 뒤에 공백이 오고,
+    BNK금융지주 같은 일반 종목은 공백이 없다 (2026-08-21 오탐 실사례로 정밀화,
+    유니버스 500종목 전수 검증: 공백 규칙이 ETF 74개와 일반주를 정확히 가른다).
+    'ETN'이 든 이름(CD금리 ETN 등)도 지수 상품이다 (브랜드가 증권사명이라 접두사로 못 잡음)."""
+    n = (name or "").strip()
+    if "ETN" in n:
+        return True
+    return n.startswith(tuple(p + " " for p in ETF_NAME_PREFIXES))
 
 
 def history_turnovers(hist_dir, days=5):
@@ -2195,6 +2202,9 @@ def build_swing(stocks, screens, mines, market_date, cfg=None):
         vol = s.get("volume") or 0
         turnover = px * vol / 1e8
         # --- 리스크 게이트 (하나라도 걸리면 후보 제외) ---
+        if is_index_product(s.get("name")):
+            continue                                 # ETF·ETN 제외 (2026-08-21 소유자 확정.
+            # CD금리 ETN이 변동 없는 우상향이라 스윙 74점을 받는 구조적 잡음 실사례)
         if mkt < cfg["min_mktcap"]:
             continue
         if turnover < cfg["liq_floor"]:

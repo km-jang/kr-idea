@@ -50,6 +50,7 @@ th{font-size:11px;color:var(--ink-3);font-weight:600;text-align:right;padding:6p
 th:first-child,td:first-child{text-align:left}
 td{padding:7px 8px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 td a{color:inherit;text-decoration:underline dotted}
+#todayBox a{color:var(--series-1-deep);text-decoration:underline dotted;font-weight:600}
 .grade{font-size:11.5px;font-weight:700;white-space:nowrap}
 .empty{color:var(--ink-3);font-size:13px;padding:22px;text-align:center;
   background:var(--surface-1);border:1px solid var(--ring);border-radius:12px}
@@ -122,7 +123,8 @@ const cls = v => v>0 ? "up" : v<0 ? "down" : "flat";
 const ETF_PREFIXES = ["KODEX","TIGER","RISE","PLUS","ACE","SOL","KIWOOM",
   "HANARO","ARIRANG","KOSEF","KoAct","TIMEFOLIO","WON",
   "BNK","FOCUS","KCGI","히어로즈","마이다스","에셋플러스"];
-const isEtf = n => ETF_PREFIXES.some(p => (n||"").trim().startsWith(p));
+/* 판별은 '접두사 + 공백' + ETN 포함: BNK금융지주 같은 일반 종목 오탐 방지 (collect.py와 동일 규칙) */
+const isEtf = n => { const t=(n||"").trim(); return t.includes("ETN") || ETF_PREFIXES.some(p => t.startsWith(p+" ")); };
 
 /* 튜닝 파라미터 (브라우저 연산이라 자유롭게 조정 가능) */
 const CFG = {
@@ -212,8 +214,11 @@ async function run(){
 
     /* 유니버스: 최신일 거래대금 상위 + ETF 제외 */
     const latest = days[days.length-1].stocks;
+    /* 우선주·ETN 제외: 코드 끝자리가 '0'이 아니면 보통주가 아니다 (삼성전자우 005935 등).
+       우선주는 본주의 그림자라 동료주로는 중복 신호일 뿐이다. */
     const cand = latest
-      .filter(s => s.code && s.name && !isEtf(s.name) && s.price && s.volume)
+      .filter(s => s.code && s.name && !isEtf(s.name) && s.price && s.volume
+                   && String(s.code).endsWith("0"))
       .sort((a,b)=>(b.price*b.volume)-(a.price*a.volume))
       .slice(0, CFG.top_liquid);
     NAMES = {}; cand.forEach(s => NAMES[s.code] = s.name);

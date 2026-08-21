@@ -54,8 +54,12 @@ ETF_NAME_PREFIXES = ("KODEX", "TIGER", "RISE", "PLUS", "ACE", "SOL", "KIWOOM",
 
 
 def is_index_product(name):
-    """ETF 등 지수 상품 이름 판별 (collect.py와 동일 규칙)."""
-    return (name or "").strip().startswith(ETF_NAME_PREFIXES)
+    """ETF 등 지수 상품 이름 판별 (collect.py와 동일 규칙: 접두사 + 공백, ETN 포함.
+    BNK금융지주 같은 일반 종목 오탐 방지, 2026-08-21)."""
+    n = (name or "").strip()
+    if "ETN" in n:
+        return True
+    return n.startswith(tuple(p + " " for p in ETF_NAME_PREFIXES))
 
 
 def fetch_realtime(codes, chunk=20):

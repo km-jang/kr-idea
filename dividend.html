@@ -301,12 +301,19 @@ function initPlanner(){
 }
 
 /* ---------- 배당 공시 ---------- */
+/* 날짜 표기: DART 원시 "20260813" → "8/13" (메인 discTime과 같은 규칙, V5.7) */
+function discTime(t){
+  const s = String(t||"");
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return `${+m[2]}/${+m[3]}`;
+  return s.replace(/\+0900|KST/g,"").trim().slice(0,22);
+}
 function notices(d){
   const hits = (d.disclosures||[]).filter(x=>(x.tag||"").includes("배당"));
   const el = document.getElementById("noticeList");
   if(!hits.length){ el.innerHTML = '<div class="empty">최근 수집된 배당 공시가 없습니다.</div>'; return; }
   el.innerHTML = `<div style="font-size:13px;line-height:2">` + hits.map(x=>
-    `· <b>${esc(x.company)}</b> ${esc(x.title)} <span style="color:var(--ink-3);font-size:11.5px">${esc(x.time||"")}</span>`
+    `· <b>${esc(x.company)}</b> ${esc(x.title)} <span style="color:var(--ink-3);font-size:11.5px">${esc(discTime(x.time))}</span>`
   ).join("<br>") + `</div>`;
 }
 

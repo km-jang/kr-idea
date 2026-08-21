@@ -1410,17 +1410,20 @@ def test_build_swing_score_and_plan():
 
 
 def test_build_swing_gates():
-    """리스크 게이트: 지뢰·악재공시·시총미달·저유동성·상한가임박 제외."""
+    """리스크 게이트: 지뢰·악재공시·시총미달·저유동성·상한가임박·ETF 제외."""
     good = _mkswing("GOOD01", "통과주")
     mine = _mkswing("MINE01", "지뢰주")
     bad_disc = _mkswing("BADD01", "악재주", disc_score=-8)
     small = _mkswing("SMALL1", "소형주", mktcap_100m=1000)
     illiq = _mkswing("ILLIQ1", "저유동", volume=1)          # 거래대금 미달
     limit = _mkswing("LIMIT1", "상한가임박", change_pct=25.0)
-    stocks = [good, mine, bad_disc, small, illiq, limit]
+    etf = _mkswing("ETF001", "KODEX 200")                    # ETF (V5.7, 소유자 확정)
+    etn = _mkswing("ETN001", "하나 CD금리투자 ETN")           # ETN (V5.7)
+    bnk = _mkswing("BNK001", "BNK금융지주")                   # 오탐 방지: 일반 종목은 통과
+    stocks = [good, mine, bad_disc, small, illiq, limit, etf, etn, bnk]
     out = collect.build_swing(stocks, {}, [{"code": "MINE01"}], "2026-07-16")
     codes = {p["code"] for p in out}
-    assert codes == {"GOOD01"}, codes
+    assert codes == {"GOOD01", "BNK001"}, codes
 
 
 def test_build_swing_absorbs_screens():
@@ -1636,6 +1639,10 @@ def test_is_index_product():
     assert not collect.is_index_product("삼성전자")
     assert not collect.is_index_product("")
     assert not collect.is_index_product(None)
+    # V5.7 정밀화: 접두사+공백 규칙. 브랜드로 시작하는 일반 종목은 ETF가 아니다 (오탐 실사례)
+    assert not collect.is_index_product("BNK금융지주")
+    import closing_scan as cs
+    assert cs.is_index_product("KODEX 200") and not cs.is_index_product("BNK금융지주")
 
 
 def test_screen_stats_from_fixture():
