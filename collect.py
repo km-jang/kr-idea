@@ -27,6 +27,7 @@ import time
 import traceback
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from html import unescape
 from pathlib import Path
 
 import requests
@@ -597,6 +598,68 @@ def build_disclosure_signals(raw_items):
         tag, senti, score = cls
         signals.append({**it, "tag": tag, "sentiment": senti, "score": score})
     return signals
+
+
+# ---------------------------------------------------------------------------
+# 📑 리포트 레이더 (V5.9, IDEAS K3 1단계): 네이버 리서치 종목분석 목록 일배치 수집
+#   목표가·의견 파싱(상세 페이지)은 이 목록 파서가 실전 검증된 뒤 2단계로 확장한다.
+# ---------------------------------------------------------------------------
+
+def parse_research_html(html_text):
+    """리서치 종목분석 목록 HTML → [{code,name,title,broker,date,nid}].
+    표 구조가 조금 바뀌어도 견디게 <tr> 단위로 느슨하게 뽑는다 (고정 픽스처 테스트 있음)."""
+    out = []
+    for tr in re.split(r"<tr[^>]*>", html_text or ""):
+        m_code = re.search(r'/item/main\.naver\?code=(\d{6})[^>]*>([^<]+)</a>', tr)
+        m_read = re.search(r'company_read\.naver\?nid=(\d+)[^"]*"[^>]*>([^<]+)</a>', tr)
+        if not m_code or not m_read:
+            continue
+        m_date = re.search(r'>(\d{2}\.\d{2}\.\d{2})<', tr)
+        broker = ""
+        for m_td in re.finditer(r'<td[^>]*>([^<>]+)</td>', tr[m_read.end():]):
+            t = m_td.group(1).strip()
+            if t and not re.match(r'^[\d,.]+$', t) and "." not in t:
+                broker = t
+                break
+        out.append({"code": m_code.group(1), "name": unescape(m_code.group(2)).strip(),
+                    "title": unescape(m_read.group(2)).strip(), "broker": broker,
+                    "date": m_date.group(1) if m_date else "", "nid": m_read.group(1)})
+    return out
+
+
+def fetch_research_reports(pages=2):
+    """네이버 금융 리서치 종목분석 목록 최근 2페이지 (약 60건)."""
+    out, seen = [], set()
+    for page in range(1, pages + 1):
+        try:
+            txt = get_text("https://finance.naver.com/research/company_list.naver"
+                           f"?&page={page}", encoding="euc-kr")
+        except Exception:
+            break
+        rows = parse_research_html(txt)
+        if not rows:
+            break
+        for r in rows:
+            if r["nid"] not in seen:
+                seen.add(r["nid"])
+                out.append(r)
+        time.sleep(REQUEST_DELAY)
+    return out
+
+
+def build_reports(raw_reports, stocks, cap=40):
+    """유니버스 종목의 최신일 리포트만 추린다. 날짜 형식이 바뀌어도 동작하도록
+    '목록에 존재하는 가장 최신 날짜'를 기준일로 삼는다 (자기 적응형)."""
+    if not raw_reports:
+        return []
+    codes = {s.get("code") for s in stocks}
+    mine = [r for r in raw_reports if r["code"] in codes]
+    if not mine:
+        return []
+    latest = max((r["date"] for r in mine if r["date"]), default="")
+    if latest:
+        mine = [r for r in mine if r["date"] == latest]
+    return mine[:cap]
 
 
 # ---------------------------------------------------------------------------
@@ -1707,6 +1770,17 @@ def build_sample():
                     kill_watch=[{"code": "005380", "name": "현대차", "picked": "2026-07-03",
                                  "days": 5, "ret_pct": 0.4, "vol_ratio": 0.31,
                                  "flags": ["time", "volume"]}],
+                    phase_track={"watch": [{"code": "012450", "name": "한화에어로스페이스",
+                                            "bdays": 3, "adj": 1, "price": 912000,
+                                            "change_pct": -1.2}],
+                                 "pullback": {"n": 6, "win": 3, "avg_pct": 0.8},
+                                 "chase": {"n": 17, "win": 15, "avg_pct": -0.89}},
+                    reports=[{"code": "005930", "name": "삼성전자", "broker": "미리내증권",
+                              "title": "HBM 사이클의 두 번째 파도", "date": "26.07.10",
+                              "nid": "sample"},
+                             {"code": "012450", "name": "한화에어로스페이스",
+                              "broker": "가온투자증권", "title": "수주 잔고가 말해주는 것",
+                              "date": "26.07.10", "nid": "sample2"}],
                     insider_trades=[
                         {"code": "035760", "name": "CJ ENM", "price": 71200,
                          "change_pct": 0.71, "mktcap_100m": 15600,
@@ -1939,11 +2013,13 @@ CONFIG_SCREENS = {
     "stealth":  {"min_mktcap": 2000, "f_streak": 4, "i_streak": 3,
                  "px_drift_max": 2.0, "vol_mult_max": 1.3}, # 몰래 매집 (제안)
     "gate52":   {"near_lo": 97.0, "near_hi": 99.9, "min_f5": 0},  # 신고가 문앞 (제안)
+    "turnflow": {"min_mktcap": 1000, "min_turnover": 30, "sell5": -50,
+                 "buy1": 30, "chg_min": -5.0},              # 수급 물꼬 (V5.9)
 }
 
 SCREEN_LABELS = {"vacancy": "🏦 빈집털이", "pullback": "🎯 대장주 눌림목",
                  "hotmoney": "🔥 종합 수급", "stealth": "🤫 몰래 매집",
-                 "gate52": "🚪 신고가 문앞"}
+                 "gate52": "🚪 신고가 문앞", "turnflow": "🚰 수급 물꼬"}
 
 # 검색식 공통 ETF 제외 (V5.4): 검색식은 개별 종목 발굴이 목적인데 지수 상품이 섞이면
 # 잡음이 된다 (2026-08-06 신고가 문앞에 채권 ETF가 실제로 잡힌 사례).
@@ -2065,6 +2141,21 @@ def build_screens(stocks, hist_dir, market_date, cfg=None):
             out["gate52"].append({"code": code, "name": s["name"],
                 "why": f"52주 고점의 {near:.1f}% · 외인 5일 +{s['f_5d_amt_100m']:.0f}억"})
 
+        # ⑥ 수급 물꼬 (V5.9): 5일 내내 팔던 큰손이 오늘 처음 크게 사기 시작
+        c = cfg["turnflow"]
+        if "turnflow" in out and mkt >= c["min_mktcap"] and turnover >= c["min_turnover"] \
+                and fresh and (chg is None or chg >= c["chg_min"]):
+            f5, f1 = s.get("f_5d_amt_100m") or 0, s.get("f_1d_amt_100m") or 0
+            i5, i1 = s.get("i_5d_amt_100m") or 0, s.get("i_1d_amt_100m") or 0
+            who = None
+            if f5 <= c["sell5"] and f1 >= c["buy1"]:
+                who = ("외인", f5, f1)
+            elif i5 <= c["sell5"] and i1 >= c["buy1"]:
+                who = ("기관", i5, i1)
+            if who:
+                out["turnflow"].append({"code": code, "name": s["name"],
+                    "why": f"{who[0]} 5일 {who[1]:.0f}억 팔다 오늘 +{who[2]:.0f}억 유턴"})
+
     for k in out:
         out[k] = out[k][:5]
     return out
@@ -2157,6 +2248,135 @@ def build_graduates(hist_dir, stocks, current_codes, market_date, lookback=21):
                     "ret_pct": round((p1 / info["price"] - 1) * 100, 2)})
     out.sort(key=lambda x: -x["ret_pct"])
     return out
+
+
+# ---------------------------------------------------------------------------
+# 🪜 돌파 국면 추적기 (V5.9): 신고가 돌파 후 "첫 조정" 관찰 + 성적 자동 채점
+#   마켓스타PRO의 국면 프레임에서 착안하되, 실시간 알람이 아니라 일배치 관찰과
+#   통계 검증으로 번역했다 (안티 FOMO: 돌파 당일 추격의 실제 성적을 함께 보여줌).
+# ---------------------------------------------------------------------------
+
+CONFIG_PHASE = {
+    "near_hi": 99.9,        # 52주 고점 대비 이 % 이상이면 신고가권 진입(돌파)으로 판정
+    "look_days": 7,         # 돌파 후 이 영업일 안의 조정만 "첫 조정"으로 관찰
+    "adj_max": 2,           # 조정 1~2일차까지만 관찰 (3일 이상 밀리면 추세 훼손 의심)
+    "min_mktcap": 1000,     # 최소 시총(억) — 잡주 제외
+    "min_turnover": 30,     # 최소 당일 거래대금(억)
+}
+
+
+def build_phase_track(hist_dir, stocks, market_date, cfg=None):
+    """신고가 돌파 국면 추적. 반환 dict (실패 시 {}):
+      watch: 오늘 '돌파 후 첫 조정 1~2일차'인 종목 [{code,name,bdays,adj,price,change_pct}]
+      pullback: 조정 1~2일차 종가 매수 → 다음날 성적 누적 {"n","win","avg_pct"}
+      chase:    돌파 당일 종가 추격 → 다음날 성적 누적 (비교 기준)
+    돌파 = 전일까지 신고가권 밖이던 종목이 당일 52주 고점의 near_hi% 이상 진입.
+    부가 기능: 어떤 실패에도 {}를 돌려주고 수집을 막지 않는다."""
+    cfg = cfg or CONFIG_PHASE
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))
+    except Exception:
+        return {}
+    days = []                                     # [(date, {code: (near,chg,price)})]
+    for f in files:
+        if market_date and f.stem >= market_date:
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        m = {s["code"]: (s.get("near_52w_pct"), s.get("change_pct"), s.get("price"))
+             for s in d.get("all_stocks") or [] if s.get("code")}
+        if m:
+            days.append((f.stem, m))
+    today = {s["code"]: (s.get("near_52w_pct"), s.get("change_pct"), s.get("price"))
+             for s in stocks if s.get("code")}
+    names = {s["code"]: s.get("name") for s in stocks if s.get("code")}
+    metas = {s["code"]: s for s in stocks if s.get("code")}
+    if today:
+        days.append((market_date or "today", today))
+    if len(days) < 3:
+        return {}
+    hi = cfg["near_hi"]
+
+    def is_bk(i, c):
+        """i일이 c의 돌파일(신고가권 첫 진입)인가."""
+        v = days[i][1].get(c)
+        if not v or v[0] is None or v[0] < hi:
+            return False
+        p = days[i - 1][1].get(c) if i > 0 else None
+        return not (p and p[0] is not None and p[0] >= hi)
+
+    # ① 성적 누적 (히스토리 전체) — 돌파 당일 추격 vs 첫 조정 1~2일차 매수
+    chase, pull = [], []
+    for i in range(len(days) - 1):
+        for c in days[i][1]:
+            if not is_bk(i, c):
+                continue
+            v0, v1 = days[i][1].get(c), days[i + 1][1].get(c)
+            if v0 and v1 and v0[2] and v1[2]:
+                chase.append((v1[2] / v0[2] - 1) * 100)
+            run = 0
+            for j in range(i + 1, min(i + 1 + cfg["look_days"], len(days) - 1)):
+                v = days[j][1].get(c)
+                if not v or v[1] is None or v[2] is None:
+                    break
+                if v[1] < 0:
+                    run += 1
+                    if run <= cfg["adj_max"]:
+                        nx = days[j + 1][1].get(c)
+                        if nx and nx[2]:
+                            pull.append((nx[2] / v[2] - 1) * 100)
+                elif run > 0:
+                    break                        # 첫 조정 구간 종료
+    def stat(rets):
+        if not rets:
+            return {}
+        return {"n": len(rets), "win": sum(1 for x in rets if x > 0),
+                "avg_pct": round(sum(rets) / len(rets), 2)}
+
+    # ② 오늘의 관찰: 돌파 후 첫 조정 1~2일차인 종목 (유동성 필터 + ETF 제외)
+    watch = []
+    t = len(days) - 1
+    for c, v in today.items():
+        if v[1] is None or v[1] >= 0:            # 오늘이 음봉이어야 조정 중
+            continue
+        s = metas.get(c) or {}
+        if is_index_product(s.get("name")):
+            continue
+        if (s.get("mktcap_100m") or 0) < cfg["min_mktcap"]:
+            continue
+        if (s.get("price") or 0) * (s.get("volume") or 0) / 1e8 < cfg["min_turnover"]:
+            continue
+        run = 0                                   # 오늘 포함 연속 음봉 수
+        k = t
+        while k >= 0:
+            vv = days[k][1].get(c)
+            if vv and vv[1] is not None and vv[1] < 0:
+                run += 1
+                k -= 1
+            else:
+                break
+        if not (1 <= run <= cfg["adj_max"]):
+            continue
+        start = t - run                           # 조정 시작 직전 일
+        bk_i = None
+        for i in range(start, max(start - cfg["look_days"], -1), -1):
+            if is_bk(i, c):
+                bk_i = i
+                break
+        if bk_i is None:
+            continue
+        # 첫 조정인지: 돌파일과 조정 시작 사이에 음봉이 없어야 함
+        first = all((days[i][1].get(c) or (None, None, None))[1] is not None
+                    and days[i][1][c][1] >= 0
+                    for i in range(bk_i + 1, t - run + 1) if days[i][1].get(c))
+        if not first:
+            continue
+        watch.append({"code": c, "name": names.get(c), "bdays": t - bk_i,
+                      "adj": run, "price": v[2], "change_pct": v[1]})
+    watch.sort(key=lambda x: (x["adj"], x["bdays"]))
+    return {"watch": watch[:15], "pullback": stat(pull), "chase": stat(chase)}
 
 
 # ---------------------------------------------------------------------------
@@ -2413,7 +2633,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              strategies=None, strategy_race=None, silence=None, news_compass=None,
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
              mines=None, swing=None, swing_review=None, chart_pack=None,
-             screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None):
+             screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None,
+             phase_track=None, reports=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -2471,6 +2692,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "chase_stats": chase_stats or {},
         "swing_stats": swing_stats or {},
         "kill_watch": kill_watch or [],
+        "phase_track": phase_track or {},
+        "reports": reports or [],
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -2549,6 +2772,15 @@ def run_full(max_universe=None, out_path=None):
         errors.append(f"dart: {e}")
     disclosures = build_disclosure_signals(raw)
     print(f"  → 공시 {len(raw)}건 중 시그널 {len(disclosures)}건")
+
+    # 리포트 레이더 (V5.9) — 부가 기능, 실패해도 수집을 막지 않는다
+    reports = []
+    try:
+        reports = build_reports(fetch_research_reports(), stocks)
+        if reports:
+            print(f"  → 오늘의 리포트 {len(reports)}건")
+    except Exception as e:
+        errors.append(f"reports: {e}")
 
     print("[5/5] 품질 검증/점수화...")
     fatal = validate_collection(stocks)
@@ -2637,6 +2869,14 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"kill_watch: {e}")
         kill_watch = []
+    # 돌파 국면 추적 (V5.9) — 부가 기능, 실패해도 수집을 막지 않는다
+    try:
+        phase_track = build_phase_track(hist_dir, stocks, market_date)
+        if phase_track.get("watch"):
+            print(f"  → 돌파 후 조정 관찰 {len(phase_track['watch'])}종목")
+    except Exception as e:
+        errors.append(f"phase_track: {e}")
+        phase_track = {}
     # 차트 카드 팩 — 부가 기능이므로 실패해도 핵심 수집을 막지 않는다
     try:
         targets = chart_targets(ideas, swing, read_watchlist_codes())
@@ -2660,7 +2900,8 @@ def run_full(max_universe=None, out_path=None):
                     screens=screens, insider_trades=insider_trades, mines=mines,
                     swing=swing, swing_review=swing_review, chart_pack=chart_pack,
                     screen_stats=screen_stats, chase_stats=chase_stats,
-                    swing_stats=swing_stats, kill_watch=kill_watch)
+                    swing_stats=swing_stats, kill_watch=kill_watch,
+                    phase_track=phase_track, reports=reports)
 
 
 def main():

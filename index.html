@@ -36,7 +36,7 @@
   }
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--page);color:var(--ink-1);
+body{margin:0;background:var(--page);color:var(--ink-1);word-break:keep-all;overflow-wrap:break-word;
   font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 .wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
@@ -295,6 +295,14 @@ table.slim{min-width:0}
   .perf-tiles{grid-template-columns:repeat(2,1fr);gap:8px}
   nav.chips a{font-size:12.5px;padding:6px 12px}
   .csvbtn,.slpreset,.slreset,.mktchip{padding:6px 11px}
+  /* V5.9 모바일 다듬기: 상태 문구는 제 줄로 (프리셋 버튼 줄이 어수선하게 갈라지던 문제) */
+  .slfoot .slstate{flex-basis:100%;order:9;margin-left:0}
+}
+/* V5.9 모바일 다듬기: 옆으로 스크롤되는 표에 힌트 한 줄 (모바일에서만, JS가 판별) */
+.scrollhint{display:none}
+@media (max-width:520px){
+  .scrollhint{display:block;font-size:11px;color:var(--ink-3);text-align:right;
+    padding:4px 4px 0;user-select:none}
 }
 </style>
 </head>
@@ -512,6 +520,7 @@ table.slim{min-width:0}
   <section id="disc">
     <h2>DART 공시 시그널</h2>
     <p class="sub">자사주·소각·무상증자 등 주가 관련성 높은 공시만 필터링 (▲ 호재성 · ▼ 악재성 · · 관찰)</p>
+    <div class="bars" id="reportBox" style="display:none"></div>
     <div class="disc" id="discList"></div>
   </section>
   <section id="search">
@@ -943,11 +952,13 @@ function ideaCards(d, override){
 }
 
 const SCREEN_LABELS_UI = {vacancy:"🏦 빈집털이", pullback:"🎯 대장주 눌림목",
-  hotmoney:"🔥 종합 수급", stealth:"🤫 몰래 매집", gate52:"🚪 신고가 문앞"};
+  hotmoney:"🔥 종합 수급", stealth:"🤫 몰래 매집", gate52:"🚪 신고가 문앞",
+  turnflow:"🚰 수급 물꼬"};
 /* V5.4 검색식 토글: 기기별 브라우저 저장. 신고가 문앞은 성적 부진(4주 승률 39%,
    3일 후 -3.5%)으로 기본 꺼짐. ⚙에서 언제든 다시 켤 수 있다. */
 const SCKEY = "kr_idea_screens";
-const DEF_SCREENS_ON = {vacancy:true, pullback:true, hotmoney:true, stealth:true, gate52:false};
+const DEF_SCREENS_ON = {vacancy:true, pullback:true, hotmoney:true, stealth:true, gate52:false,
+  turnflow:true};
 const getScreensOn = () => { try { return {...DEF_SCREENS_ON, ...(JSON.parse(localStorage.getItem(SCKEY))||{})}; } catch(e){ return {...DEF_SCREENS_ON}; } };
 const setScreensOn = o => { try { localStorage.setItem(SCKEY, JSON.stringify(o)); } catch(e){} };
 let SCREEN_CFG_OPEN = false;
@@ -1013,7 +1024,7 @@ function screensBox(d){
   }
   el.style.display = "";
   el.innerHTML = `<div class="bars" style="border-left:3px solid var(--series-1)">
-    <h3>🔎 조건 검색 적중 <span style="font-weight:400;color:var(--ink-3)">· 5개 검색식, 걸린 날만 표시</span> <span data-scgear role="button" title="검색식 켜기/끄기와 성적" style="cursor:pointer;color:var(--ink-3);font-weight:400">⚙ 설정</span></h3>
+    <h3>🔎 조건 검색 적중 <span style="font-weight:400;color:var(--ink-3)">· 6개 검색식, 걸린 날만 표시</span> <span data-scgear role="button" title="검색식 켜기/끄기와 성적" style="cursor:pointer;color:var(--ink-3);font-weight:400">⚙ 설정</span></h3>
     ${body}${cfg}</div>`;
 }
 
@@ -1356,13 +1367,25 @@ function raceChart(d){
     aria-label="전략 리그전 누적 수익률">`;
   svg += `<line x1="${pad}" y1="${Y(100)}" x2="${W-padR}" y2="${Y(100)}"
     stroke="var(--grid)" stroke-width="1" stroke-dasharray="3,3"/>`;
+  /* 끝 라벨 겹침 방지 (V5.9 모바일 다듬기): 곡선 끝값이 비슷하면 라벨이 포개져 안 읽혔다 */
+  const labels = names.map(k=>({k, y: Y(r.curves[k][r.curves[k].length-1].v)+4}))
+    .sort((a,b)=>a.y-b.y);
+  const GAP = 13;
+  for(let i=1;i<labels.length;i++)
+    if(labels[i].y - labels[i-1].y < GAP) labels[i].y = labels[i-1].y + GAP;
+  for(let i=labels.length-1;i>=0;i--){        // 아래로 밀다 화면을 벗어나면 위로 되민다
+    if(labels[i].y > H-4) labels[i].y = H-4;
+    if(i < labels.length-1 && labels[i+1].y - labels[i].y < GAP)
+      labels[i].y = labels[i+1].y - GAP;
+  }
+  const labelY = {};
+  labels.forEach(l=>{ labelY[l.k] = l.y; });
   names.forEach((k,idx)=>{
     const c = r.curves[k];
     const pts = c.map((p,i)=>`${X(i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ");
-    const last = c[c.length-1];
     svg += `<polyline points="${pts}" fill="none" stroke="${RACE_COLORS[idx%4]}"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-    svg += `<text x="${W-padR+5}" y="${Y(last.v)+4}" font-size="11" font-weight="700"
+    svg += `<text x="${W-padR+5}" y="${labelY[k].toFixed(1)}" font-size="11" font-weight="700"
       fill="${RACE_COLORS[idx%4]}">${esc(k)}</text>`;
   });
   svg += "</svg>";
@@ -1907,6 +1930,38 @@ function discTime(t){
   if(m) return `${+m[2]}/${+m[3]}`;
   return s.replace(/\+0900|KST/g,"").trim().slice(0,22);
 }
+/* 📑 리포트 레이더 (V5.9): 오늘 증권사 리포트가 나온 유니버스 종목 (있을 때만 표시, 0픽셀) */
+function reportsBox(d){
+  const el = document.getElementById("reportBox");
+  if(!el) return;
+  const rs = d.reports || [];
+  if(!rs.length){ el.style.display = "none"; el.innerHTML = ""; return; }
+  const cnt = {};
+  rs.forEach(r=>{ cnt[r.code] = (cnt[r.code]||0) + 1; });
+  const HEAD = 8;
+  const row = r=>`<div style="padding:3px 0">
+    <span class="qn" data-c="${r.code}" data-n="${esc(r.name)}" style="font-weight:600">${esc(r.name)}</span>
+    ${cnt[r.code]>1?`<span style="font-size:10.5px;color:var(--up);font-weight:700">리포트 ${cnt[r.code]}건</span>`:""}
+    <a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted"
+       href="https://finance.naver.com/research/company_read.naver?nid=${esc(r.nid)}">${esc(r.title)}</a>
+    <span style="color:var(--ink-3);font-size:11.5px">· ${esc(r.broker)}</span></div>`;
+  const rest = rs.slice(HEAD);
+  el.style.display = "";
+  el.innerHTML = `<h3>📑 오늘의 리포트 <span style="font-weight:400;color:var(--ink-3)">· 증권사 종목분석 ${rs.length}건 (네이버 리서치)</span></h3>
+    <div style="font-size:13px;line-height:1.7">${rs.slice(0,HEAD).map(row).join("")}
+    ${rest.length?`<div class="reportrest" hidden>${rest.map(row).join("")}</div>
+      <button type="button" class="colmore" aria-expanded="false">▾ 리포트 ${rest.length}건 더보기</button>`:""}</div>
+    <div style="font-size:11px;color:var(--ink-3);margin-top:5px">리포트 발행 = 매수 신호가 아닙니다 · 목표가 상향 랠리 끝물에 리포트가 몰리는 경우도 흔합니다</div>`;
+  const btn = el.querySelector(".colmore");
+  if(btn) btn.onclick = ()=>{
+    const box = el.querySelector(".reportrest");
+    const open = box.hidden;
+    box.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.textContent = open ? "▴ 접기" : `▾ 리포트 ${rest.length}건 더보기`;
+  };
+}
+
 function discList(d){
   const el = document.getElementById("discList");
   const list = d.disclosures||[];
@@ -2118,7 +2173,7 @@ function renderAll(d, isHistory){
   healthDot(d);
   buildRegulars(d);   // 표·카드가 그려지기 전에 단골 목록을 먼저 만든다
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
-  sectorBars(d); flowBars(d); flowTable(d); valueTable(d); discList(d);
+  sectorBars(d); flowBars(d); flowTable(d); valueTable(d); reportsBox(d); discList(d);
   curveChart(d); raceChart(d); portSection(d); silenceSection(d); compassSection(d);
   screensBox(d); brief3(d); sectionBadges(d);
   if(!isHistory){
@@ -2128,6 +2183,24 @@ function renderAll(d, isHistory){
   } else {
     ideaCards(d);   // 과거 보기에선 슬라이더 미적용 원본 5선
   }
+  markScrollables();
+}
+
+/* V5.9 모바일 다듬기: 실제로 옆 스크롤이 생긴 표에만 힌트 한 줄을 붙인다 */
+function markScrollables(){
+  document.querySelectorAll(".tblwrap").forEach(w=>{
+    const has = w.scrollWidth > w.clientWidth + 4;
+    const next = w.nextElementSibling;
+    const isHint = next && next.classList && next.classList.contains("scrollhint");
+    if(has && !isHint){
+      const h = document.createElement("div");
+      h.className = "scrollhint";
+      h.textContent = "⇠ 표를 옆으로 밀면 더 보여요";
+      w.parentNode.insertBefore(h, w.nextSibling);
+    } else if(!has && isHint){
+      next.remove();
+    }
+  });
 }
 
 /* ---------- 히스토리 브라우저 ---------- */
@@ -2357,7 +2430,7 @@ function openTrust(){
     if(st && st.n1){
       const pct = Math.round(st.win1/st.n1*100);
       rows.push([SCREEN_LABELS_UI[k] + (on[k]?"":' <span style="font-size:10.5px;color:var(--ink-3)">(꺼짐)</span>'),
-        `${st.n1}건`, `다음날 승률 ${pct}% · 적중 ${st.hits}건`, trustGrade(st.n1)]);
+        `${st.n1}건`, `승률 ${pct}% · 적중 ${st.hits}건`, trustGrade(st.n1)]);
     } else {
       rows.push([SCREEN_LABELS_UI[k], "·", "집계 준비 중", trustGrade(0)]);
     }
@@ -2372,13 +2445,18 @@ function openTrust(){
   /* ⑤ 종가 스캔 (최근 1일 채점) */
   const sr = d.scan_review;
   rows.push(sr && (sr.items||[]).length
-    ? ["🌆 종가 스캔", `최근일 ${sr.items.length}종목`, `다음날 평균 ${pctTxt(sr.avg_ret_pct)} (${esc((sr.date||"").slice(5))})`, trustGrade(sr.items.length)]
+    ? ["🌆 종가 스캔", `최근일 ${sr.items.length}종목`, `평균 ${pctTxt(sr.avg_ret_pct)} (${esc((sr.date||"").slice(5))})`, trustGrade(sr.items.length)]
     : ["🌆 종가 스캔", "·", "기록 없음", trustGrade(0)]);
   /* ⑥ 추격 통계 (스캔 급등주를 종가에 따라붙으면?) */
   const ch = d.chase_stats;
   rows.push(ch && ch.n
-    ? ["🏃 추격 통계", `${ch.n}건`, `다음날 승률 ${Math.round(ch.win/ch.n*100)}% · 평균 ${pctTxt(ch.avg_pct)}`, trustGrade(ch.n)]
+    ? ["🏃 추격 통계", `${ch.n}건`, `승률 ${Math.round(ch.win/ch.n*100)}% · 평균 ${pctTxt(ch.avg_pct)}`, trustGrade(ch.n)]
     : ["🏃 추격 통계", "·", "집계 준비 중", trustGrade(0)]);
+  /* ⑦ 돌파 국면 (V5.9): 신고가 돌파 후 첫 조정 1~2일차 매수 성적 */
+  const pb = (d.phase_track||{}).pullback;
+  rows.push(pb && pb.n
+    ? ["🪜 조정 대기 매수", `${pb.n}건`, `승률 ${Math.round(pb.win/pb.n*100)}% · 평균 ${pctTxt(pb.avg_pct)}`, trustGrade(pb.n)]
+    : ["🪜 조정 대기 매수", "·", "집계 준비 중", trustGrade(0)]);
   const body = rows.map(([nm, n, perf, g]) =>
     `<tr>
       <td style="padding:6px 2px;font-size:12px;word-break:keep-all">${nm}</td>
@@ -2400,7 +2478,7 @@ function openTrust(){
         <th style="text-align:right;padding:4px 2px;font-size:11px;color:var(--ink-3)">신뢰</th>
       </tr></thead><tbody>${body}</tbody></table></div>
     <div style="font-size:11px;color:var(--ink-3);margin-top:6px;line-height:1.6">
-      표본 30건 이상 ✅ · 10건 이상 ⚠️ · 그 미만 🌱 표본 부족 ·
+      성적은 다음날 종가 기준 · 표본 30건 이상 ✅ · 10건 이상 ⚠️ · 그 미만 🌱 ·
       표본이 적은 신호는 성적이 좋아도 우연일 수 있습니다.
       모든 성적은 자동 집계이며 매수·매도 추천이 아닙니다.</div>
     <button class="qclose" onclick="closeQsheet()">닫기</button>`;

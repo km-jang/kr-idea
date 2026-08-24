@@ -21,7 +21,7 @@
   }
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--page);color:var(--ink-1);
+body{margin:0;background:var(--page);color:var(--ink-1);word-break:keep-all;overflow-wrap:break-word;
   font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
 .wrap{max-width:900px;margin:0 auto;padding:16px 14px 40px}
 header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:6px 0 14px}
@@ -91,7 +91,7 @@ function chartSVG(closes, A){
     ${A.m60?`<path d="${path(A.MA60)}" fill="none" stroke="var(--warn)" stroke-width="1.6" opacity=".8"/>`:""}
     <path d="${path(A.MA20)}" fill="none" stroke="var(--series-1)" stroke-width="1.8"/>
     <path d="${path(closes)}" fill="none" stroke="var(--ink-1)" stroke-width="1.4" opacity=".8"/>
-    <text x="${padL+2}" y="${padT}" font-size="10.5" fill="var(--ink-3)">─ 주가 · <tspan fill="var(--series-1)">─ 20일선</tspan>${A.m60?` · <tspan fill="var(--warn)">─ 60일선</tspan>`:""} · 빨강 점선=저항(전고점) · 파랑 점선=지지(최근 저점)</text>
+    <text x="${padL+2}" y="${padT}" font-size="13.5" fill="var(--ink-3)">─ 주가 · <tspan fill="var(--series-1)">─ 20일</tspan>${A.m60?` · <tspan fill="var(--warn)">─ 60일</tspan>`:""} · <tspan fill="var(--up)">┄저항</tspan>·<tspan fill="var(--down)">┄지지</tspan></text>
   </svg>`;
 }
 

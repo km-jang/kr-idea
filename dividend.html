@@ -27,7 +27,7 @@
   }
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--page);color:var(--ink-1);
+body{margin:0;background:var(--page);color:var(--ink-1);word-break:keep-all;overflow-wrap:break-word;
   font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 .wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
@@ -72,6 +72,10 @@ button:hover{color:var(--ink-1)}
 .empty{color:var(--ink-3);font-size:13px;padding:14px;text-align:center}
 footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   font-size:11.5px;color:var(--ink-3);line-height:1.7}
+.scrollhint{display:none}
+@media (max-width:520px){
+  .scrollhint{display:block;font-size:11px;color:var(--ink-3);text-align:right;padding:4px 4px 0}
+}
 @media (max-width:520px){
   body{font-size:14px}
   .wrap{padding:10px 10px 50px}
@@ -319,7 +323,14 @@ function notices(d){
 
 fetch("data.json?t="+Date.now())
   .then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); })
-  .then(d=>{ render(d); initPlanner(); })
+  .then(d=>{ render(d); initPlanner();
+    document.querySelectorAll(".tblwrap").forEach(w=>{
+      if(w.scrollWidth > w.clientWidth + 4 && !(w.nextElementSibling||{}).classList?.contains("scrollhint")){
+        const h = document.createElement("div"); h.className = "scrollhint";
+        h.textContent = "⇠ 표를 옆으로 밀면 더 보여요"; w.parentNode.insertBefore(h, w.nextSibling);
+      }
+    });
+  })
   .catch(err=>{
     document.getElementById("stamp").textContent = "데이터를 불러오지 못했습니다 ("+esc(err.message)+")";
   });

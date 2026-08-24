@@ -393,7 +393,7 @@ def compass_lines(data, brief=False):
 
 SCREEN_LABELS = {"vacancy": "🏦 빈집털이", "pullback": "🎯 대장주 눌림목",
                  "hotmoney": "🔥 종합 수급", "stealth": "🤫 몰래 매집",
-                 "gate52": "🚪 신고가 문앞"}
+                 "gate52": "🚪 신고가 문앞", "turnflow": "🚰 수급 물꼬"}
 
 def screen_lines(data):
     """조건 검색 적중 블록 (저녁 요약용) - 적중 없으면 빈 리스트."""

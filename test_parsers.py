@@ -1744,6 +1744,94 @@ def test_kill_watch_from_fixture():
     assert collect.build_kill_watch("/없는폴더", [], "2026-08-07") == []
 
 
+def test_turnflow_screen():
+    """V5.9 수급 물꼬: 5일 순매도 → 당일 대량 순매수 유턴 감지."""
+    import tempfile
+    base = {"price": 20000, "volume": 500000, "mktcap_100m": 5000,
+            "closes": [20000] * 21, "d1_date": "2026-08-24"}
+    hit = dict(base, code="T00001", name="유턴주",
+               f_5d_amt_100m=-120, f_1d_amt_100m=45, i_5d_amt_100m=0, i_1d_amt_100m=0)
+    still_sell = dict(base, code="T00002", name="계속파는주",
+                      f_5d_amt_100m=-120, f_1d_amt_100m=-10)
+    always_buy = dict(base, code="T00003", name="원래사는주",
+                      f_5d_amt_100m=200, f_1d_amt_100m=45)
+    stale = dict(hit, code="T00004", name="수급미확정주", d1_date="2026-08-23")
+    inst = dict(base, code="T00005", name="기관유턴주",
+                f_5d_amt_100m=0, f_1d_amt_100m=0, i_5d_amt_100m=-80, i_1d_amt_100m=35)
+    with tempfile.TemporaryDirectory() as td:
+        scr = collect.build_screens([hit, still_sell, always_buy, stale, inst],
+                                    td, "2026-08-24")
+    codes = {h["code"] for h in scr["turnflow"]}
+    assert codes == {"T00001", "T00005"}, scr["turnflow"]
+    assert "유턴" in scr["turnflow"][0]["why"]
+
+
+def test_research_report_parse():
+    """V5.9 리포트 레이더: 네이버 리서치 목록 파서 (고정 픽스처)."""
+    html_fix = """
+    <table class="type_1">
+    <tr><th>종목명</th><th>제목</th><th>증권사</th><th>첨부</th><th>작성일</th><th>조회수</th></tr>
+    <tr>
+      <td style="padding-left:10"><a href="/item/main.naver?code=005930" class="stock_item">삼성전자</a></td>
+      <td><a href="company_read.naver?nid=12345&amp;page=1">HBM &amp; 파운드리, 두 개의 엔진</a></td>
+      <td>미리내증권</td>
+      <td class="file"><a href="x.pdf"></a></td>
+      <td class="date">26.08.24</td><td class="date">1,234</td>
+    </tr>
+    <tr><td colspan="6">광고 배너 행 (파서가 건너뛰어야 함)</td></tr>
+    <tr>
+      <td><a href="/item/main.naver?code=012450">한화에어로스페이스</a></td>
+      <td><a href="company_read.naver?nid=12346&amp;page=1">수주 잔고의 재평가</a></td>
+      <td>가온투자증권</td>
+      <td class="file"></td>
+      <td class="date">26.08.22</td><td class="date">99</td>
+    </tr>
+    </table>"""
+    rows = collect.parse_research_html(html_fix)
+    assert len(rows) == 2, rows
+    assert rows[0]["code"] == "005930" and rows[0]["name"] == "삼성전자"
+    assert rows[0]["title"] == "HBM & 파운드리, 두 개의 엔진"      # HTML 엔티티 복원
+    assert rows[0]["broker"] == "미리내증권" and rows[0]["date"] == "26.08.24"
+    assert rows[0]["nid"] == "12345"
+    assert collect.parse_research_html("") == []
+    assert collect.parse_research_html("<html>구조가 전혀 다른 페이지</html>") == []
+    # build_reports: 유니버스 필터 + 최신일만 (자기 적응형 날짜 기준)
+    stocks = [{"code": "005930"}, {"code": "012450"}]
+    out = collect.build_reports(rows, stocks)
+    assert len(out) == 1 and out[0]["code"] == "005930", out   # 26.08.24가 최신일
+    assert collect.build_reports(rows, [{"code": "000000"}]) == []
+    assert collect.build_reports([], stocks) == []
+
+
+def test_phase_track_from_fixture():
+    """V5.9 돌파 국면 추적: 돌파일 판정·첫 조정 관찰·추격 성적 채점 검증."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        hd = os.path.join(td, "hist"); os.makedirs(hd)
+        mk = lambda near, chg, px: {"code": "A", "name": "돌파주", "near_52w_pct": near,
+                                    "change_pct": chg, "price": px}
+        # d1 평범 → d2 돌파(첫 진입) → d3 상승 → 오늘(d4) 음봉 = 첫 조정 1일차
+        seq = [("2026-08-03", mk(90.0, 1.0, 10000)),
+               ("2026-08-04", mk(100.0, 5.0, 10500)),   # 돌파일
+               ("2026-08-05", mk(100.5, 2.0, 10710))]   # 추격 채점: 10500→10710 = +2%
+        for day, s in seq:
+            (Path(hd) / f"{day}.json").write_text(
+                json.dumps({"market_date": day, "all_stocks": [s]}, ensure_ascii=False),
+                encoding="utf-8")
+        today = [dict(mk(98.0, -1.5, 10550), mktcap_100m=5000,
+                      volume=int(60e8 / 10550))]        # 오늘 음봉, 유동성 통과
+        pt = collect.build_phase_track(hd, today, "2026-08-06")
+        assert pt["chase"]["n"] == 1 and abs(pt["chase"]["avg_pct"] - 2.0) < 0.01, pt
+        w = pt["watch"]
+        assert len(w) == 1 and w[0]["code"] == "A", pt
+        assert w[0]["bdays"] == 2 and w[0]["adj"] == 1, w     # 돌파 2일차 · 조정 1일차
+        # ETF는 관찰 제외
+        today_etf = [dict(today[0], name="KODEX 200")]
+        pt2 = collect.build_phase_track(hd, today_etf, "2026-08-06")
+        assert pt2["watch"] == [], pt2
+    assert collect.build_phase_track("/없는폴더", [], "2026-08-06") == {}
+
+
 def test_holidays_2027():
     """2027년 휴장일 선등록 검증 (2026-08-21 월력요항 기준. 12월 KRX 공지 대조 예정)."""
     import holidays_kr as h

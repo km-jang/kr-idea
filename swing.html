@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>5일선 스윙 레이더</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="5일 이동평균선을 중심으로 단기(5일 이내) 스윙 후보를 고르는 레이더 · 조건검색 5종 통합, 진입·손절·목표 제시">
+<meta name="description" content="5일 이동평균선을 중심으로 단기(5일 이내) 스윙 후보를 고르는 레이더 · 조건검색 6종 통합, 진입·손절·목표 제시">
 <meta name="theme-color" content="#0b0b0b">
 <link rel="icon" type="image/png" href="icon-192.png">
 <style>
@@ -27,7 +27,7 @@
   }
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--page);color:var(--ink-1);
+body{margin:0;background:var(--page);color:var(--ink-1);word-break:keep-all;overflow-wrap:break-word;
   font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
   font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 .wrap{max-width:960px;margin:0 auto;padding:16px 14px 60px}
@@ -59,7 +59,7 @@ h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
 .tag.warn{color:#fff;background:var(--warn)}
 .tag a{color:inherit;text-decoration:none}
 .plan{display:flex;gap:6px;margin-top:11px}
-.plan .box{flex:1;text-align:center;background:var(--chip-bg);border-radius:8px;padding:7px 4px}
+.plan .box{flex:1 1 0;min-width:0;text-align:center;background:var(--chip-bg);border-radius:8px;padding:7px 4px}
 .plan .k{font-size:11px;color:var(--ink-3);display:block}
 .plan .v{font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .plan .p{font-size:11px;font-weight:600;white-space:nowrap}
@@ -78,7 +78,10 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   body{font-size:14px}
   .wrap{padding:10px 10px 50px}
   header.top h1{font-size:17px}
-  .cards{grid-template-columns:1fr}
+  .cards{grid-template-columns:minmax(0,1fr)}
+  .card{min-width:0}
+  .plan .v{font-size:13px}
+  .plan .p{display:block}   /* 값과 %가 밀착돼 보이던 것을 제 줄로 */
 }
 </style>
 </head>
@@ -94,7 +97,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <h3>이 도구가 보는 것</h3>
     <b>5일 이동평균선</b>을 중심축으로, 향후 <b>5일 이내 단기 스윙</b> 후보를 100점으로 채점합니다:
     이평선 배열·추세(30) · 외인/기관 수급 연속(25) · 진입 위치(20) · 유동성(15) · 촉매(10).
-    기존 <b>조건검색 5종</b>(빈집털이·눌림목·종합수급·몰래매집·신고가문앞)은 이 안에 <b>셋업 태그</b>로 통합돼 있습니다.
+    기존 <b>조건검색 6종</b>(빈집털이·눌림목·종합수급·몰래매집·신고가문앞·수급물꼬)은 이 안에 <b>셋업 태그</b>로 통합돼 있습니다.
     💣지뢰·악재 공시·상한가 임박(추격 위험) 종목은 자동으로 걸러냅니다. 각 후보엔
     <b>진입가·손절(20일선=생명선 기준)·목표(손익비 2:1)</b>를 함께 제시합니다.<br>
     <span style="color:var(--ink-3)">솔직한 한계: 이 신호가 실제로 통했는지(적중률)는 5영업일 기록이 쌓인 뒤 아래 성적표에 나타납니다.
@@ -118,6 +121,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <div class="bars" id="killBox" style="font-size:13.5px;line-height:2"></div>
   </section>
 
+  <section id="phaseSec" style="display:none">
+    <h2>🪜 돌파 국면 관찰</h2>
+    <p class="sub">신고가를 갓 뚫은 종목의 "첫 조정 1~2일차" 목록 · 추격하지 말고 기다렸다 보자는 관찰 도구입니다 (매수 신호 아님)</p>
+    <div class="bars" id="phaseBox" style="font-size:13.5px;line-height:2"></div>
+  </section>
+
   <section id="reviewSec" style="display:none">
     <h2>📋 지난 스윙 성적표</h2>
     <p class="sub" id="reviewSub"></p>
@@ -131,7 +140,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
   </section>
 
   <footer>
-    자료: 네이버 금융 시세·수급 + 이동평균선 계산 · 조건검색 5종 통합 · 진입/손절/목표는 이동평균선·변동성 기반 <b>기계적 제안</b>입니다.<br>
+    자료: 네이버 금융 시세·수급 + 이동평균선 계산 · 조건검색 6종 통합 · 진입/손절/목표는 이동평균선·변동성 기반 <b>기계적 제안</b>입니다.<br>
     투자 참고 자료이며 매수·매도 추천이 아닙니다. 손절은 반드시 지키세요. · <a href="index.html" style="color:var(--series-1-deep)">메인 대시보드로</a>
   </footer>
 </div>
@@ -237,6 +246,29 @@ fetch("data.json?t="+Date.now())
       mycodes = (JSON.parse(localStorage.getItem("kr_idea_port")||"[]")).map(h=>h.code)
         .concat(JSON.parse(localStorage.getItem("kr_idea_watchlist")||"[]"));
     }catch(e){}
+
+    // 🪜 돌파 국면 (V5.9): 신고가 돌파 후 첫 조정 관찰 + 추격 vs 조정대기 성적 (조건부 표시)
+    const pt = d.phase_track || {};
+    const ptw = pt.watch || [];
+    const pstat = (s, label) => (s && s.n)
+      ? `${label} ${s.n}건 · 승률 ${Math.round(s.win/s.n*100)}% · 다음날 평균 <span class="${s.avg_pct>0?"up":s.avg_pct<0?"down":"flat"}">${s.avg_pct>0?"+":""}${s.avg_pct}%</span>${s.n<30?' <span style="color:var(--warn);font-size:11px;font-weight:700">🌱 표본 부족</span>':""}`
+      : `${label} 집계 준비 중`;
+    if(ptw.length || (pt.chase && pt.chase.n)){
+      document.getElementById("phaseSec").style.display = "";
+      const nm = w => `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${w.code}">${esc(w.name)}</a>`;
+      const groups = [1,2].map(adj=>{
+        const rows = ptw.filter(w=>w.adj===adj);
+        if(!rows.length) return "";
+        return `<div><b>조정 ${adj}일차</b> · ` + rows.map(w=>
+          `<span style="color:var(--ink-3);font-size:11.5px">[돌파 ${w.bdays}일차]</span> ${nm(w)} <span class="${w.change_pct<0?"down":"up"}" style="font-size:11.5px">${w.change_pct>0?"+":""}${w.change_pct}%</span>`
+        ).join(" · ") + `</div>`;
+      }).join("");
+      document.getElementById("phaseBox").innerHTML =
+        (ptw.length ? groups : `<div style="color:var(--ink-3)">오늘은 돌파 후 첫 조정에 들어간 종목이 없습니다.</div>`) +
+        `<div style="font-size:12px;color:var(--ink-3);margin-top:9px;border-top:1px dashed var(--grid);padding-top:7px">
+          자동 채점 성적: ${pstat(pt.chase, "🏃 돌파 당일 추격")} / ${pstat(pt.pullback, "🪜 조정 1~2일차 매수")}<br>
+          숫자가 증명하기 전까지는 둘 다 매수 근거가 아닙니다 · 이 통계가 이 도구의 존재 이유입니다</div>`;
+    }
 
     // ⏱ 킬 스위치 (S16): 시간·거래대금 규율에 걸린 최근 스윙 후보 (조건부 표시)
     const kw = d.kill_watch || [];
