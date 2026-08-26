@@ -2343,7 +2343,7 @@ def build_wave_pullback(hist_dir, stocks, market_date, cfg=None):
         except Exception:
             continue
         m = {s["code"]: (s.get("price"), s.get("volume") or 0, s.get("change_pct"))
-             for s in d.get("all_stocks") or [] if s.get("code")}
+             for s in d.get("all_stocks") or [] if s.get("code") and s.get("price")}
         if m:
             days.append((f.stem, m))
     today = {s["code"]: (s.get("price"), s.get("volume") or 0, s.get("change_pct"))
@@ -2373,7 +2373,7 @@ def build_wave_pullback(hist_dir, stocks, market_date, cfg=None):
             adj_sum = 0.0
             for j in range(i + 1, min(i + 1 + cfg["adj_max"], len(days) - 1)):
                 v = days[j][1].get(c)
-                if not v or v[2] is None or v[0] is None or v[2] >= 0:
+                if not v or v[2] is None or not v[0] or v[2] >= 0:
                     break                      # 조정 구간 종료
                 adj_sum += turn(j, c)
                 nx = days[j + 1][1].get(c)
@@ -2462,7 +2462,7 @@ def build_phase_track(hist_dir, stocks, market_date, cfg=None):
         except Exception:
             continue
         m = {s["code"]: (s.get("near_52w_pct"), s.get("change_pct"), s.get("price"))
-             for s in d.get("all_stocks") or [] if s.get("code")}
+             for s in d.get("all_stocks") or [] if s.get("code") and s.get("price")}
         if m:
             days.append((f.stem, m))
     today = {s["code"]: (s.get("near_52w_pct"), s.get("change_pct"), s.get("price"))
@@ -2495,7 +2495,7 @@ def build_phase_track(hist_dir, stocks, market_date, cfg=None):
             run = 0
             for j in range(i + 1, min(i + 1 + cfg["look_days"], len(days) - 1)):
                 v = days[j][1].get(c)
-                if not v or v[1] is None or v[2] is None:
+                if not v or v[1] is None or not v[2]:
                     break
                 if v[1] < 0:
                     run += 1
@@ -2961,6 +2961,14 @@ def run_full(max_universe=None, out_path=None):
         errors.append(f"reports: {e}")
 
     print("[5/5] 품질 검증/점수화...")
+    # 가격 0짜리 불량 레코드 제거 (2026-08-25 실사고: 수집 실패한 ETN 몇 종이
+    # price 0·등락 -100%로 실려 들어와 파생 계산을 터뜨렸다. 소스 장애로 전체가
+    # 0이 되는 경우엔 아래 품질 가드가 유니버스 급감으로 그대로 잡아낸다)
+    junk = [s for s in stocks if not s.get("price")]
+    if junk:
+        stocks = [s for s in stocks if s.get("price")]
+        print(f"  → 가격 없는 불량 레코드 {len(junk)}건 제외 "
+              f"({', '.join((s.get('name') or '?') for s in junk[:3])})")
     fatal = validate_collection(stocks)
     if fatal:
         print("수집 품질 미달 - 갱신 중단 (직전 데이터 유지):", *fatal, sep="\n  ")

@@ -1890,6 +1890,35 @@ def test_dump_scan_and_stats():
     assert collect.build_dump_stats("/없는파일.json", "/없는폴더") == {}
 
 
+def test_zero_price_records_are_ignored():
+    """2026-08-25 실사고 회귀 테스트: 가격 0짜리 불량 레코드(수집 실패한 ETN 등)가
+    섞여도 돌파 국면·파동 에너지가 예외 없이 동작해야 한다.
+    (당시 phase_track이 ZeroDivisionError로 통째로 죽어 기능이 사라졌음)"""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        hd = os.path.join(td, "hist"); os.makedirs(hd)
+        junk = {"code": "999990", "name": "불량 ETN", "price": 0.0,
+                "volume": 0, "change_pct": -100.0, "near_52w_pct": 100.0}
+        good = lambda px, vol, chg, near: {"code": "100010", "name": "정상주", "price": px,
+                                           "volume": vol, "change_pct": chg,
+                                           "near_52w_pct": near}
+        seq = [("2026-08-03", good(10000, 100000, 1.0, 90.0)),
+               ("2026-08-04", good(11000, int(500e8 / 11000), 10.0, 100.0)),
+               ("2026-08-05", good(10800, int(100e8 / 10800), -1.8, 99.0)),
+               ("2026-08-06", good(11200, 200000, 3.7, 100.0))]
+        for day, s in seq:
+            (Path(hd) / f"{day}.json").write_text(json.dumps(
+                {"market_date": day, "all_stocks": [s, dict(junk)]}, ensure_ascii=False),
+                encoding="utf-8")
+        today = [dict(good(10900, 80000, -0.9, 98.0), mktcap_100m=5000), dict(junk)]
+        pt = collect.build_phase_track(hd, today, "2026-08-07")   # 예외 없이 돌아야 한다
+        wp = collect.build_wave_pullback(hd, today, "2026-08-07")
+        assert isinstance(pt, dict) and isinstance(wp, dict)
+        assert pt.get("chase", {}).get("n", 0) >= 1, pt          # 정상주는 정상 채점
+        assert "999990" not in {w["code"] for w in pt.get("watch", [])}
+        assert "999990" not in {w["code"] for w in wp.get("watch", [])}
+
+
 def test_phase_track_from_fixture():
     """V5.9 돌파 국면 추적: 돌파일 판정·첫 조정 관찰·추격 성적 채점 검증."""
     import tempfile, os

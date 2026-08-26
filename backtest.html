@@ -174,7 +174,7 @@ async function load(){
         if(!all.length) continue;
         const map = new Map();
         all.forEach(s=>{
-          if(!s.code || s.price == null) return;
+          if(!s.code || !s.price) return;   /* 가격 0 불량 레코드 배제 (2026-08-25 실사고) */
           map.set(s.code, { p: s.price,
             f: s.flow_score||0, v: s.value_score||0, m: s.mom_score||0, dsc: s.disc_score||0,
             mc: s.mktcap_100m||0, to: (s.price*(s.volume||0))/1e8 });
