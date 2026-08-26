@@ -1377,6 +1377,42 @@ def build_chase_stats(scans_path, hist_dir, max_records=60):
             "avg_pct": round(sum(rets) / len(rets), 2)}
 
 
+def build_dump_stats(scans_path, hist_dir, max_records=60):
+    """마감 투매 눌림 성적 (V6.0): 종가 스캔이 남긴 dumps 후보를 그날 확정 종가에
+    샀다고 가정하고 다음 기록일 종가로 채점한 누적 통계 (chase_stats와 같은 방식).
+    반환: {"n","win","avg_pct"} 또는 {}. 부가 기능이므로 실패 시 빈 dict."""
+    try:
+        records = json.loads(Path(scans_path).read_text(encoding="utf-8"))
+        files = sorted(Path(hist_dir).glob("*.json"))
+    except Exception:
+        return {}
+    days = []
+    for f in files:
+        try:
+            days.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    dates = [d.get("market_date") for d in days]
+    px = [{s.get("code"): s.get("price")
+           for s in d.get("all_stocks") or [] if s.get("code")} for d in days]
+    rets = []
+    for r in records[-max_records:]:
+        dt = r.get("date")
+        if dt not in dates:
+            continue
+        i = dates.index(dt)
+        if i + 1 >= len(days):
+            continue
+        for c in r.get("dumps") or []:
+            p0, p1 = px[i].get(c.get("code")), px[i + 1].get(c.get("code"))
+            if p0 and p1:
+                rets.append((p1 / p0 - 1) * 100)
+    if not rets:
+        return {}
+    return {"n": len(rets), "win": sum(1 for x in rets if x > 0),
+            "avg_pct": round(sum(rets) / len(rets), 2)}
+
+
 def build_swing_stats(hist_dir, today_review=None):
     """스윙 누적 통계 (V5.7): history에 남은 일별 swing_review(회차별 채점)를 회차 날짜
     기준으로 중복 없이 모아 전체 표본의 승률·평균을 집계. 최신 1회차만 보이던 스윙 성적을
@@ -1775,6 +1811,14 @@ def build_sample():
                                             "change_pct": -1.2}],
                                  "pullback": {"n": 6, "win": 3, "avg_pct": 0.8},
                                  "chase": {"n": 17, "win": 15, "avg_pct": -0.89}},
+                    wave_pullback={"watch": [{"code": "247540", "name": "가상소재",
+                                              "adj": 1, "ratio": 0.24, "band": "tight",
+                                              "surge_chg": 11.2, "change_pct": -2.4,
+                                              "price": 41300}],
+                                   "stats": {"tight": {"n": 19, "win": 11, "avg_pct": 1.94},
+                                             "mid": {"n": 83, "win": 39, "avg_pct": -0.47},
+                                             "loose": {"n": 290, "win": 133, "avg_pct": -1.18}}},
+                    dump_stats={"n": 12, "win": 7, "avg_pct": 1.1},
                     reports=[{"code": "005930", "name": "삼성전자", "broker": "미리내증권",
                               "title": "HBM 사이클의 두 번째 파도", "date": "26.07.10",
                               "nid": "sample"},
@@ -2251,6 +2295,138 @@ def build_graduates(hist_dir, stocks, current_codes, market_date, lookback=21):
 
 
 # ---------------------------------------------------------------------------
+# 🌊 파동 에너지 눌림 (V6.0): 눌림의 "질"을 거래대금 비율로 등급화
+#   눌림매매 변형 ③에서 착안. 주가가 몇 % 밀렸는지가 아니라 "상승할 때 터진
+#   거래대금 대비 조정 때 나온 거래대금의 비율"을 본다. 비율이 낮을수록 팔 사람이
+#   안 팔고 있다는 뜻이고, 우리는 종가·거래량만으로 이 비율을 정확히 계산할 수 있다.
+#   (시가·고가가 없어 장대양봉 중심값·윗꼬리는 못 보지만, 이 비율은 온전히 가능)
+# ---------------------------------------------------------------------------
+
+CONFIG_WAVE = {
+    "surge_chg": 7.0,        # 파동 시작 판정: 이 % 이상 급등한 날
+    "surge_turnover": 300,   # 파동 시작 판정: 그날 거래대금(억) 하한
+    "adj_max": 3,            # 조정 며칠차까지 관찰할지 (연속 음봉)
+    "min_mktcap": 1000,      # 최소 시총 (억)
+    "min_turnover": 30,      # 오늘 관찰 대상의 최소 거래대금 (억)
+    "band_tight": 0.30,      # 이 비율 미만이면 "거래 실종" (최상급 눌림)
+    "band_mid": 0.60,        # 이 비율 미만이면 "잘 식음", 이상이면 "아직 활발"
+}
+
+
+def wave_band(ratio, cfg=None):
+    """에너지 비율 → 등급 키 (tight=거래 실종 · mid=잘 식음 · loose=아직 활발)."""
+    cfg = cfg or CONFIG_WAVE
+    if ratio is None:
+        return None
+    if ratio < cfg["band_tight"]:
+        return "tight"
+    return "mid" if ratio < cfg["band_mid"] else "loose"
+
+
+def build_wave_pullback(hist_dir, stocks, market_date, cfg=None):
+    """파동 에너지 눌림. 반환 dict (실패 시 {}):
+      watch: 오늘 조정 중인 급등 종목 [{code,name,adj,ratio,band,surge_chg,change_pct,price}]
+      stats: 등급별 성적 {"tight"/"mid"/"loose": {"n","win","avg_pct"}}
+    조정 구간 종가 매수 → 다음날 종가로 채점하며, 히스토리 전체를 매일 다시 센다.
+    부가 기능이므로 어떤 실패에도 {}를 돌려주고 수집을 막지 않는다."""
+    cfg = cfg or CONFIG_WAVE
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))
+    except Exception:
+        return {}
+    days = []                                  # [(date, {code: (price, volume, chg)})]
+    for f in files:
+        if market_date and f.stem >= market_date:
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        m = {s["code"]: (s.get("price"), s.get("volume") or 0, s.get("change_pct"))
+             for s in d.get("all_stocks") or [] if s.get("code")}
+        if m:
+            days.append((f.stem, m))
+    today = {s["code"]: (s.get("price"), s.get("volume") or 0, s.get("change_pct"))
+             for s in stocks if s.get("code")}
+    metas = {s["code"]: s for s in stocks if s.get("code")}
+    if today:
+        days.append((market_date or "today", today))
+    if len(days) < 3:
+        return {}
+
+    def turn(i, c):
+        v = days[i][1].get(c)
+        return (v[0] or 0) * (v[1] or 0) / 1e8 if v else 0
+
+    def is_surge(i, c):
+        v = days[i][1].get(c)
+        return bool(v and v[2] is not None and v[2] >= cfg["surge_chg"]
+                    and turn(i, c) >= cfg["surge_turnover"])
+
+    # ① 등급별 성적 누적 (히스토리 전체)
+    acc = {}
+    for i in range(len(days) - 1):
+        for c in days[i][1]:
+            if not is_surge(i, c):
+                continue
+            up = turn(i, c)
+            adj_sum = 0.0
+            for j in range(i + 1, min(i + 1 + cfg["adj_max"], len(days) - 1)):
+                v = days[j][1].get(c)
+                if not v or v[2] is None or v[0] is None or v[2] >= 0:
+                    break                      # 조정 구간 종료
+                adj_sum += turn(j, c)
+                nx = days[j + 1][1].get(c)
+                if not (nx and nx[0]):
+                    continue
+                band = wave_band(adj_sum / up if up else None, cfg)
+                if not band:
+                    continue
+                acc.setdefault(band, []).append((nx[0] / v[0] - 1) * 100)
+    stats = {k: {"n": len(v), "win": sum(1 for x in v if x > 0),
+                 "avg_pct": round(sum(v) / len(v), 2)} for k, v in acc.items()}
+
+    # ② 오늘의 관찰: 조정 중인 급등 종목 + 현재까지의 에너지 비율
+    watch, t = [], len(days) - 1
+    for c, v in today.items():
+        if v[2] is None or v[2] >= 0 or not v[0]:
+            continue                           # 오늘이 음봉이어야 조정 중
+        s = metas.get(c) or {}
+        if is_index_product(s.get("name")):
+            continue
+        if (s.get("mktcap_100m") or 0) < cfg["min_mktcap"]:
+            continue
+        if turn(t, c) < cfg["min_turnover"]:
+            continue
+        run, k = 0, t                          # 오늘 포함 연속 음봉 수
+        while k >= 0:
+            vv = days[k][1].get(c)
+            if vv and vv[2] is not None and vv[2] < 0:
+                run += 1
+                k -= 1
+            else:
+                break
+        if not (1 <= run <= cfg["adj_max"]):
+            continue
+        si = t - run                           # 조정 직전 일 = 파동 시작 후보
+        if si < 0 or not is_surge(si, c):
+            continue
+        up = turn(si, c)
+        adj_sum = sum(turn(j, c) for j in range(si + 1, t + 1))
+        ratio = adj_sum / up if up else None
+        band = wave_band(ratio, cfg)
+        if not band:
+            continue
+        watch.append({"code": c, "name": s.get("name"), "adj": run,
+                      "ratio": round(ratio, 2), "band": band,
+                      "surge_chg": days[si][1][c][2], "change_pct": v[2],
+                      "price": v[0]})
+    order = {"tight": 0, "mid": 1, "loose": 2}
+    watch.sort(key=lambda x: (order.get(x["band"], 9), x["ratio"]))
+    return {"watch": watch[:12], "stats": stats}
+
+
+# ---------------------------------------------------------------------------
 # 🪜 돌파 국면 추적기 (V5.9): 신고가 돌파 후 "첫 조정" 관찰 + 성적 자동 채점
 #   마켓스타PRO의 국면 프레임에서 착안하되, 실시간 알람이 아니라 일배치 관찰과
 #   통계 검증으로 번역했다 (안티 FOMO: 돌파 당일 추격의 실제 성적을 함께 보여줌).
@@ -2634,7 +2810,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
              mines=None, swing=None, swing_review=None, chart_pack=None,
              screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None,
-             phase_track=None, reports=None):
+             phase_track=None, reports=None, wave_pullback=None, dump_stats=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -2694,6 +2870,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "kill_watch": kill_watch or [],
         "phase_track": phase_track or {},
         "reports": reports or [],
+        "wave_pullback": wave_pullback or {},
+        "dump_stats": dump_stats or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -2877,6 +3055,20 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"phase_track: {e}")
         phase_track = {}
+    # 파동 에너지 눌림 (V6.0) — 부가 기능, 실패해도 수집을 막지 않는다
+    try:
+        wave_pullback = build_wave_pullback(hist_dir, stocks, market_date)
+        if wave_pullback.get("watch"):
+            print(f"  → 파동 에너지 눌림 관찰 {len(wave_pullback['watch'])}종목")
+    except Exception as e:
+        errors.append(f"wave_pullback: {e}")
+        wave_pullback = {}
+    # 마감 투매 눌림 성적 (V6.0) — 부가 기능, 실패해도 수집을 막지 않는다
+    try:
+        dump_stats = build_dump_stats(ROOT / "scans.json", hist_dir)
+    except Exception as e:
+        errors.append(f"dump_stats: {e}")
+        dump_stats = {}
     # 차트 카드 팩 — 부가 기능이므로 실패해도 핵심 수집을 막지 않는다
     try:
         targets = chart_targets(ideas, swing, read_watchlist_codes())
@@ -2901,7 +3093,8 @@ def run_full(max_universe=None, out_path=None):
                     swing=swing, swing_review=swing_review, chart_pack=chart_pack,
                     screen_stats=screen_stats, chase_stats=chase_stats,
                     swing_stats=swing_stats, kill_watch=kill_watch,
-                    phase_track=phase_track, reports=reports)
+                    phase_track=phase_track, reports=reports,
+                    wave_pullback=wave_pullback, dump_stats=dump_stats)
 
 
 def main():

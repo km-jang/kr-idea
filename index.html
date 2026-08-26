@@ -2457,6 +2457,16 @@ function openTrust(){
   rows.push(pb && pb.n
     ? ["🪜 조정 대기 매수", `${pb.n}건`, `승률 ${Math.round(pb.win/pb.n*100)}% · 평균 ${pctTxt(pb.avg_pct)}`, trustGrade(pb.n)]
     : ["🪜 조정 대기 매수", "·", "집계 준비 중", trustGrade(0)]);
+  /* ⑧ 파동 에너지 눌림 (V6.0): 거래 실종 등급의 조정 매수 성적 (최상급 밴드만 대표로) */
+  const wt = ((d.wave_pullback||{}).stats||{}).tight;
+  rows.push(wt && wt.n
+    ? ["🌊 눌림(거래 실종)", `${wt.n}건`, `승률 ${Math.round(wt.win/wt.n*100)}% · 평균 ${pctTxt(wt.avg_pct)}`, trustGrade(wt.n)]
+    : ["🌊 눌림(거래 실종)", "·", "집계 준비 중", trustGrade(0)]);
+  /* ⑨ 마감 투매 눌림 (V6.0) */
+  const ds = d.dump_stats;
+  rows.push(ds && ds.n
+    ? ["🩸 마감 투매 눌림", `${ds.n}건`, `승률 ${Math.round(ds.win/ds.n*100)}% · 평균 ${pctTxt(ds.avg_pct)}`, trustGrade(ds.n)]
+    : ["🩸 마감 투매 눌림", "·", "집계 준비 중", trustGrade(0)]);
   const body = rows.map(([nm, n, perf, g]) =>
     `<tr>
       <td style="padding:6px 2px;font-size:12px;word-break:keep-all">${nm}</td>

@@ -127,6 +127,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--grid);
     <div class="bars" id="phaseBox" style="font-size:13.5px;line-height:2"></div>
   </section>
 
+  <section id="waveSec" style="display:none">
+    <h2>🌊 파동 에너지 눌림</h2>
+    <p class="sub">급등한 날 터진 거래대금 대비, 조정 중 나온 거래대금의 비율 · 비율이 낮을수록 "팔 사람이 아직 안 팔았다"는 뜻입니다 (관찰용 · 매수 신호 아님)</p>
+    <div class="bars" id="waveBox" style="font-size:13.5px;line-height:2"></div>
+  </section>
+
   <section id="reviewSec" style="display:none">
     <h2>📋 지난 스윙 성적표</h2>
     <p class="sub" id="reviewSub"></p>
@@ -268,6 +274,33 @@ fetch("data.json?t="+Date.now())
         `<div style="font-size:12px;color:var(--ink-3);margin-top:9px;border-top:1px dashed var(--grid);padding-top:7px">
           자동 채점 성적: ${pstat(pt.chase, "🏃 돌파 당일 추격")} / ${pstat(pt.pullback, "🪜 조정 1~2일차 매수")}<br>
           숫자가 증명하기 전까지는 둘 다 매수 근거가 아닙니다 · 이 통계가 이 도구의 존재 이유입니다</div>`;
+    }
+
+    // 🌊 파동 에너지 눌림 (V6.0): 조정의 '질'을 거래대금 비율로 등급화 (조건부 표시)
+    const wp = d.wave_pullback || {};
+    const wpw = wp.watch || [];
+    const WB = {tight: {t:"거래 실종", c:"var(--up)"}, mid: {t:"잘 식음", c:"var(--warn)"},
+                loose:{t:"아직 활발", c:"var(--ink-3)"}};
+    if(wpw.length || (wp.stats && Object.keys(wp.stats).length)){
+      document.getElementById("waveSec").style.display = "";
+      const nm2 = w => `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${w.code}">${esc(w.name)}</a>`;
+      const rows = wpw.map(w=>{
+        const b = WB[w.band] || WB.loose;
+        return `<div>${nm2(w)} <span style="color:${b.c};font-weight:700">${esc(b.t)} ${Math.round(w.ratio*100)}%</span>
+          <span style="color:var(--ink-3);font-size:11.5px">· 조정 ${w.adj}일차 · 급등일 +${w.surge_chg}% · 오늘 ${w.change_pct}%</span></div>`;
+      }).join("");
+      const st = wp.stats || {};
+      const line = k => {
+        const s = st[k];
+        const b = WB[k];
+        if(!s || !s.n) return `<span style="color:var(--ink-3)">${b.t} 집계 준비 중</span>`;
+        return `<span style="color:${b.c};font-weight:700">${b.t}</span> ${s.n}건 · 승률 ${Math.round(s.win/s.n*100)}% · 평균 <span class="${s.avg_pct>0?"up":s.avg_pct<0?"down":"flat"}">${s.avg_pct>0?"+":""}${s.avg_pct}%</span>`;
+      };
+      document.getElementById("waveBox").innerHTML =
+        (wpw.length ? rows : `<div style="color:var(--ink-3)">오늘은 급등 후 조정에 들어간 종목이 없습니다.</div>`) +
+        `<div style="font-size:12px;color:var(--ink-3);margin-top:9px;border-top:1px dashed var(--grid);padding-top:7px">
+          자동 채점 (조정 종가 매수 → 다음날):<br>${line("tight")}<br>${line("mid")}<br>${line("loose")}<br>
+          비율이 낮은 쪽이 실제로 나은지를 이 숫자가 매일 검증합니다 · 표본이 적은 동안은 참고만</div>`;
     }
 
     // ⏱ 킬 스위치 (S16): 시간·거래대금 규율에 걸린 최근 스윙 후보 (조건부 표시)

@@ -44,6 +44,24 @@ CONFIG_SCAN = {
     "top_n": 5,              # 후보 개수
 }
 
+# --- 마감 투매 눌림 (V6.0) -------------------------------------------------
+# 눌림매매 변형 ④: 재료가 살아있는 주도주가 장 막판 데이트레이더 청산 물량에
+# 밀리는 구간을 관찰한다. 이 스캔은 실제로 15:00 전후에 실행되므로(크론 14:48 +
+# 지연 실측 15:01~15:04) 전략이 노리는 창과 겹친다. 실시간 시세에 당일 고가가
+# 실려오므로 "고가 대비 얼마나 밀렸나"를 그 자리에서 판정할 수 있다.
+# 강한 마감(scan_candidates)의 정반대 조건이라 같은 데이터로 역방향만 보면 된다.
+CONFIG_DUMP = {
+    "from_high": 0.94,       # 당일 고가 대비 이 비율 이하로 밀렸을 때 (= -6%↓)
+    "chg_floor": -12.0,      # 당일 등락률 하한 (그 아래는 재료 붕괴로 보고 제외)
+    "chg_cap": 12.0,         # 당일 등락률 상한 (아직 크게 오른 상태면 눌림이 아님)
+    "min_mktcap": 1000,      # 최소 시총 (억)
+    "min_turnover": 100,     # 최소 당일 거래대금 (억) - 관심이 살아있어야 한다
+    "lead_chg": 5.0,         # 재료 판정 ①: 전일 등락률 이 값 이상
+    "lead_near52": 90.0,     # 재료 판정 ②: 52주 고점 대비 이 % 이상
+    "lead_fstreak": 3,       # 재료 판정 ③: 외국인 연속 순매수 일수
+    "top_n": 5,
+}
+
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 # 종가매매도 개별 종목 발굴 도구: ETF 제외 (2026-08-21 소유자 절충안).
@@ -147,7 +165,54 @@ def scan_candidates(universe, quotes, cfg=None):
     return cands[:cfg["top_n"]]
 
 
-def build_scan_message(cands, now=None):
+def scan_dump_candidates(universe, quotes, cfg=None):
+    """마감 투매 눌림 후보 (V6.0): 재료 살아있는 주도주 x 당일 고가 대비 큰 밀림.
+
+    scan_candidates가 "막판까지 안 밀린 종목"을 뽑는다면 이쪽은 정반대로
+    "밀렸는데 재료는 살아있는 종목"을 뽑는다. 관찰용이며 매수 신호가 아니다.
+    반환: [{code,name,price,chg,from_high,score,notes}] (밀린 폭이 큰 순)."""
+    cfg = cfg or CONFIG_DUMP
+    out = []
+    for s in universe:
+        q = quotes.get(s.get("code"))
+        if not q or not q.get("price") or not q.get("high"):
+            continue
+        if is_index_product(s.get("name")):
+            continue
+        if not str(s.get("code") or "").endswith("0"):
+            continue                       # 우선주·ETN 제외 (본주의 그림자라 중복 신호)
+        price, high, chg = q["price"], q["high"], q.get("chg")
+        if chg is None or not (cfg["chg_floor"] <= chg <= cfg["chg_cap"]):
+            continue
+        ratio = price / high
+        if ratio > cfg["from_high"]:
+            continue                       # 아직 고가 근처 = 투매 눌림이 아니다
+        if (s.get("mktcap_100m") or 0) < cfg["min_mktcap"]:
+            continue
+        turnover = price * (q.get("volume") or 0) / 1e8
+        if turnover < cfg["min_turnover"]:
+            continue
+        # 재료 판정: 전일까지의 주도주 흔적이 하나라도 있어야 한다
+        reasons = []
+        if (s.get("change_pct") or 0) >= cfg["lead_chg"]:
+            reasons.append(f"전일 +{s['change_pct']:.1f}%")
+        if (s.get("near_52w_pct") or 0) >= cfg["lead_near52"]:
+            reasons.append(f"52주 고점의 {s['near_52w_pct']:.0f}%")
+        if (s.get("f_streak") or 0) >= cfg["lead_fstreak"]:
+            reasons.append(f"외인 {s['f_streak']}일 연속")
+        if not reasons:
+            continue
+        drop = (1 - ratio) * 100
+        notes = [f"고가 대비 -{drop:.1f}%", f"당일 {chg:+.1f}%",
+                 f"대금 {turnover:,.0f}억"] + reasons
+        out.append({"code": s["code"], "name": s["name"], "price": price,
+                    "chg": chg, "from_high": round(drop, 1),
+                    "score": round(drop + len(reasons) * 2, 1), "notes": notes})
+    out.sort(key=lambda c: -c["score"])
+    return out[:cfg["top_n"]]
+
+
+def build_scan_message(cands, now=None, dumps=None):
     e = html.escape
     now = now or datetime.now(KST)
     lines = [f"🔔 <b>종가매매 후보 스캔</b>  <i>({now:%H:%M} 기준)</i>", ""]
@@ -157,6 +222,12 @@ def build_scan_message(cands, now=None):
         for i, c in enumerate(cands, 1):
             lines.append(f"{i}. <b>{e(c['name'])}</b> {c['price']:,.0f}원")
             lines.append(f"   {e(' · '.join(c['notes']))}")
+    if dumps:
+        lines.append("")
+        lines.append("🩸 <b>마감 투매 눌림</b> <i>(재료는 살아있는데 막판에 밀린 종목 · 관찰용)</i>")
+        for c in dumps:
+            lines.append(f"· <b>{e(c['name'])}</b> {c['price']:,.0f}원 · {e(' · '.join(c['notes']))}")
+        lines.append("<i>투매 구간은 반등도 크지만 재료 소멸이면 더 밀립니다. 성적은 대시보드에 자동 집계됩니다.</i>")
     lines.append("")
     lines.append(f'📈 <a href="{SITE_URL}">대시보드</a>')
     lines.append("<i>단기 트레이딩은 위험이 큽니다. 스크리닝 결과일 뿐 매수 신호가 아닙니다.</i>")
@@ -296,12 +367,17 @@ def main():
         return
 
     cands = scan_candidates(universe, quotes)
-    msg = build_scan_message(cands)
-    print(f"[2/2] 후보 {len(cands)}건")
+    try:                                  # 부가 기능 - 실패해도 본 스캔은 나간다
+        dumps = scan_dump_candidates(universe, quotes)
+    except Exception as exc:
+        print(f"투매 눌림 스캔 실패(무시): {exc}")
+        dumps = []
+    msg = build_scan_message(cands, dumps=dumps)
+    print(f"[2/2] 후보 {len(cands)}건 · 투매 눌림 {len(dumps)}건")
     if args.dry_run:
         print(msg)
         return
-    save_scan_record(cands)               # 다음날 성적 채점용 기록
+    save_scan_record(cands, dumps=dumps)  # 다음날 성적 채점용 기록
     if not send_telegram(msg):
         sys.exit(1)
 
@@ -309,8 +385,9 @@ def main():
 SCANS_PATH = ROOT / "scans.json"
 
 
-def save_scan_record(cands, path=None, keep=30):
-    """스캔 결과를 scans.json에 누적 저장 (성과 검증 루프의 재료)."""
+def save_scan_record(cands, path=None, keep=30, dumps=None):
+    """스캔 결과를 scans.json에 누적 저장 (성과 검증 루프의 재료).
+    V6.0부터 마감 투매 눌림 후보를 "dumps" 키로 함께 남긴다 (키 추가만, 규칙 1 무해)."""
     path = Path(path or SCANS_PATH)
     try:
         records = json.loads(path.read_text(encoding="utf-8"))
@@ -320,15 +397,19 @@ def save_scan_record(cands, path=None, keep=30):
         records = []
     now = datetime.now(KST)
     records = [r for r in records if r.get("date") != now.strftime("%Y-%m-%d")]
-    records.append({
+    slim = lambda c: {"code": c["code"], "name": c["name"],
+                      "price": c["price"], "chg": c["chg"]}
+    rec = {
         "date": now.strftime("%Y-%m-%d"),
         "time": now.strftime("%H:%M"),
-        "candidates": [{"code": c["code"], "name": c["name"],
-                        "price": c["price"], "chg": c["chg"]} for c in cands],
-    })
+        "candidates": [slim(c) for c in cands],
+    }
+    if dumps:
+        rec["dumps"] = [dict(slim(c), from_high=c.get("from_high")) for c in dumps]
+    records.append(rec)
     path.write_text(json.dumps(records[-keep:], ensure_ascii=False, indent=1),
                     encoding="utf-8")
-    print(f"스캔 기록 저장: {len(cands)}건")
+    print(f"스캔 기록 저장: {len(cands)}건" + (f" · 투매 눌림 {len(dumps)}건" if dumps else ""))
 
 
 if __name__ == "__main__":

@@ -1803,6 +1803,93 @@ def test_research_report_parse():
     assert collect.build_reports([], stocks) == []
 
 
+def test_wave_pullback_from_fixture():
+    """V6.0 파동 에너지: 급등일 대금 대비 조정 대금 비율·등급·채점 검증."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        hd = os.path.join(td, "hist"); os.makedirs(hd)
+        # 급등일: +10%, 대금 500억 / 조정일: 대금 100억 → 비율 0.2 = tight
+        mk = lambda px, vol, chg: {"code": "A", "name": "파동주", "price": px,
+                                   "volume": vol, "change_pct": chg}
+        seq = [("2026-08-03", mk(10000, 100000, 1.0)),                 # 평범
+               ("2026-08-04", mk(11000, int(500e8/11000), 10.0)),      # 급등일 (대금 500억)
+               ("2026-08-05", mk(10800, int(100e8/10800), -1.8)),      # 조정 1일차 (대금 100억)
+               ("2026-08-06", mk(11200, 200000, 3.7))]                 # 다음날 +3.7% (채점)
+        for day, s in seq:
+            (Path(hd) / f"{day}.json").write_text(
+                json.dumps({"market_date": day, "all_stocks": [s]}, ensure_ascii=False),
+                encoding="utf-8")
+        today = [dict(mk(10900, int(80e8/10900), -0.9), mktcap_100m=5000)]
+        wp = collect.build_wave_pullback(hd, today, "2026-08-07")
+        # 채점: 조정일(10800) → 다음날(11200) = +3.70%, 비율 0.2 → tight
+        assert wp["stats"]["tight"]["n"] == 1, wp["stats"]
+        assert abs(wp["stats"]["tight"]["avg_pct"] - 3.70) < 0.05, wp["stats"]
+        # 오늘 관찰: 8/6이 급등일이 아니므로(+3.7%, 대금 미달) 후보 없음
+        assert wp["watch"] == [], wp["watch"]
+    # 등급 경계
+    assert collect.wave_band(0.10) == "tight"
+    assert collect.wave_band(0.45) == "mid"
+    assert collect.wave_band(0.90) == "loose"
+    assert collect.wave_band(None) is None
+    assert collect.build_wave_pullback("/없는폴더", [], "2026-08-07") == {}
+
+
+def test_dump_scan_and_stats():
+    """V6.0 마감 투매 눌림: 역방향 스캔 조건 + scans.json 기록 + 다음날 채점."""
+    import tempfile, os
+    import closing_scan as cs
+    universe = [
+        # 재료 있음(전일 +8%) + 고가 대비 -8% 밀림 → 후보
+        {"code": "100010", "name": "투매주", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000, "change_pct": 8.0, "near_52w_pct": 80, "f_streak": 0},
+        # 재료 없음 → 제외
+        {"code": "100020", "name": "무재료주", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000, "change_pct": 0.5, "near_52w_pct": 50, "f_streak": 0},
+        # 재료 있으나 고가 근처 유지 → 제외 (이건 기존 강한 마감 스캔의 몫)
+        {"code": "100030", "name": "강한마감주", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000, "change_pct": 9.0, "near_52w_pct": 95, "f_streak": 5},
+        # ETF → 제외
+        {"code": "100040", "name": "KODEX 200", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000, "change_pct": 0, "near_52w_pct": 99, "f_streak": 9},
+        # 우선주(코드 끝자리 0 아님) → 제외 (본주의 그림자라 중복 신호)
+        {"code": "100015", "name": "투매주우", "price": 10000, "volume": 100000,
+         "mktcap_100m": 5000, "change_pct": 8.0, "near_52w_pct": 80, "f_streak": 0},
+    ]
+    # 거래대금 하한 100억을 넘겨야 한다 (10,120원 x 150만주 = 약 152억)
+    quotes = {
+        "100010": {"price": 10120, "high": 11000, "volume": 1500000, "chg": 1.2},  # -8.0%
+        "100020": {"price": 10120, "high": 11000, "volume": 1500000, "chg": 1.2},
+        "100030": {"price": 10900, "high": 11000, "volume": 1500000, "chg": 9.0},  # -0.9%
+        "100040": {"price": 10120, "high": 11000, "volume": 1500000, "chg": 1.2},
+        "100015": {"price": 10120, "high": 11000, "volume": 1500000, "chg": 1.2},
+    }
+    dumps = cs.scan_dump_candidates(universe, quotes)
+    assert [c["code"] for c in dumps] == ["100010"], dumps
+    assert dumps[0]["from_high"] == 8.0, dumps[0]
+    assert any("전일 +8.0%" in n for n in dumps[0]["notes"]), dumps[0]["notes"]
+    # 메시지에 투매 블록이 붙는지 (없으면 아예 안 붙어야 함)
+    msg = cs.build_scan_message([], dumps=dumps)
+    assert "마감 투매 눌림" in msg and "투매주" in msg
+    assert "마감 투매 눌림" not in cs.build_scan_message([], dumps=[])
+    with tempfile.TemporaryDirectory() as td:
+        sp = os.path.join(td, "scans.json")
+        cs.save_scan_record([], path=sp, dumps=dumps)
+        rec = json.loads(open(sp).read())
+        assert rec[0]["dumps"][0]["code"] == "100010", rec
+        # 채점: 기록일을 과거로 돌리고 히스토리 2일 준비
+        rec[0]["date"] = "2026-08-03"
+        open(sp, "w").write(json.dumps(rec, ensure_ascii=False))
+        hd = os.path.join(td, "hist"); os.makedirs(hd)
+        for day, px in (("2026-08-03", 10120), ("2026-08-04", 10627)):   # +5.01%
+            (Path(hd) / f"{day}.json").write_text(json.dumps(
+                {"market_date": day, "all_stocks": [{"code": "100010", "price": px}]},
+                ensure_ascii=False), encoding="utf-8")
+        st = collect.build_dump_stats(sp, hd)
+        assert st["n"] == 1 and st["win"] == 1, st
+        assert abs(st["avg_pct"] - 5.01) < 0.05, st
+    assert collect.build_dump_stats("/없는파일.json", "/없는폴더") == {}
+
+
 def test_phase_track_from_fixture():
     """V5.9 돌파 국면 추적: 돌파일 판정·첫 조정 관찰·추격 성적 채점 검증."""
     import tempfile, os
