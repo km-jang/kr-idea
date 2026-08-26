@@ -258,5 +258,15 @@
   "evening": true,
   "scan": true,
   "recover": "none"
+ },
+ {
+  "date": "2026-08-26",
+  "data_final": true,
+  "data_gen": "2026-08-26 20:21 KST",
+  "morning": true,
+  "pulse": true,
+  "evening": false,
+  "scan": true,
+  "recover": "none"
  }
 ]
