@@ -851,6 +851,7 @@ def test_scan_record_and_review():
 
         # 채점: 스캔일을 과거로 조작 후 오늘 가격으로 평가
         rec[0]["date"] = "2026-07-10"
+        rec[0]["time"] = "15:04"   # 정상 시간 창 (V6.1 채점 조건)
         open(p, "w").write(json.dumps(rec))
         stocks = [{"code": "A", "price": 10800}]      # +8%
         rv = collect.build_scan_review(p, stocks, "2026-07-11")
@@ -1878,6 +1879,7 @@ def test_dump_scan_and_stats():
         assert rec[0]["dumps"][0]["code"] == "100010", rec
         # 채점: 기록일을 과거로 돌리고 히스토리 2일 준비
         rec[0]["date"] = "2026-08-03"
+        rec[0]["time"] = "15:04"   # 정상 시간 창 (V6.1 채점 조건)
         open(sp, "w").write(json.dumps(rec, ensure_ascii=False))
         hd = os.path.join(td, "hist"); os.makedirs(hd)
         for day, px in (("2026-08-03", 10120), ("2026-08-04", 10627)):   # +5.01%
@@ -1888,6 +1890,33 @@ def test_dump_scan_and_stats():
         assert st["n"] == 1 and st["win"] == 1, st
         assert abs(st["avg_pct"] - 5.01) < 0.05, st
     assert collect.build_dump_stats("/없는파일.json", "/없는폴더") == {}
+
+
+def test_late_run_guards():
+    """2026-08-27 실사고 회귀: 크론이 크게 밀린 실행은 스캔·채점에서 배제된다.
+    (그날 종가 스캔이 다음날 01:49에 돌아 '종가를 알고 뽑은' 후보가 기록됐다)"""
+    import closing_scan as cs
+    import datetime as _dt
+    KST = _dt.timezone(_dt.timedelta(hours=9))
+    mk = lambda h, m: _dt.datetime(2026, 8, 28, h, m, tzinfo=KST)
+    # 시간 창: 정상 시각은 통과, 마감 후·새벽은 차단
+    assert cs.in_window(mk(15, 4), cs.SCAN_LAST) is True
+    assert cs.in_window(mk(16, 40), cs.SCAN_LAST) is False
+    assert cs.in_window(mk(1, 49), cs.SCAN_LAST) is False     # 새벽 실행
+    assert cs.in_window(mk(12, 30), cs.PULSE_LAST) is True
+    assert cs.in_window(mk(23, 5), cs.PULSE_LAST) is False
+    # 자정 넘김 보정: 새벽 실행은 전날 몫으로 기록
+    assert cs.base_day(mk(1, 49)) == "2026-08-27"
+    assert cs.base_day(mk(15, 4)) == "2026-08-28"
+    # 채점 배제 (look-ahead 차단) · 옛 기록은 하위호환 통과
+    assert collect.scan_record_usable({"time": "15:04"}) is True
+    assert collect.scan_record_usable({"time": "01:49"}) is False
+    assert collect.scan_record_usable({"time": "17:30"}) is False
+    assert collect.scan_record_usable({"date": "2026-07-10"}) is True
+    # 지연 발송 머리말
+    import notify
+    assert notify.late_notice("morning", mk(8, 30)) == ""
+    assert "지연 발송" in notify.late_notice("morning", mk(13, 29))
 
 
 def test_zero_price_records_are_ignored():

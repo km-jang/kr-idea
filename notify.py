@@ -239,6 +239,32 @@ def us_market_block():
         return []
 
 
+# 예약 시각 (KST) · 이 시각보다 크게 늦게 도착하면 "지연 발송"임을 머리말로 밝힌다.
+# (2026-08-27 실사고: GitHub 크론이 5~11시간 밀려 아침 브리핑이 13:29, 점심 맥박이
+#  23:05에 도착했다. 정보 자체는 쓸모 있으므로 발송은 하되 혼동만 막는다)
+SCHEDULE_HHMM = {"morning": (8, 3), "evening": (19, 13), "weekly": (18, 7)}
+LATE_AFTER_MIN = 120          # 예약보다 이 분수 이상 늦으면 표시
+
+
+def late_notice(mode, now=None):
+    """지연 발송 머리말 (정상 시각이면 빈 문자열). 순수 함수."""
+    plan = SCHEDULE_HHMM.get(mode)
+    if not plan:
+        return ""
+    now = now or datetime.now(KST)
+    scheduled = now.replace(hour=plan[0], minute=plan[1], second=0, microsecond=0)
+    late_min = (now - scheduled).total_seconds() / 60
+    if late_min < 0:                       # 자정 넘겨 실행 = 전날 몫이 늦게 온 것
+        late_min += 24 * 60
+        scheduled -= timedelta(days=1)
+    if late_min < LATE_AFTER_MIN:
+        return ""
+    hours = late_min / 60
+    return (f"⏰ <b>지연 발송</b> <i>(예약 {plan[0]:02d}:{plan[1]:02d} → 실제 "
+            f"{now:%m/%d %H:%M} · {hours:.1f}시간 늦음)</i>\n"
+            f"<i>GitHub 예약 실행이 밀린 것이며 데이터 자체는 정상입니다.</i>\n\n")
+
+
 def build_message(data):
     """data.json → 텔레그램 메시지 (HTML 포맷)."""
     e = lambda s: html.escape(str(s or ""))
@@ -762,6 +788,9 @@ def main():
            else build_message(data))
     if holiday and holiday != "주말" and mode == "morning":
         msg = f"📅 오늘은 휴장일입니다 ({holiday}). 국내장 알림은 다음 거래일에 재개됩니다.\n\n" + msg
+    late = late_notice(mode)          # 크론 지연 시 "지연 발송" 머리말 (V6.1)
+    if late:
+        msg = late + msg
 
     if args.dry_run:
         print(msg)

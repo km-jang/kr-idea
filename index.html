@@ -2133,6 +2133,21 @@ function healthDot(d){
   el.onclick = toggleOps;
 }
 
+/* V6.1 지연 감시: 수집 완료 시각과 예약(19:13) 대비 지연을 성적표에 함께 보여준다.
+   2026-08-27에 크론이 10시간 밀려 다음날 새벽에 수집된 일이 있었고, 그때 성적표만으로는
+   "지연"인지 "고장"인지 구분할 수 없었다. */
+function genCell(gen){
+  const m = String(gen||"").match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+  if(!m) return '<span style="color:var(--ink-3)">·</span>';
+  const hh = +m[4], mm = +m[5];
+  let late = (hh*60+mm) - (19*60+13);          // 예약 19:13 대비 분
+  if(late < -600) late += 24*60;               // 자정 넘겨 수집된 경우
+  const txt = `${m[4]}:${m[5]}`;
+  if(late >= 180) return `<span style="color:var(--crit);font-weight:700" title="예약보다 ${(late/60).toFixed(1)}시간 지연">${txt}</span>`;
+  if(late >= 90)  return `<span style="color:var(--warn);font-weight:600" title="예약보다 ${(late/60).toFixed(1)}시간 지연">${txt}</span>`;
+  return `<span style="color:var(--ink-3)">${txt}</span>`;
+}
+
 /* ---------- 실행 성적표 (신호등 클릭 → 최근 5영업일 매트릭스, ops.json) ---------- */
 let OPS = null;
 async function toggleOps(){
@@ -2150,15 +2165,16 @@ async function toggleOps(){
                       : '<span style="color:var(--ink-3)">―</span>';
   p.innerHTML = rows.length
     ? '<b style="font-size:12px">🩺 실행 성적표 (최근 ' + rows.length + '영업일)</b>'
-      + '<table><tr><th></th><th>수집</th><th>아침</th><th>점심</th><th>스캔</th><th>저녁</th><th>복구</th></tr>'
+      + '<table><tr><th></th><th>수집</th><th>아침</th><th>점심</th><th>스캔</th><th>저녁</th><th>복구</th><th>수집시각</th></tr>'
       + rows.map(r => '<tr><td>' + esc((r.date || "").slice(5)) + '</td>'
           + '<td>' + mark(r.data_final) + '</td><td>' + mark(r.morning) + '</td>'
           + '<td>' + mark(r.pulse) + '</td><td>' + mark(r.scan) + '</td>'
           + '<td>' + mark(r.evening) + '</td>'
           + '<td>' + (r.recover === "ok" ? "🔧 성공"
                      : r.recover === "fail" ? '<span style="color:var(--crit);font-weight:700">실패</span>'
-                     : '<span style="color:var(--ink-3)">불필요</span>') + '</td></tr>').join("")
-      + '</table><div style="font-size:11px;color:var(--ink-3);margin-top:5px">매일 밤 야간 자가 점검(23:03)이 기록 · ✓=정상 실행 · 복구=자동 복구 작동 여부 · <a href="#" onclick="openTrust();return false" style="color:inherit;font-weight:700">📋 신호 신뢰도 통지표</a></div>'
+                     : '<span style="color:var(--ink-3)">불필요</span>') + '</td>'
+          + '<td>' + genCell(r.data_gen) + '</td></tr>').join("")
+      + '</table><div style="font-size:11px;color:var(--ink-3);margin-top:5px">매일 밤 야간 자가 점검(23:03)이 기록 · ✓=정상 실행 · 수집시각이 빨간색이면 GitHub 예약 지연(데이터는 정상) · <a href="#" onclick="openTrust();return false" style="color:inherit;font-weight:700">📋 신호 신뢰도 통지표</a></div>'
     : '<b style="font-size:12px">🩺 실행 성적표</b>'
       + '<div style="font-size:12px;color:var(--ink-3);margin-top:4px">아직 기록이 없습니다. 야간 자가 점검(23:03)이 매일 밤 기록을 남깁니다.</div>';
   p.style.display = "block";

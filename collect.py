@@ -1313,6 +1313,22 @@ def build_silence(candidates, top_n=10):
     return out[:top_n]
 
 
+SCAN_WINDOW = ("09:00", "16:30")   # 종가 스캔이 유의미한 시간 창 (closing_scan.SCAN_LAST와 짝)
+
+
+def scan_record_usable(rec):
+    """이 스캔 기록을 성적 채점에 써도 되는가 (V6.1, 2026-08-27 실사고).
+
+    크론이 크게 밀려 장 마감 한참 뒤(심하면 다음날 새벽)에 돈 스캔은 '이미 확정된
+    종가'를 보고 후보를 뽑은 셈이라, 통계에 섞으면 성적이 실제보다 좋게 부풀려진다
+    (look-ahead). 시간 창을 벗어난 기록은 장부를 고치지 않고 채점에서만 제외한다.
+    time 필드가 없는 옛 기록은 하위호환으로 통과시킨다."""
+    t = (rec or {}).get("time")
+    if not t:
+        return True
+    return SCAN_WINDOW[0] <= t <= SCAN_WINDOW[1]
+
+
 def build_scan_review(scans_path, stocks, market_date):
     """종가매매 스캔 성적 채점: 직전 스캔 후보를 오늘 종가로 평가."""
     try:
@@ -1321,7 +1337,7 @@ def build_scan_review(scans_path, stocks, market_date):
         return None
     past = [r for r in records
             if r.get("date") and (not market_date or r["date"] < market_date)
-            and r.get("candidates")]
+            and r.get("candidates") and scan_record_usable(r)]
     if not past:
         return None
     last = past[-1]
@@ -1362,7 +1378,7 @@ def build_chase_stats(scans_path, hist_dir, max_records=60):
     rets = []
     for r in records[-max_records:]:
         dt = r.get("date")
-        if dt not in dates:
+        if dt not in dates or not scan_record_usable(r):
             continue
         i = dates.index(dt)
         if i + 1 >= len(days):
@@ -1398,7 +1414,7 @@ def build_dump_stats(scans_path, hist_dir, max_records=60):
     rets = []
     for r in records[-max_records:]:
         dt = r.get("date")
-        if dt not in dates:
+        if dt not in dates or not scan_record_usable(r):
             continue
         i = dates.index(dt)
         if i + 1 >= len(days):

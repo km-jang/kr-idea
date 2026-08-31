@@ -44,6 +44,31 @@ CONFIG_SCAN = {
     "top_n": 5,              # 후보 개수
 }
 
+# --- 지각 실행 가드 (V6.1, 2026-08-27 실사고) -------------------------------
+# GitHub 예약 크론이 하루 통째로 5~11시간 밀린 날, 종가 스캔이 다음날 01:49에
+# 실행돼 "이미 확정된 종가"를 보고 후보를 뽑았다. 이건 두 가지로 해롭다:
+#   ① 알림이 장 마감 한참 뒤에 도착 = 행동 불가
+#   ② 답을 알고 찍은 셈이라(look-ahead) 성적 통계가 부풀려진다
+# 그래서 창 밖 실행은 조용히 건너뛴다. 예비 알람이 다음 창에서 다시 시도한다.
+LATE_NIGHT_UNTIL = 6          # ops_log.base_day와 같은 규칙 (00~06시 = 전날 몫)
+SCAN_LAST = "16:30"           # 종가 스캔이 유의미한 마지막 시각
+PULSE_LAST = "15:00"          # 장중 맥박이 유의미한 마지막 시각
+
+
+def base_day(now):
+    """기록 기준일 (ops_log.base_day와 동일 규칙: 새벽 실행은 전날 몫)."""
+    if now.hour < LATE_NIGHT_UNTIL:
+        now = now - timedelta(days=1)
+    return now.strftime("%Y-%m-%d")
+
+
+def in_window(now, last_hhmm):
+    """지금이 그 작업이 의미 있는 시간 창 안인가. 순수 함수."""
+    if now.hour < LATE_NIGHT_UNTIL:
+        return False                       # 새벽 실행 = 그날 장이 이미 끝났다
+    return f"{now:%H:%M}" <= last_hhmm
+
+
 # --- 마감 투매 눌림 (V6.0) -------------------------------------------------
 # 눌림매매 변형 ④: 재료가 살아있는 주도주가 장 막판 데이트레이더 청산 물량에
 # 밀리는 구간을 관찰한다. 이 스캔은 실제로 15:00 전후에 실행되므로(크론 14:48 +
@@ -347,6 +372,9 @@ def main():
         return
 
     if args.pulse:
+        if not in_window(datetime.now(KST), PULSE_LAST):
+            print(f"장중 맥박 시간 창({PULSE_LAST}) 초과 - 발송 생략 (크론 지연)")
+            return
         try:
             sys.path.insert(0, str(ROOT))
             import notify
@@ -366,6 +394,10 @@ def main():
             notify.mark_sent("pulse")
         return
 
+    if not in_window(datetime.now(KST), SCAN_LAST):
+        # 종가를 이미 알고 뽑는 셈이 되어 알림도 통계도 못 쓴다 (V6.1, 2026-08-27 실사고)
+        print(f"종가 스캔 시간 창({SCAN_LAST}) 초과 - 스캔·기록 생략 (크론 지연)")
+        return
     cands = scan_candidates(universe, quotes)
     try:                                  # 부가 기능 - 실패해도 본 스캔은 나간다
         dumps = scan_dump_candidates(universe, quotes)
@@ -396,11 +428,12 @@ def save_scan_record(cands, path=None, keep=30, dumps=None):
     except Exception:
         records = []
     now = datetime.now(KST)
-    records = [r for r in records if r.get("date") != now.strftime("%Y-%m-%d")]
+    day = base_day(now)                    # 새벽 실행은 전날 몫 (V6.1 보정)
+    records = [r for r in records if r.get("date") != day]
     slim = lambda c: {"code": c["code"], "name": c["name"],
                       "price": c["price"], "chg": c["chg"]}
     rec = {
-        "date": now.strftime("%Y-%m-%d"),
+        "date": day,
         "time": now.strftime("%H:%M"),
         "candidates": [slim(c) for c in cands],
     }
