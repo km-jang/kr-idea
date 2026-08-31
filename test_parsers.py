@@ -1917,6 +1917,12 @@ def test_late_run_guards():
     import notify
     assert notify.late_notice("morning", mk(8, 30)) == ""
     assert "지연 발송" in notify.late_notice("morning", mk(13, 29))
+    # 인자 없이(실제 호출 형태로) 불러도 터지지 않아야 한다.
+    # 2026-08-31 실사고: 테스트가 항상 now를 넘겨줘서 기본 경로의 NameError(KST 미정의)를
+    # 못 잡았고, 그대로 배포돼 브리핑 발송이 전부 죽었다. 기본 인자 경로를 반드시 밟을 것.
+    for m in ("morning", "evening", "weekly"):
+        assert isinstance(notify.late_notice(m), str)
+    assert notify.late_notice("없는모드") == ""
 
 
 def test_zero_price_records_are_ignored():

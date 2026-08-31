@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -238,6 +238,8 @@ def us_market_block():
     except Exception:
         return []
 
+
+KST = timezone(timedelta(hours=9))   # 이 모듈엔 원래 없었다 (V6.1 핫픽스, 2026-08-31)
 
 # 예약 시각 (KST) · 이 시각보다 크게 늦게 도착하면 "지연 발송"임을 머리말로 밝힌다.
 # (2026-08-27 실사고: GitHub 크론이 5~11시간 밀려 아침 브리핑이 13:29, 점심 맥박이
