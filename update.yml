@@ -1,0 +1,341 @@
+name: 데이터 갱신
+
+on:
+  schedule:
+    - cron: "13 10 * * 1-5"   # 매 영업일 19:13 KST - 데이터 수집 + 마감 요약
+    - cron: "3 23 * * 0-4"    # 매 영업일 08:03 KST - 아침 브리핑 발송 (신선도 확인 + 자가복구)
+    - cron: "7 9 * * 0"       # 일요일 18:07 KST - 주간 결산 발송
+    - cron: "48 5 * * 1-5"    # 매 영업일 14:48 KST - 종가매매 스캔
+    - cron: "43 10 * * 1-5"   # 매 영업일 19:43 KST - 예비 알람 (본 수집 누락 시에만 작동)
+    - cron: "28 23 * * 0-4"   # 매 영업일 08:28 KST - 아침 예비 알람 (본 발송 누락 시에만)
+    - cron: "6 3 * * 1-5"     # 매 영업일 12:06 KST - 장중 시황 요약 (점심 맥박)
+    - cron: "38 3 * * 1-5"    # 매 영업일 12:38 KST - 점심 맥박 예비 (본 발송 누락 시에만)
+    - cron: "7 6 * * 1-5"     # 매 영업일 15:07 KST - 종가 스캔 예비 (본 스캔 누락 시에만)
+    - cron: "3 14 * * 1-5"    # 매 영업일 23:03 KST - 야간 자가 점검 (감시 + 자동 복구 + 실행 성적표)
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "실행할 작업 (외부 정시 스케줄러가 지정. 수동 실행 시 그냥 두면 evening)"
+        required: false
+        default: "evening"
+        type: choice
+        options:
+          - evening          # 19:13 수집 + 마감 요약
+          - morning          # 08:03 아침 브리핑
+          - pulse            # 12:06 점심 맥박
+          - scan             # 14:48 종가매매 스캔
+          - night            # 23:03 야간 자가 점검
+          - weekly           # 일 18:07 주간 결산
+          - evening_backup   # 19:43 예비 수집·발송
+          - morning_backup   # 08:28 아침 예비
+          - pulse_backup     # 12:38 맥박 예비
+          - scan_backup      # 15:07 스캔 예비
+          - collect_only     # 수집만 (발송 없음)
+
+# 크론 분(minute)을 정각·5분 배수에서 비켜둔 이유: GitHub 혼잡 시간대 지연·누락 회피 (2026-07-17 안정화)
+# 자정 넘김 보정: 크론이 크게 밀려 00~06시(KST)에 실행되면 기준일을 전날로 되돌린다 (헛경보 차단, 2026-07-30)
+# 야간 점검 21:33 → 23:03 이동 (2026-07-31): 수집 지연 실측이 이틀 연속 2시간 안팎이라
+# 점검이 수집을 추월할 뻔했다(여유 13분·30분). 수집과의 간격을 2시간 20분에서 3시간 50분으로 넓힘
+# 블랙박스 (2026-08-04): 수집·테스트 출력을 run_log.txt/recover_log.txt에 담아, 실패 시
+# 🚨·🩺 텔레그램에 오류 마지막 줄을 동봉한다. 7/31·8/3 연속 수집 실패 때 로그 접근이
+# 병목이었던 것의 재발 방지. 이 tee·tail 로직을 지우지 말 것 (PLAYBOOK 2.7절과 한 세트)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false   # true였을 때 지연된 수집이 다음 크론에 강제 취소되던 문제 수정 (2026-07-17)
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 오프라인 테스트
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening' || github.event.inputs.job == 'collect_only'
+        run: |
+          python test_parsers.py 2>&1 | tee run_log.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: 데이터 수집
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening' || github.event.inputs.job == 'collect_only'
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: |
+          python collect.py 2>&1 | tee run_log.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: 커밋 & 푸시
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening' || github.event.inputs.job == 'collect_only'
+        run: |
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add data.json history/ 2>/dev/null || git add data.json
+          if git diff --cached --quiet; then
+            echo "변경 없음"
+          else
+            git commit -m "data: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')"
+            git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)
+          fi
+
+      - name: 아침 브리핑 발송 (신선도 확인 + 자가복구)
+        if: github.event.schedule == '3 23 * * 0-4' || github.event.inputs.job == 'morning'
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
+          FRESH=$(python -c "from datetime import datetime,timedelta,timezone; g='$GEN'; now=datetime.now(timezone(timedelta(hours=9))); lim=(now-timedelta(days=4)).strftime('%Y-%m-%d'); print('yes' if g[:10]>=lim and g[11:16]>='15:40' else 'no')" 2>/dev/null || echo no)
+          if [ "$FRESH" != "yes" ]; then
+            echo "마감 확정 데이터 없음(현재: $GEN), 아침 자가복구 수집 시도"
+            if python test_parsers.py && python collect.py; then
+              git config user.name "dashboard-bot"
+              git config user.email "actions@github.com"
+              git add data.json history/ 2>/dev/null || git add data.json
+              git diff --cached --quiet || (git commit -m "data(아침복구): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+            else
+              echo "아침 복구 실패, 기존 데이터로 발송 진행"
+            fi
+          fi
+          python notify.py
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 아침 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 아침 예비 발송 (08:28, 본 발송 누락 시에만)
+        if: github.event.schedule == '28 23 * * 0-4' || github.event.inputs.job == 'morning_backup'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python notify.py --if-not-sent
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 아침 예비 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 마감 요약 발송
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python notify.py --evening
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 저녁 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 주간 결산 발송
+        if: github.event.schedule == '7 9 * * 0' || github.event.inputs.job == 'weekly'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python notify.py --weekly
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 주간 결산 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 예비 수집·발송 (19:43, 본 수집 누락 시에만)
+        if: github.event.schedule == '43 10 * * 1-5' || github.event.inputs.job == 'evening_backup'
+        continue-on-error: true
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          HH=$(TZ=Asia/Seoul date '+%-H')
+          if [ "$HH" -lt 6 ]; then
+            TODAY=$(TZ=Asia/Seoul date -d 'yesterday' '+%Y-%m-%d')
+            echo "자정 넘김 실행 감지(현재 ${HH}시), 기준일을 전날($TODAY)로 보정"
+          else
+            TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          fi
+          HAVE=$(python -c "import json;print(json.load(open('data.json')).get('market_date',''))" 2>/dev/null || echo "")
+          GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
+          FINAL=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+          if [ "$FINAL" = "yes" ]; then
+            echo "본 수집 완료 확인(마감 후 수집 $GEN), 예비 알람 조용히 종료"
+            exit 0
+          fi
+          echo "본 수집 누락 감지(현재 데이터: $HAVE / 생성 $GEN), 예비 수집 시작"
+          python test_parsers.py
+          python collect.py
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add data.json history/ 2>/dev/null || git add data.json
+          if git diff --cached --quiet; then
+            echo "변경 없음"
+          else
+            git commit -m "data(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')"
+            git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)
+          fi
+          NEWDATE=$(python -c "import json;print(json.load(open('data.json')).get('market_date',''))" 2>/dev/null || echo "")
+          if [ "$NEWDATE" = "$TODAY" ]; then
+            python notify.py --evening
+          else
+            echo "휴장일 등으로 새 데이터 없음, 발송 생략"
+          fi
+
+      - name: 장중 시황 요약 (12:06)
+        if: github.event.schedule == '6 3 * * 1-5' || github.event.inputs.job == 'pulse'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python closing_scan.py --pulse
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 점심 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 점심 맥박 예비 (12:38, 본 발송 누락 시에만)
+        if: github.event.schedule == '38 3 * * 1-5' || github.event.inputs.job == 'pulse_backup'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python closing_scan.py --pulse --if-not-sent
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 점심 예비 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 종가 스캔 예비 (15:07, 본 스캔 누락 시에만)
+        if: github.event.schedule == '7 6 * * 1-5' || github.event.inputs.job == 'scan_backup'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          DONE=$(python -c "import json;rs=json.load(open('scans.json'));print('yes' if any(r.get('date')=='$TODAY' for r in rs) else 'no')" 2>/dev/null || echo "no")
+          if [ "$DONE" = "yes" ]; then echo "본 스캔 완료 확인 - 예비 조용히 종료"; exit 0; fi
+          echo "본 스캔 누락 감지 - 예비 스캔 시작"
+          python closing_scan.py
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add scans.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "scan(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 야간 자가 점검 (23:03, 감시 + 자동 복구 + 실행 성적표)
+        if: github.event.schedule == '3 14 * * 1-5' || github.event.inputs.job == 'night'
+        continue-on-error: true
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "시크릿 없음 - 생략"; exit 0; fi
+          HH=$(TZ=Asia/Seoul date '+%-H')
+          if [ "$HH" -lt 6 ]; then
+            TODAY=$(TZ=Asia/Seoul date -d 'yesterday' '+%Y-%m-%d')
+            echo "자정 넘김 실행 감지(현재 ${HH}시), 기준일을 전날($TODAY)로 보정"
+          else
+            TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          fi
+          H=$(python holidays_kr.py "$TODAY" 2>/dev/null || true)
+          if [ -n "$H" ]; then echo "휴장일($H), 자가 점검·성적표 기록 생략"; exit 0; fi
+          GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
+          FRESH=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+          RECOVER=none
+          NEWGEN="$GEN"
+          if [ "$FRESH" != "yes" ]; then
+            echo "마감 수집 미반영 감지 (현재: $GEN), 자동 복구 시도"
+            RECOVER=fail
+            set +e
+            { python test_parsers.py && python collect.py ; } > recover_log.txt 2>&1
+            ROK=$?
+            set -e
+            cat recover_log.txt
+            if [ "$ROK" = "0" ]; then
+              git config user.name "dashboard-bot"
+              git config user.email "actions@github.com"
+              git add data.json history/ 2>/dev/null || git add data.json
+              git diff --cached --quiet || (git commit -m "data(자가복구): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+              NEWGEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
+              NEWFRESH=$(python -c "g='$NEWGEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+              if [ "$NEWFRESH" = "yes" ]; then
+                RECOVER=ok
+                python notify.py --evening --if-not-sent || true
+              fi
+            fi
+          else
+            echo "자가 점검 통과 (수집 $GEN)"
+          fi
+          python ops_log.py "$RECOVER" "$TODAY" || true
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add ops.json sent_log.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "log: 실행 성적표 $TODAY" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+          if [ "$RECOVER" = "ok" ]; then
+            MSG="🩺 야간 자가 점검: 마감 수집 누락을 발견해 자동 복구했습니다 (새 수집: $NEWGEN)
+          저녁 브리핑이 미발송 상태였다면 방금 함께 발송됐습니다."
+          elif [ "$RECOVER" = "fail" ]; then
+            ERRT=$(tail -n 6 recover_log.txt 2>/dev/null | tail -c 600)
+            MSG="🩺 야간 자가 점검: $TODAY 마감 수집이 반영되지 않았고 자동 복구도 실패했습니다 (현재 데이터: $GEN)
+          [오류 마지막 줄]
+          ${ERRT:-복구 시도 로그 없음}
+          휴장일이면 정상입니다. 평일이라면 위 오류 줄을 그대로 복사해 AI에게 주세요 (PLAYBOOK 2.7절).
+          https://github.com/${{ github.repository }}/actions"
+          else
+            exit 0
+          fi
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
+
+      - name: 종가매매 스캔
+        if: github.event.schedule == '48 5 * * 1-5' || github.event.inputs.job == 'scan'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python closing_scan.py
+          git config user.name "dashboard-bot"
+          git config user.email "actions@github.com"
+          git add scans.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "scan: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+
+      - name: 실패 자동 통보
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "시크릿 없음 - 통보 생략"; exit 0; fi
+          TAILT=$(tail -n 8 run_log.txt 2>/dev/null | tail -c 800)
+          MSG="🚨 자동화 실행 실패 ($(TZ=Asia/Seoul date '+%m/%d %H:%M KST'))
+          [오류 마지막 줄]
+          ${TAILT:-오류 로그 없음: 수집·테스트 외 단계 실패 (Actions 로그 확인)}
+          위 오류 줄을 그대로 복사해 AI에게 주면 바로 진단됩니다 (PLAYBOOK 2.7절).
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
