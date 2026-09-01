@@ -12,7 +12,25 @@ on:
     - cron: "38 3 * * 1-5"    # 매 영업일 12:38 KST - 점심 맥박 예비 (본 발송 누락 시에만)
     - cron: "7 6 * * 1-5"     # 매 영업일 15:07 KST - 종가 스캔 예비 (본 스캔 누락 시에만)
     - cron: "3 14 * * 1-5"    # 매 영업일 23:03 KST - 야간 자가 점검 (감시 + 자동 복구 + 실행 성적표)
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "실행할 작업 (외부 정시 스케줄러가 지정. 수동 실행 시 그냥 두면 evening)"
+        required: false
+        default: "evening"
+        type: choice
+        options:
+          - evening          # 19:13 수집 + 마감 요약
+          - morning          # 08:03 아침 브리핑
+          - pulse            # 12:06 점심 맥박
+          - scan             # 14:48 종가매매 스캔
+          - night            # 23:03 야간 자가 점검
+          - weekly           # 일 18:07 주간 결산
+          - evening_backup   # 19:43 예비 수집·발송
+          - morning_backup   # 08:28 아침 예비
+          - pulse_backup     # 12:38 맥박 예비
+          - scan_backup      # 15:07 스캔 예비
+          - collect_only     # 수집만 (발송 없음)
 
 # 크론 분(minute)을 정각·5분 배수에서 비켜둔 이유: GitHub 혼잡 시간대 지연·누락 회피 (2026-07-17 안정화)
 # 자정 넘김 보정: 크론이 크게 밀려 00~06시(KST)에 실행되면 기준일을 전날로 되돌린다 (헛경보 차단, 2026-07-30)
@@ -44,13 +62,13 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 오프라인 테스트
-        if: github.event.schedule == '13 10 * * 1-5' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening' || github.event.inputs.job == 'collect_only'
         run: |
           python test_parsers.py 2>&1 | tee run_log.txt
           exit ${PIPESTATUS[0]}
 
       - name: 데이터 수집
-        if: github.event.schedule == '13 10 * * 1-5' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening' || github.event.inputs.job == 'collect_only'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
@@ -60,7 +78,7 @@ jobs:
           exit ${PIPESTATUS[0]}
 
       - name: 커밋 & 푸시
-        if: github.event.schedule == '13 10 * * 1-5' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening' || github.event.inputs.job == 'collect_only'
         run: |
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
@@ -73,7 +91,7 @@ jobs:
           fi
 
       - name: 아침 브리핑 발송 (신선도 확인 + 자가복구)
-        if: github.event.schedule == '3 23 * * 0-4' || github.event_name == 'workflow_dispatch'
+        if: github.event.schedule == '3 23 * * 0-4' || github.event.inputs.job == 'morning'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
@@ -101,7 +119,7 @@ jobs:
           git diff --cached --quiet || (git commit -m "log: 아침 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 아침 예비 발송 (08:28, 본 발송 누락 시에만)
-        if: github.event.schedule == '28 23 * * 0-4'
+        if: github.event.schedule == '28 23 * * 0-4' || github.event.inputs.job == 'morning_backup'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -114,7 +132,7 @@ jobs:
           git diff --cached --quiet || (git commit -m "log: 아침 예비 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 마감 요약 발송
-        if: github.event.schedule == '13 10 * * 1-5'
+        if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -127,7 +145,7 @@ jobs:
           git diff --cached --quiet || (git commit -m "log: 저녁 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 주간 결산 발송
-        if: github.event.schedule == '7 9 * * 0'
+        if: github.event.schedule == '7 9 * * 0' || github.event.inputs.job == 'weekly'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -140,7 +158,7 @@ jobs:
           git diff --cached --quiet || (git commit -m "log: 주간 결산 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 예비 수집·발송 (19:43, 본 수집 누락 시에만)
-        if: github.event.schedule == '43 10 * * 1-5'
+        if: github.event.schedule == '43 10 * * 1-5' || github.event.inputs.job == 'evening_backup'
         continue-on-error: true
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
@@ -183,7 +201,7 @@ jobs:
           fi
 
       - name: 장중 시황 요약 (12:06)
-        if: github.event.schedule == '6 3 * * 1-5'
+        if: github.event.schedule == '6 3 * * 1-5' || github.event.inputs.job == 'pulse'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -196,7 +214,7 @@ jobs:
           git diff --cached --quiet || (git commit -m "log: 점심 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 점심 맥박 예비 (12:38, 본 발송 누락 시에만)
-        if: github.event.schedule == '38 3 * * 1-5'
+        if: github.event.schedule == '38 3 * * 1-5' || github.event.inputs.job == 'pulse_backup'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -209,7 +227,7 @@ jobs:
           git diff --cached --quiet || (git commit -m "log: 점심 예비 발송 기록" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 종가 스캔 예비 (15:07, 본 스캔 누락 시에만)
-        if: github.event.schedule == '7 6 * * 1-5'
+        if: github.event.schedule == '7 6 * * 1-5' || github.event.inputs.job == 'scan_backup'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -226,7 +244,7 @@ jobs:
           git diff --cached --quiet || (git commit -m "scan(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
 
       - name: 야간 자가 점검 (23:03, 감시 + 자동 복구 + 실행 성적표)
-        if: github.event.schedule == '3 14 * * 1-5'
+        if: github.event.schedule == '3 14 * * 1-5' || github.event.inputs.job == 'night'
         continue-on-error: true
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
@@ -294,7 +312,7 @@ jobs:
             -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
 
       - name: 종가매매 스캔
-        if: github.event.schedule == '48 5 * * 1-5'
+        if: github.event.schedule == '48 5 * * 1-5' || github.event.inputs.job == 'scan'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
