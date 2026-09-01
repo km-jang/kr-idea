@@ -57,6 +57,57 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # ── 무단 실행 감지 (2026-09-01) ────────────────────────────────────────
+      # 외부 정시 스케줄러가 토큰으로 이 워크플로를 부른다. 토큰이 탈취되면
+      # 공격자도 같은 호출을 할 수 있고, 지금까지는 그게 조용히 지나갔다.
+      # 그래서 호출 시각이 그 작업의 예상 창 밖이면 즉시 텔레그램으로 알린다.
+      # 막지 않고 알리기만 한다 (오판이 정상 동작을 끊으면 안 된다).
+      - name: 무단 실행 감지 (예상 시각 밖 호출 경고)
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          JOB="${{ github.event.inputs.job }}"
+          NOW=$(TZ=Asia/Seoul date '+%H:%M')
+          DOW=$(TZ=Asia/Seoul date '+%u')          # 1=월 ... 7=일
+          STAMP=$(TZ=Asia/Seoul date '+%m/%d %H:%M KST')
+          case "$JOB" in
+            morning)        FROM=07:50; TO=08:25; WHEN=weekday ;;
+            pulse)          FROM=11:50; TO=12:25; WHEN=weekday ;;
+            scan)           FROM=14:35; TO=15:05; WHEN=weekday ;;
+            evening)        FROM=19:00; TO=19:35; WHEN=weekday ;;
+            night)          FROM=22:50; TO=23:25; WHEN=weekday ;;
+            weekly)         FROM=17:50; TO=18:25; WHEN=sunday  ;;
+            morning_backup) FROM=08:15; TO=08:50; WHEN=weekday ;;
+            pulse_backup)   FROM=12:25; TO=13:00; WHEN=weekday ;;
+            scan_backup)    FROM=14:55; TO=15:30; WHEN=weekday ;;
+            evening_backup) FROM=19:30; TO=20:05; WHEN=weekday ;;
+            *) echo "수동 작업(job=${JOB:-없음}) - 시각 검사 대상 아님"; exit 0 ;;
+          esac
+          BAD=""
+          [[ "$NOW" < "$FROM" || "$NOW" > "$TO" ]] && BAD="시각"
+          [[ "$WHEN" == weekday && "$DOW" -gt 5 ]] && BAD="${BAD:+$BAD·}요일"
+          [[ "$WHEN" == sunday  && "$DOW" != 7   ]] && BAD="${BAD:+$BAD·}요일"
+          if [ -z "$BAD" ]; then
+            echo "정상 시각 호출 ($JOB $NOW KST, 예상 $FROM~$TO)"; exit 0
+          fi
+          echo "예상 밖 호출 감지 [$BAD]: $JOB $NOW KST (예상 $FROM~$TO)"
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then exit 0; fi
+          MSG="⚠️ 예상 밖 시각에 자동화가 호출됐습니다
+          작업: $JOB
+          호출 시각: $STAMP (예상 $FROM~$TO)
+          어긋난 항목: $BAD
+
+          본인이 수동으로 실행한 것이면 무시하세요.
+          아니라면 스케줄러 토큰이 새어나갔을 수 있습니다. 바로 폐기하세요:
+          https://github.com/settings/tokens
+          실행 기록: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
+
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
