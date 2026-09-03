@@ -378,14 +378,81 @@ def build_chart_pack(codes, name_of, fetch_hist=None, days=120):
         try:
             rows = (fetch_hist or fetch_price_history)(c, days)
             if len(rows) >= 40:        # 최소 60일선 근처는 그릴 수 있어야 수록
-                pack[c] = {
+                closes = [round(r["close"]) for r in rows]
+                item = {
                     "name": name_of.get(c, ""),
-                    "closes": [round(r["close"]) for r in rows],
+                    "closes": closes,
                     "vols": [int(r.get("vol") or 0) for r in rows],
                 }
+                ich = ichimoku_state(closes)   # 일목 근사 (78일 미만이면 None)
+                if ich:
+                    item["ichimoku"] = ich
+                pack[c] = item
         except Exception:
             continue
     return pack
+
+
+def ichimoku_state(closes, tenkan=9, kijun=26, span_b=52, shift=26):
+    """일목 근사 상태 (V6.3, 2026-09-03). closes: 과거→현재 순.
+
+    주의: 일별 고가·저가를 수집하지 않으므로 정통 일목의 (최고가+최저가)/2 를
+    (최고종가+최저종가)/2 로 근사한다. 사용자에게 보이는 문구는 반드시
+    '일목 근사'로 쓴다 ('일목균형표'라고 쓰면 거짓말이 된다).
+    표본 25일이 쌓이기 전에는 표시·기록만 하고 점수·손절에 반영하지 않는다.
+
+    반환: {pos, bull, thick, bot, chikou, fut_bot} 또는 None(이력 부족).
+      pos     구름 대비 주가 위치 (above / inside / below)
+      bull    양운 여부 (선행스팬1 > 선행스팬2)
+      thick   구름 두께 % (지지·저항의 세기. 얇으면 가짜 돌파 위험)
+      bot     구름 하단 = 추세 이탈 판정선 (손절선이 아니다. 실측 중앙값 -19.5%)
+      chikou  후행스팬 우위 = 26일 전 종가보다 위 (5선 중 유일하게 근사가 아님)
+      fut_bot 26일 뒤 구름 하단 (이미 확정돼 있어 손절선 이동을 미리 알 수 있다)
+    """
+    if not closes or len(closes) < span_b + shift:
+        return None
+
+    def mid(seq):
+        return (max(seq) + min(seq)) / 2
+
+    px, past = closes[-1], closes[:-shift]          # past = 26일 전까지의 이력
+    a_now = (mid(past[-tenkan:]) + mid(past[-kijun:])) / 2   # 오늘 자리의 선행스팬 1
+    b_now = mid(past[-span_b:])                              # 오늘 자리의 선행스팬 2
+    top, bot = max(a_now, b_now), min(a_now, b_now)
+    a_fut = (mid(closes[-tenkan:]) + mid(closes[-kijun:])) / 2   # 26일 뒤 구름
+    b_fut = mid(closes[-span_b:])
+    return {
+        "pos": "above" if px > top else ("below" if px < bot else "inside"),
+        "bull": a_now > b_now,
+        "thick": round(abs(a_now - b_now) / px * 100, 1),
+        "bot": round(bot),
+        "chikou": px > closes[-(shift + 1)],
+        "fut_bot": round(min(a_fut, b_fut)),
+    }
+
+
+def fetch_daily_hl(codes, fetch=None):
+    """당일 시가·고가·저가 수집 (V6.3, 2026-09-03).
+
+    일별 고가·저가는 수집원(네이버 frgn 페이지)에 컬럼이 아예 없어서 그동안
+    못 쌓았고, 그래서 윗꼬리·도지·정통 일목이 '구조적 불가'로 묶여 있었다.
+    저녁 수집은 장 마감 뒤에 돌므로, 이때 실시간 API가 주는 값이 그날 확정치다.
+    여기서 쌓인 이력이 history/에 남아 나중에 근사를 실측으로 바꿔준다.
+
+    부가 기능이므로 실패해도 수집 전체를 막지 않는다 (호출부에서 try로 감싼다).
+    반환: {코드: {"day_open"/"day_high"/"day_low": 값}} (없는 필드는 빠진다)."""
+    if fetch is None:
+        import closing_scan                       # 실시간 묶음 조회 재사용
+        fetch = closing_scan.fetch_realtime
+    out = {}
+    for code, q in (fetch(list(codes)) or {}).items():
+        rec = {}
+        for src, dst in (("open", "day_open"), ("high", "day_high"), ("low", "day_low")):
+            if q.get(src):
+                rec[dst] = q[src]
+        if rec:
+            out[code] = rec
+    return out
 
 
 def flow_metrics(rows, price=None):
@@ -1792,9 +1859,12 @@ def build_sample():
             v *= random.uniform(0.985, 1.022)
             cs.append(round(v))
         cs[-1] = s["price"]
-        chart_pack_sample[s["code"]] = {
-            "name": s["name"], "closes": cs,
-            "vols": [random.randint(80000, 900000) for _ in range(120)]}
+        item = {"name": s["name"], "closes": cs,
+                "vols": [random.randint(80000, 900000) for _ in range(120)]}
+        ich = ichimoku_state(cs)
+        if ich:
+            item["ichimoku"] = ich
+        chart_pack_sample[s["code"]] = item
     now = datetime.now(KST)
     return assemble(stocks, disclosures, ideas,
                     {"KOSPI": {"value": 3412.68, "change_pct": 0.87},
@@ -2855,6 +2925,9 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
             r["ma5"] = round(m5)
         if m20:
             r["ma20"] = round(m20)
+        for k in ("day_open", "day_high", "day_low"):   # V6.3 — 있을 때만 싣는다
+            if s.get(k):
+                r[k] = s[k]
         return r
 
     flow_rank = sorted(stocks, key=lambda s: -(s.get("flow_score") or 0))[:30]
@@ -3103,6 +3176,22 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"chart_pack: {e}")
         chart_pack = {}
+    # 당일 시가·고가·저가 (V6.3) — 부가 기능이므로 실패해도 수집을 막지 않는다.
+    # 첫 실행 로그의 수신 종목 수로 실시간 API에 저가 필드가 있는지 바로 확인된다.
+    try:
+        hl = fetch_daily_hl([s["code"] for s in stocks])
+        for s in stocks:
+            s.update(hl.get(s["code"]) or {})
+        n_hi = sum(1 for s in stocks if s.get("day_high"))
+        n_lo = sum(1 for s in stocks if s.get("day_low"))
+        n_op = sum(1 for s in stocks if s.get("day_open"))
+        print(f"  → 당일 고가 {n_hi}종목 · 저가 {n_lo}종목 · 시가 {n_op}종목 수신")
+        if n_hi and not n_lo:
+            # 고가는 오는데 저가가 하나도 없으면 실시간 API의 필드명이 다르다는 뜻.
+            # errors에 남겨야 1절 체크리스트 0번에서 발견된다 (조용히 못 쌓이는 것 방지).
+            errors.append("daily_hl: 저가 필드 미수신 (lowPrice 필드명 확인 필요)")
+    except Exception as e:
+        errors.append(f"daily_hl: {e}")
 
     if errors[:5]:
         print("경고:", *errors[:5], sep="\n  ")

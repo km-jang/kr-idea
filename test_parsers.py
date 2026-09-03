@@ -2001,6 +2001,75 @@ def test_holidays_2027():
     assert h.closed_reason("2027-02-06") == "주말"
 
 
+def test_ichimoku_state_history_guard():
+    """일목 근사: 78일(52+26) 미만이면 계산하지 않는다."""
+    assert collect.ichimoku_state([100] * 77) is None
+    assert collect.ichimoku_state([]) is None
+    assert collect.ichimoku_state(None) is None
+    assert collect.ichimoku_state([100 + i for i in range(78)]) is not None  # 경계 통과
+
+
+def test_ichimoku_state_trend_direction():
+    """단조 상승이면 구름 위·양운, 단조 하락이면 구름 아래·음운."""
+    up = collect.ichimoku_state([100 + i for i in range(120)])
+    assert up["pos"] == "above" and up["bull"] is True and up["chikou"] is True
+    down = collect.ichimoku_state([300 - i for i in range(120)])
+    assert down["pos"] == "below" and down["bull"] is False and down["chikou"] is False
+
+
+def test_ichimoku_state_fields():
+    """반환 필드의 값 범위: 두께는 0 이상, 구름 위면 하단이 현재가 아래."""
+    cs = [100 + i for i in range(120)]
+    s = collect.ichimoku_state(cs)
+    assert set(s) == {"pos", "bull", "thick", "bot", "chikou", "fut_bot"}
+    assert s["thick"] >= 0
+    assert s["bot"] <= cs[-1]           # 구름 위 상태이므로 하단은 현재가 아래
+    assert s["fut_bot"] >= s["bot"]     # 상승 추세면 26일 뒤 하단이 더 높다
+    flat = collect.ichimoku_state([500] * 120)
+    assert flat["thick"] == 0 and flat["pos"] == "inside"   # 횡보는 두께 0·구름 속
+
+
+def test_ichimoku_in_chart_pack():
+    """차트팩에 일목 상태가 실리고, 이력이 짧은 종목엔 안 실린다."""
+    def fake_hist(code, days=120):
+        n = 50 if code == "000660" else 120
+        return [{"date": f"d{i}", "close": 1000 + i, "vol": 10} for i in range(n)]
+    pack = collect.build_chart_pack(["005930", "000660"], {"005930": "삼성전자"},
+                                    fetch_hist=fake_hist)
+    assert pack["005930"]["ichimoku"]["pos"] == "above"
+    assert "ichimoku" not in pack["000660"]        # 50일 = 78일 미만이라 미부착
+    assert len(pack["000660"]["closes"]) == 50     # 차트는 그대로 그려진다
+
+
+def test_fetch_daily_hl_maps_fields():
+    """당일 시가·고가·저가 수집: 있는 필드만 싣고, 없으면 조용히 뺀다."""
+    def fake_fetch(codes):
+        return {
+            "005930": {"price": 100, "open": 98, "high": 105, "low": 97},
+            "000660": {"price": 200, "high": 210, "low": None},   # 저가 결측
+            "035420": {"price": 300},                              # 전부 결측
+        }
+    out = collect.fetch_daily_hl(["005930", "000660", "035420"], fetch=fake_fetch)
+    assert out["005930"] == {"day_open": 98, "day_high": 105, "day_low": 97}
+    assert out["000660"] == {"day_high": 210}      # 결측 필드는 빠진다
+    assert "035420" not in out                     # 실을 게 없으면 종목 자체가 빠진다
+    assert collect.fetch_daily_hl([], fetch=lambda c: None) == {}   # 응답 없음 방어
+
+
+def test_daily_hl_in_all_stocks():
+    """수집한 당일 고가·저가가 all_stocks 축약 레코드까지 실려 나가는지."""
+    stocks = [{"code": "005930", "name": "삼성전자", "price": 100.0,
+               "mktcap_100m": 500.0, "day_open": 98.0, "day_high": 105.0,
+               "day_low": 97.0},
+              {"code": "000660", "name": "SK하이닉스", "price": 200.0,
+               "mktcap_100m": 400.0}]
+    out = collect.assemble(stocks, [], [], {}, collect.datetime.now(collect.KST))
+    rec = {s["code"]: s for s in out["all_stocks"]}
+    assert rec["005930"]["day_high"] == 105.0 and rec["005930"]["day_low"] == 97.0
+    assert "day_high" not in rec["000660"]         # 없는 종목엔 키가 안 생긴다
+    json.dumps(out, ensure_ascii=False)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

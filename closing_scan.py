@@ -143,6 +143,10 @@ def parse_realtime(data):
         out[code] = {
             "price": _num(d.get("closePrice")),
             "high": _num(d.get("highPrice")),
+            # 시가·저가는 V6.3(2026-09-03)에 추가. 필드가 없으면 None으로 남고
+            # 저장 단계에서 조용히 빠진다 (collect.fetch_daily_hl 참조).
+            "open": _num(d.get("openPrice")),
+            "low": _num(d.get("lowPrice")),
             "volume": _num(d.get("accumulatedTradingVolume")),
             "chg": chg,
         }
