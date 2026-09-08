@@ -344,6 +344,20 @@ def test_ops_log_record():
     assert r3["data_final"] is False and r3["recover"] == "fail"
 
 
+def test_ops_log_missing_sends():
+    """무발송 감시(2026-09-08): 성적표 레코드에서 누락 항목명을 뽑는다."""
+    import ops_log
+    full = {"morning": True, "pulse": True, "scan": True, "evening": True}
+    assert ops_log.missing_sends(full) == []                       # 정상일엔 조용
+    part = {"morning": True, "pulse": False, "scan": False, "evening": True}
+    assert ops_log.missing_sends(part) == ["점심맥박", "종가스캔"]   # 스케줄러 사망 전형
+    assert ops_log.missing_sends({}) == ["아침브리핑", "점심맥박", "종가스캔", "저녁요약"]
+    # build_record 출력을 그대로 먹여도 동작 (실제 호출 경로)
+    rec = ops_log.build_record({"generated_at": "2026-09-07 19:13 KST"},
+                               {"morning": "2026-09-07"}, [], "2026-09-07")
+    assert ops_log.missing_sends(rec) == ["점심맥박", "종가스캔", "저녁요약"]
+
+
 def test_ops_log_append():
     """장부 추가: 같은 날짜 교체 + 보존 한도 + 정렬. 순수 함수라 파일 불필요."""
     import ops_log

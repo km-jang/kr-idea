@@ -49,6 +49,21 @@ def build_record(data, sent, scans, today, recover="none"):
     }
 
 
+SEND_LABELS = {"morning": "아침브리핑", "pulse": "점심맥박",
+               "scan": "종가스캔", "evening": "저녁요약"}
+
+
+def missing_sends(record):
+    """성적표 1건에서 발송·스캔 누락 항목명을 뽑는다. 순수 함수.
+
+    야간 점검(호출부)이 휴장일을 이미 걸러내므로, 여기 들어온 record의
+    False는 곧 진짜 누락이다. 정시 스케줄러(cron-job.org)가 멈추면
+    맥박·스캔이 시간 창 가드에 걸려 조용히 사라지는데, 그걸 잡는 마지막 그물이다.
+    """
+    return [SEND_LABELS[k] for k in ("morning", "pulse", "scan", "evening")
+            if not record.get(k)]
+
+
 def append_record(log, record, keep=KEEP_DAYS):
     """장부에 기록 추가 (같은 날짜는 최신으로 교체, keep일만 유지). 순수 함수."""
     if not isinstance(log, list):
@@ -80,6 +95,9 @@ def main():
     with open("ops.json", "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=1)
     print(f"ops 기록 완료: {record}")
+    miss = missing_sends(record)
+    if miss:                                   # 야간 점검이 이 줄을 읽어 텔레그램에 경고
+        print("SEND_MISSING=" + "·".join(miss))
 
 
 if __name__ == "__main__":
