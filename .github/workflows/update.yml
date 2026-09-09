@@ -293,11 +293,27 @@ jobs:
           DONE=$(python -c "import json;rs=json.load(open('scans.json'));print('yes' if any(r.get('date')=='$TODAY' for r in rs) else 'no')" 2>/dev/null || echo "no")
           if [ "$DONE" = "yes" ]; then echo "본 스캔 완료 확인 - 예비 조용히 종료"; exit 0; fi
           echo "본 스캔 누락 감지 - 예비 스캔 시작"
-          python closing_scan.py
+          # 발송이 실패해도 기록 커밋은 반드시 끝낸다 (2026-09-08 실사고).
+          # 예전엔 python이 exit 1로 죽으면 셸이 그 자리에서 멈춰 아래 git 줄이 통째로
+          # 건너뛰어졌고, 러너가 폐기되면서 방금 저장한 scans.json 기록까지 증발했다.
+          set +e
+          python closing_scan.py 2>&1 | tee scan_log.txt
+          RC=${PIPESTATUS[0]}
+          set -e
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
           git add scans.json 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "scan(예비): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+          if [ "$RC" != "0" ]; then
+            ERRT=$(tail -n 4 scan_log.txt 2>/dev/null | tail -c 500)
+            MSG="🚨 종가 스캔 예비가 실패했습니다 (기록 커밋은 시도 완료)
+          [오류 마지막 줄]
+          ${ERRT:-로그 없음}
+          이 줄을 그대로 복사해 AI에게 주세요 (PLAYBOOK 2.7절).
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \n              -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
+            exit $RC
+          fi
 
       - name: 야간 자가 점검 (23:03, 감시 + 자동 복구 + 실행 성적표)
         if: github.event.schedule == '3 14 * * 1-5' || github.event.inputs.job == 'night'
@@ -361,7 +377,7 @@ jobs:
             WARN="
 
           오늘 발송 안 됨: $MISS
-          정시 스케줄러(cron-job.org)가 멈췄을 수 있습니다. 로그인해서 작업 5개가 살아있는지 보세요.
+          그 작업의 실행이 실패했거나, 정시 스케줄러(cron-job.org)가 멈췄을 수 있습니다.
           PLAYBOOK 2.10절에 확인·복구 순서가 있습니다."
           fi
           if [ "$RECOVER" = "ok" ]; then
@@ -389,11 +405,27 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python closing_scan.py
+          # 발송이 실패해도 기록 커밋은 반드시 끝낸다 (2026-09-08 실사고).
+          # 예전엔 python이 exit 1로 죽으면 셸이 그 자리에서 멈춰 아래 git 줄이 통째로
+          # 건너뛰어졌고, 러너가 폐기되면서 방금 저장한 scans.json 기록까지 증발했다.
+          set +e
+          python closing_scan.py 2>&1 | tee scan_log.txt
+          RC=${PIPESTATUS[0]}
+          set -e
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
           git add scans.json 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "scan: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
+          if [ "$RC" != "0" ]; then
+            ERRT=$(tail -n 4 scan_log.txt 2>/dev/null | tail -c 500)
+            MSG="🚨 종가 스캔이 실패했습니다 (기록 커밋은 시도 완료)
+          [오류 마지막 줄]
+          ${ERRT:-로그 없음}
+          이 줄을 그대로 복사해 AI에게 주세요 (PLAYBOOK 2.7절).
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \n              -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
+            exit $RC
+          fi
 
       - name: 실패 자동 통보
         if: failure()
