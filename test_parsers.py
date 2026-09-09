@@ -856,17 +856,17 @@ def test_scan_record_and_review():
         cands = [{"code": "A", "name": "가", "price": 10000, "chg": 5.0, "notes": []},
                  {"code": "B", "name": "나", "price": 20000, "chg": 7.0, "notes": []}]
         cs.save_scan_record(cands, path=p)
-        rec = json.loads(open(p).read())
+        rec = json.loads(open(p, encoding="utf-8").read())
         assert len(rec) == 1 and len(rec[0]["candidates"]) == 2
         # 같은 날 재실행 → 덮어쓰기 (중복 없음)
         cs.save_scan_record(cands[:1], path=p)
-        rec = json.loads(open(p).read())
+        rec = json.loads(open(p, encoding="utf-8").read())
         assert len(rec) == 1 and len(rec[0]["candidates"]) == 1
 
         # 채점: 스캔일을 과거로 조작 후 오늘 가격으로 평가
         rec[0]["date"] = "2026-07-10"
         rec[0]["time"] = "15:04"   # 정상 시간 창 (V6.1 채점 조건)
-        open(p, "w").write(json.dumps(rec))
+        open(p, "w", encoding="utf-8").write(json.dumps(rec))
         stocks = [{"code": "A", "price": 10800}]      # +8%
         rv = collect.build_scan_review(p, stocks, "2026-07-11")
         assert rv and rv["date"] == "2026-07-10"
@@ -1889,12 +1889,12 @@ def test_dump_scan_and_stats():
     with tempfile.TemporaryDirectory() as td:
         sp = os.path.join(td, "scans.json")
         cs.save_scan_record([], path=sp, dumps=dumps)
-        rec = json.loads(open(sp).read())
+        rec = json.loads(open(sp, encoding="utf-8").read())
         assert rec[0]["dumps"][0]["code"] == "100010", rec
         # 채점: 기록일을 과거로 돌리고 히스토리 2일 준비
         rec[0]["date"] = "2026-08-03"
         rec[0]["time"] = "15:04"   # 정상 시간 창 (V6.1 채점 조건)
-        open(sp, "w").write(json.dumps(rec, ensure_ascii=False))
+        open(sp, "w", encoding="utf-8").write(json.dumps(rec, ensure_ascii=False))
         hd = os.path.join(td, "hist"); os.makedirs(hd)
         for day, px in (("2026-08-03", 10120), ("2026-08-04", 10627)):   # +5.01%
             (Path(hd) / f"{day}.json").write_text(json.dumps(
@@ -2082,6 +2082,103 @@ def test_daily_hl_in_all_stocks():
     assert rec["005930"]["day_high"] == 105.0 and rec["005930"]["day_low"] == 97.0
     assert "day_high" not in rec["000660"]         # 없는 종목엔 키가 안 생긴다
     json.dumps(out, ensure_ascii=False)
+
+
+
+def test_scan_retry_after_parse():
+    """텔레그램 429 응답에서 대기 초를 뽑는다 (2026-09-08 실사고)."""
+    import closing_scan as cs
+    body = {"ok": False, "error_code": 429,
+            "parameters": {"retry_after": 576}}
+    assert cs.retry_after(body) == 576
+    assert cs.retry_after({"ok": False}, 4) == 4          # 429가 아니면 기본값
+    assert cs.retry_after(None, 4) == 4
+    assert cs.retry_after({"parameters": {"retry_after": "x"}}, 4) == 4
+
+
+def _fake_env(monkey):
+    import os
+    orig = {k: os.environ.get(k) for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")}
+    os.environ["TELEGRAM_BOT_TOKEN"] = "tok"
+    os.environ["TELEGRAM_CHAT_ID"] = "chat"
+    return orig
+
+
+def _restore_env(orig):
+    import os
+    for k, v in orig.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+def test_scan_send_retries_on_429():
+    """429는 서버가 알려준 초만큼 기다렸다 재시도한다 (기록·알림 유실 방지)."""
+    import closing_scan as cs
+    calls, slept = [], []
+    class Resp429:
+        status_code = 429
+        text = '{"ok":false,"error_code":429}'
+        def json(self): return {"ok": False, "parameters": {"retry_after": 576}}
+    class RespOK:
+        status_code = 200
+        text = "ok"
+        def json(self): return {"ok": True}
+    def fake_post(*a, **k):
+        calls.append(1)
+        return Resp429() if len(calls) == 1 else RespOK()
+    orig_post, orig_sleep = cs.requests.post, cs.time.sleep
+    cs.requests.post = fake_post
+    cs.time.sleep = lambda s: slept.append(s)
+    env = _fake_env(None)
+    try:
+        assert cs.send_telegram("msg") is True
+        assert len(calls) == 2, f"재시도 1회여야 하는데 호출 {len(calls)}회"
+        assert slept == [576], f"576초 대기여야 하는데 {slept}"
+    finally:
+        cs.requests.post, cs.time.sleep = orig_post, orig_sleep
+        _restore_env(env)
+
+
+def test_scan_send_respects_wait_budget():
+    """대기 상한을 넘는 retry_after면 기다리지 않고 포기한다 (러너 30분 제한)."""
+    import closing_scan as cs
+    calls, slept = [], []
+    class Resp429:
+        status_code = 429
+        text = '{"ok":false,"error_code":429}'
+        def json(self): return {"ok": False, "parameters": {"retry_after": 9999}}
+    orig_post, orig_sleep = cs.requests.post, cs.time.sleep
+    cs.requests.post = lambda *a, **k: (calls.append(1), Resp429())[1]
+    cs.time.sleep = lambda s: slept.append(s)
+    env = _fake_env(None)
+    try:
+        assert cs.send_telegram("msg", max_wait=600) is False
+        assert len(calls) == 1 and slept == [], f"호출 {len(calls)}회 · 대기 {slept}"
+    finally:
+        cs.requests.post, cs.time.sleep = orig_post, orig_sleep
+        _restore_env(env)
+
+
+def test_scan_send_no_retry_on_client_error():
+    """400번대 설정 오류는 재시도 없이 즉시 중단 (429 제외)."""
+    import closing_scan as cs
+    calls = []
+    class Resp400:
+        status_code = 400
+        text = "Bad Request: chat not found"
+        def json(self): return {"ok": False}
+    orig_post, orig_sleep = cs.requests.post, cs.time.sleep
+    cs.requests.post = lambda *a, **k: (calls.append(1), Resp400())[1]
+    cs.time.sleep = lambda s: None
+    env = _fake_env(None)
+    try:
+        assert cs.send_telegram("msg") is False
+        assert len(calls) == 1, f"400 오류인데 {len(calls)}회 호출"
+    finally:
+        cs.requests.post, cs.time.sleep = orig_post, orig_sleep
+        _restore_env(env)
 
 
 if __name__ == "__main__":

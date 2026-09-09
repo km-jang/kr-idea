@@ -263,18 +263,55 @@ def build_scan_message(cands, now=None, dumps=None):
     return "\n".join(lines)
 
 
-def send_telegram(text):
+def retry_after(payload, default=0):
+    """텔레그램 429 응답에서 "몇 초 뒤에 다시 오라"는 값을 뽑는다. 순수 함수.
+
+    2026-09-08 실사고: 429(Too Many Requests, retry after 576)를 한 번 맞고
+    재시도 없이 죽는 바람에 종가 스캔 알림과 기록이 통째로 날아갔다.
+    """
+    try:
+        return int((payload or {}).get("parameters", {}).get("retry_after") or default)
+    except (TypeError, ValueError, AttributeError):
+        return default
+
+
+def send_telegram(text, retries=3, wait_s=4, max_wait=600):
+    """텔레그램 발송. notify.send와 같은 재시도 정책 + 429는 서버가 알려준 만큼 기다린다.
+
+    max_wait는 대기 시간의 총 상한(초)이다. 러너 제한 30분 안에 반드시 끝나야 한다.
+    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         print("텔레그램 시크릿 없음 - 발송 생략")
         return True
-    r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                      json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                            "disable_web_page_preview": True}, timeout=20)
-    ok = r.status_code == 200 and r.json().get("ok")
-    print("발송 완료" if ok else f"발송 실패: {r.status_code} {r.text[:200]}")
-    return ok
+    last, budget = "", max_wait
+    for attempt in range(1, retries + 1):
+        wait = wait_s
+        try:
+            r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                              json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                                    "disable_web_page_preview": True}, timeout=20)
+            if r.status_code == 200 and r.json().get("ok"):
+                print("발송 완료")
+                return True
+            last = f"{r.status_code} {r.text[:200]}"
+            if r.status_code == 429:
+                try:
+                    wait = retry_after(r.json(), wait_s) or wait_s
+                except Exception:
+                    wait = wait_s
+            elif 400 <= r.status_code < 500:
+                break                      # 토큰·챗ID 오류는 재시도해도 소용없음
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {exc}"
+        if attempt >= retries or wait > budget:
+            break
+        print(f"발송 실패({attempt}/{retries}) - {wait}초 후 재시도: {last}")
+        time.sleep(wait)
+        budget -= wait
+    print(f"텔레그램 발송 실패: {last}")
+    return False
 
 
 def build_pulse_message(data, quotes, now=None):
