@@ -1,15 +1,5 @@
 [
  {
-  "date": "2026-07-29",
-  "data_final": true,
-  "data_gen": "2026-07-29 21:20 KST",
-  "morning": true,
-  "pulse": true,
-  "evening": true,
-  "scan": true,
-  "recover": "none"
- },
- {
   "date": "2026-07-30",
   "data_final": true,
   "data_gen": "2026-07-30 21:03 KST",
@@ -298,5 +288,15 @@
   "evening": false,
   "scan": true,
   "recover": "fail"
+ },
+ {
+  "date": "2026-09-14",
+  "data_final": true,
+  "data_gen": "2026-09-14 19:14 KST",
+  "morning": true,
+  "pulse": true,
+  "evening": true,
+  "scan": true,
+  "recover": "none"
  }
 ]
