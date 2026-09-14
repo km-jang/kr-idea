@@ -116,7 +116,9 @@ jobs:
           EOF
 
       - name: 결과 통보
-        if: always()
+        # 취소된 점검(연속 업로드로 다음 커밋에 밀린 것)은 통보하지 않는다 (2026-09-14 헛경보 수정).
+        # always()였을 때는 취소도 "깨졌습니다"로 나갔다. 마지막 커밋의 점검만 ✅/⛔를 보낸다.
+        if: ${{ !cancelled() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
