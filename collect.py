@@ -2259,6 +2259,57 @@ SCREEN_LABELS = {"vacancy": "🏦 빈집털이", "pullback": "🎯 대장주 눌
                  "hotmoney": "🔥 종합 수급", "stealth": "🤫 몰래 매집",
                  "gate52": "🚪 신고가 문앞", "turnflow": "🚰 수급 물꼬"}
 
+# ---------------------------------------------------------------------------
+# 벤치 제도 (V6.8, 소유자 결정 2026-09-14): 개시 이후 누적 성적이 나쁜 신호는 화면·브리핑에서
+# 숨기되 채점은 계속한다. 최근 성적이 살아나거나 연속으로 좋으면 자동 부활, 다시 나빠지면 자동 복귀.
+# 판정은 매일 저녁 수집이 하고 data.json에 benched/revived 플래그로 실린다 (키 추가만, 규칙 1 무해).
+# 화면(index·swing)·저녁 요약(notify)·종가 스캔(closing_scan)은 플래그만 읽는다 = 기준은 여기 한 곳.
+# 벤치 목록을 바꿀 때는 index.html BENCHED_DEFAULT · notify.py BENCHED_DEFAULT(구 데이터 폴백)도 함께.
+# ---------------------------------------------------------------------------
+CONFIG_BENCH = {
+    "screens": ("gate52", "hotmoney"),       # 검색식 벤치: 신고가 문앞(1차 복기) · 종합 수급(2차 복기)
+    "signals": ("dump", "phase_pullback"),   # 그 밖의 벤치: 🩸 마감 투매 눌림 · 🪜 조정 대기 매수
+    # 연속 조건: 최근 10거래일 창과 그 앞 10거래일 창이 둘 다 표본 5건↑ · 승률 55%↑ · 다음날 평균 +
+    "win_days": 10, "win_min_n": 5, "win_min_rate": 0.55,
+    # 살아남 조건: 최근 20거래일 누적 표본 10건↑ · 승률 60%↑ · 다음날 평균 +1% 초과
+    "alive_min_n": 10, "alive_min_rate": 0.60, "alive_min_avg": 1.0,
+    # 창이 없는 신호(투매·조정대기는 누적만 있음): 누적 표본 10건↑ · 승률 50%↑ · 평균 +
+    "cum_min_n": 10, "cum_min_rate": 0.50, "cum_min_avg": 0.0,
+}
+
+
+def _good(n, win, avg, min_n, min_rate, min_avg):
+    """성적 한 묶음이 기준을 넘는지 (표본 · 승률 · 평균 셋 다)."""
+    try:
+        return bool(n and n >= min_n and win / n >= min_rate
+                    and avg is not None and avg > min_avg)
+    except (TypeError, ZeroDivisionError):
+        return False
+
+
+def screen_revival(st, cfg=None):
+    """검색식 하나의 성적 dict(build_screen_stats 산출)로 부활 여부 판정. 순수 함수.
+    연속(최근 10일 창 w1 · 그 앞 10일 창 w2 둘 다 좋음) 또는 살아남(최근 20일 누적) 중 하나면 True."""
+    cfg = cfg or CONFIG_BENCH
+    st = st or {}
+    w1, w2 = st.get("w1") or {}, st.get("w2") or {}
+    both = all(_good(w.get("n1", 0), w.get("win1", 0), w.get("avg1"),
+                     cfg["win_min_n"], cfg["win_min_rate"], 0.0) for w in (w1, w2))
+    alive = _good(st.get("n1", 0), st.get("win1", 0), st.get("avg1"),
+                  cfg["alive_min_n"], cfg["alive_min_rate"], cfg["alive_min_avg"])
+    return both or alive
+
+
+def bench_flags(stat, benched, cfg=None):
+    """누적형 성적 dict({"n","win","avg_pct"})에 benched/revived 플래그를 덧붙여 돌려준다 (키 추가만).
+    벤치가 아니면 revived도 False (부활 개념이 없다). 빈 dict도 플래그만 붙어 나간다."""
+    cfg = cfg or CONFIG_BENCH
+    out = dict(stat or {})
+    out["benched"] = bool(benched)
+    out["revived"] = bool(benched) and _good(out.get("n", 0), out.get("win", 0), out.get("avg_pct"),
+                                             cfg["cum_min_n"], cfg["cum_min_rate"], cfg["cum_min_avg"])
+    return out
+
 # 검색식 공통 ETF 제외 (V5.4): 검색식은 개별 종목 발굴이 목적인데 지수 상품이 섞이면
 # 잡음이 된다 (2026-08-06 신고가 문앞에 채권 ETF가 실제로 잡힌 사례).
 # 이름 앞머리(운용사 브랜드) 기준으로 거른다. 새 브랜드가 생기면 여기에 추가.
@@ -2420,22 +2471,41 @@ def build_screen_stats(hist_dir, max_days=20):
         return {}
     px = [{s.get("code"): s.get("price")
            for s in d.get("all_stocks") or [] if s.get("code")} for d in days]
+    # V6.8 벤치 제도: 누적(n1·win1)에 avg1과 최근 10일 창(w1) · 그 앞 10일 창(w2)을 덧붙이고
+    # 벤치 검색식엔 benched/revived 플래그를 단다 (키 추가만). 창 경계는 "다음날 종가가 있는 신호일" 기준.
     stats = {}
+    n_sig = len(days) - 1                     # 판정 가능한 신호일 수 (마지막 날은 다음날이 없다)
+    wd = CONFIG_BENCH["win_days"]
+    fresh = lambda: {"n1": 0, "win1": 0, "_sum": 0.0}
     for i, d in enumerate(days):
         for key, items in (d.get("screens") or {}).items():
-            st = stats.setdefault(key, {"days": 0, "hits": 0, "win1": 0, "n1": 0})
+            st = stats.setdefault(key, {"days": 0, "hits": 0, "win1": 0, "n1": 0, "_sum": 0.0,
+                                        "w1": fresh(), "w2": fresh()})
             if not items:
                 continue
             st["days"] += 1
             st["hits"] += len(items)
             if i + 1 >= len(days):
                 continue                 # 마지막 날은 다음날 종가가 아직 없다
+            buckets = [st]
+            if i >= n_sig - wd:
+                buckets.append(st["w1"])
+            elif i >= n_sig - 2 * wd:
+                buckets.append(st["w2"])
             for it in items:
                 p0, p1 = px[i].get(it.get("code")), px[i + 1].get(it.get("code"))
                 if p0 and p1:
-                    st["n1"] += 1
-                    if p1 > p0:
-                        st["win1"] += 1
+                    r = (p1 / p0 - 1) * 100
+                    for b in buckets:
+                        b["n1"] += 1
+                        b["_sum"] += r
+                        if p1 > p0:
+                            b["win1"] += 1
+    for key, st in stats.items():
+        for b in (st, st["w1"], st["w2"]):
+            b["avg1"] = round(b.pop("_sum") / b["n1"], 2) if b["n1"] else None
+        st["benched"] = key in CONFIG_BENCH["screens"]
+        st["revived"] = st["benched"] and screen_revival(st)
     return stats
 
 
@@ -3255,6 +3325,9 @@ def run_full(max_universe=None, out_path=None):
     # 돌파 국면 추적 (V5.9) — 부가 기능, 실패해도 수집을 막지 않는다
     try:
         phase_track = build_phase_track(hist_dir, stocks, market_date)
+        # V6.8 벤치: 조정 대기 매수 성적에 benched/revived 플래그 (swing.html이 섹션 표시 여부를 이걸로 정함)
+        phase_track["pullback"] = bench_flags(phase_track.get("pullback"),
+                                              "phase_pullback" in CONFIG_BENCH["signals"])
         if phase_track.get("watch"):
             print(f"  → 돌파 후 조정 관찰 {len(phase_track['watch'])}종목")
     except Exception as e:
@@ -3271,6 +3344,8 @@ def run_full(max_universe=None, out_path=None):
     # 마감 투매 눌림 성적 (V6.0) — 부가 기능, 실패해도 수집을 막지 않는다
     try:
         dump_stats = build_dump_stats(ROOT / "scans.json", hist_dir)
+        # V6.8 벤치: 종가 스캔 텔레그램이 이 플래그로 🩸 블록 표시 여부를 정한다 (기록·채점은 계속)
+        dump_stats = bench_flags(dump_stats, "dump" in CONFIG_BENCH["signals"])
     except Exception as e:
         errors.append(f"dump_stats: {e}")
         dump_stats = {}

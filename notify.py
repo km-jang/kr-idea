@@ -423,16 +423,26 @@ SCREEN_LABELS = {"vacancy": "🏦 빈집털이", "pullback": "🎯 대장주 눌
                  "hotmoney": "🔥 종합 수급", "stealth": "🤫 몰래 매집",
                  "gate52": "🚪 신고가 문앞", "turnflow": "🚰 수급 물꼬"}
 
+BENCHED_DEFAULT = ("gate52", "hotmoney")   # 구 data.json(플래그 없음) 폴백 · 원본은 collect.CONFIG_BENCH
+
+
 def screen_lines(data):
-    """조건 검색 적중 블록 (저녁 요약용) - 적중 없으면 빈 리스트."""
+    """조건 검색 적중 블록 (저녁 요약용) - 적중 없으면 빈 리스트.
+    V6.8 벤치 제도: 누적 부진 검색식은 채점만 계속하고 브리핑엔 안 싣는다. 서버 판정(screen_stats의
+    benched/revived)이 부활이면 🔁 표시로 돌아온다. 플래그가 없는 구 데이터는 기본 벤치 목록으로."""
     e = lambda t: html.escape(str(t or ""))
     screens = data.get("screens") or {}
+    stats = data.get("screen_stats") or {}
     out = []
     for key, label in SCREEN_LABELS.items():
         hits = screens.get(key) or []
+        st = stats.get(key) or {}
+        benched = st["benched"] if "benched" in st else (key in BENCHED_DEFAULT)
+        if benched and not st.get("revived"):
+            continue
         if hits:
             names = " · ".join(f"<b>{e(h['name'])}</b>({e(h['why'])})" for h in hits[:3])
-            out.append(f"{label}: {names}")
+            out.append(f"{'🔁 ' if benched else ''}{label}: {names}")
     if out:
         out.insert(0, "🔎 <b>조건 검색 적중</b>")
         out.append("")

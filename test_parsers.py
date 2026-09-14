@@ -2293,6 +2293,72 @@ def test_last_trading_day():
     assert holidays_kr.last_trading_day("garbage").count("-") == 2       # 불량 입력도 죽지 않음
 
 
+def test_bench_revival_rules():
+    """V6.8 벤치 제도: 검색식 부활 판정(연속 2창 / 살아남)과 누적형 플래그. 순수 함수."""
+    g = lambda n, w, a: {"n1": n, "win1": w, "avg1": a}
+    # 연속: 최근 10일 창과 그 앞 10일 창이 둘 다 표본 5↑ · 승률 55%↑ · 평균 +
+    assert collect.screen_revival({"n1": 12, "win1": 7, "avg1": 0.3,
+                                   "w1": g(6, 4, 0.5), "w2": g(6, 4, 0.2)}) is True
+    # 한 창만 좋으면 아직 아님
+    assert collect.screen_revival({"n1": 12, "win1": 7, "avg1": 0.3,
+                                   "w1": g(6, 4, 0.5), "w2": g(6, 2, -0.2)}) is False
+    # 살아남: 최근 20일 누적 표본 10↑ · 승률 60%↑ · 평균 +1% 초과 (창 하나가 나빠도 통과)
+    assert collect.screen_revival({"n1": 10, "win1": 7, "avg1": 1.4,
+                                   "w1": g(5, 4, 2.0), "w2": g(5, 1, -1.0)}) is True
+    assert collect.screen_revival({"n1": 10, "win1": 7, "avg1": 0.8, "w1": {}, "w2": {}}) is False
+    assert collect.screen_revival({}) is False
+    # 누적형(투매·조정대기): 표본 10↑ · 승률 50%↑ · 평균 +
+    st = collect.bench_flags({"n": 21, "win": 7, "avg_pct": -0.49}, True)
+    assert st["benched"] is True and st["revived"] is False and st["n"] == 21, st
+    assert collect.bench_flags({"n": 12, "win": 7, "avg_pct": 0.6}, True)["revived"] is True
+    assert collect.bench_flags({}, True) == {"benched": True, "revived": False}
+    nb = collect.bench_flags({"n": 3, "win": 0, "avg_pct": -5}, False)
+    assert nb["benched"] is False and nb["revived"] is False
+    assert "gate52" in collect.CONFIG_BENCH["screens"] and "hotmoney" in collect.CONFIG_BENCH["screens"]
+
+
+def test_screen_stats_windows_and_bench():
+    """build_screen_stats가 avg1 · 최근 10일 창(w1/w2) · 벤치 플래그를 덧붙이는지 (기존 키는 그대로)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        px = [100, 110, 99, 120]     # 가상A 종가: 상승 · 하락 · 상승
+        for i, p in enumerate(px):
+            doc = {"market_date": f"2026-08-0{i+1}",
+                   "screens": {"hotmoney": [{"code": "000001", "name": "가상A"}], "vacancy": []},
+                   "all_stocks": [{"code": "000001", "price": p}]}
+            (Path(td) / f"2026-08-0{i+1}.json").write_text(json.dumps(doc), encoding="utf-8")
+        allst = collect.build_screen_stats(td)
+        st = allst["hotmoney"]
+        assert st["n1"] == 3 and st["win1"] == 2 and st["hits"] == 4, st   # 마지막 날은 다음날이 없다
+        assert st["w1"]["n1"] == 3 and st["w2"]["n1"] == 0, st             # 4일치는 전부 최근 10일 창
+        assert abs(st["avg1"] - 7.07) < 0.05 and st["w1"]["avg1"] == st["avg1"], st
+        assert st["w2"]["avg1"] is None, st
+        assert st["benched"] is True and st["revived"] is False, st         # 표본 3건은 부활 조건 미달
+        assert allst["vacancy"]["benched"] is False and allst["vacancy"]["revived"] is False
+
+
+def test_notify_screen_lines_bench():
+    """벤치 검색식은 저녁 요약에서 빠지고, 서버가 부활 판정하면 🔁 표시로 돌아온다."""
+    import notify
+    hits = {"hotmoney": [{"code": "A", "name": "과열주", "why": "대금 5배"}]}
+    assert notify.screen_lines({"screens": hits}) == []          # 구 데이터(플래그 없음) → 기본 벤치
+    assert notify.screen_lines({"screens": hits,
+                                "screen_stats": {"hotmoney": {"benched": True, "revived": False}}}) == []
+    out = "\n".join(notify.screen_lines({"screens": hits,
+                                         "screen_stats": {"hotmoney": {"benched": True, "revived": True}}}))
+    assert "과열주" in out and "🔁" in out, out
+    out2 = "\n".join(notify.screen_lines({"screens": {"vacancy": [{"code": "B", "name": "빈집주", "why": "기관"}]}}))
+    assert "빈집주" in out2 and "🔁" not in out2, out2
+
+
+def test_scan_message_dumps_bench():
+    """🩸 투매 눌림 블록: show_dumps=False면 기록만 하고 메시지엔 싣지 않는다."""
+    import closing_scan as cs
+    dumps = [{"name": "투매주", "price": 10000, "notes": ["전일 +8%", "고가 대비 -8%"]}]
+    assert "마감 투매 눌림" in cs.build_scan_message([], dumps=dumps)
+    assert "마감 투매 눌림" not in cs.build_scan_message([], dumps=dumps, show_dumps=False)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

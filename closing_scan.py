@@ -241,7 +241,8 @@ def scan_dump_candidates(universe, quotes, cfg=None):
     return out[:cfg["top_n"]]
 
 
-def build_scan_message(cands, now=None, dumps=None):
+def build_scan_message(cands, now=None, dumps=None, show_dumps=True):
+    """show_dumps=False면 🩸 투매 눌림 블록을 싣지 않는다 (V6.8 벤치: 기록·채점은 계속, 표시는 부활 시만)."""
     e = html.escape
     now = now or datetime.now(KST)
     lines = [f"🔔 <b>종가매매 후보 스캔</b>  <i>({now:%H:%M} 기준)</i>", ""]
@@ -251,7 +252,7 @@ def build_scan_message(cands, now=None, dumps=None):
         for i, c in enumerate(cands, 1):
             lines.append(f"{i}. <b>{e(c['name'])}</b> {c['price']:,.0f}원")
             lines.append(f"   {e(' · '.join(c['notes']))}")
-    if dumps:
+    if dumps and show_dumps:
         lines.append("")
         lines.append("🩸 <b>마감 투매 눌림</b> <i>(재료는 살아있는데 막판에 밀린 종목 · 관찰용)</i>")
         for c in dumps:
@@ -445,8 +446,12 @@ def main():
     except Exception as exc:
         print(f"투매 눌림 스캔 실패(무시): {exc}")
         dumps = []
-    msg = build_scan_message(cands, dumps=dumps)
-    print(f"[2/2] 후보 {len(cands)}건 · 투매 눌림 {len(dumps)}건")
+    # V6.8 벤치: 투매 눌림은 누적 성적이 나쁘면 기록만 남기고 메시지엔 안 싣는다 (부활 판정은 collect.py)
+    ds = data.get("dump_stats") or {}
+    show_dumps = (not ds.get("benched")) or bool(ds.get("revived"))
+    msg = build_scan_message(cands, dumps=dumps, show_dumps=show_dumps)
+    print(f"[2/2] 후보 {len(cands)}건 · 투매 눌림 {len(dumps)}건"
+          + ("" if show_dumps else " (벤치 · 기록만, 발송 제외)"))
     if args.dry_run:
         print(msg)
         return

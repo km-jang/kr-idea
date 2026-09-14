@@ -259,7 +259,11 @@ fetch("data.json?t="+Date.now())
     const pstat = (s, label) => (s && s.n)
       ? `${label} ${s.n}건 · 승률 ${Math.round(s.win/s.n*100)}% · 다음날 평균 <span class="${s.avg_pct>0?"up":s.avg_pct<0?"down":"flat"}">${s.avg_pct>0?"+":""}${s.avg_pct}%</span>${s.n<30?' <span style="color:var(--warn);font-size:11px;font-weight:700">🌱 표본 부족</span>':""}`
       : `${label} 집계 준비 중`;
-    if(ptw.length || (pt.chase && pt.chase.n)){
+    /* V6.8 벤치: 조정 대기 매수가 누적 부진이면(서버 판정 benched·미부활) 섹션 자체를 숨긴다.
+       채점은 계속되고 메인 📋 통지표에 🪑 벤치로 남는다. 살아나면 플래그가 바뀌어 자동으로 돌아온다. */
+    const pbench = pt.pullback || {};
+    const pHidden = !!pbench.benched && !pbench.revived;
+    if(!pHidden && (ptw.length || (pt.chase && pt.chase.n))){
       document.getElementById("phaseSec").style.display = "";
       const nm = w => `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${w.code}">${esc(w.name)}</a>`;
       const groups = [1,2].map(adj=>{

@@ -954,21 +954,52 @@ function ideaCards(d, override){
 const SCREEN_LABELS_UI = {vacancy:"🏦 빈집털이", pullback:"🎯 대장주 눌림목",
   hotmoney:"🔥 종합 수급", stealth:"🤫 몰래 매집", gate52:"🚪 신고가 문앞",
   turnflow:"🚰 수급 물꼬"};
-/* V5.4 검색식 토글: 기기별 브라우저 저장. 신고가 문앞은 성적 부진(4주 승률 39%,
-   3일 후 -3.5%)으로 기본 꺼짐. ⚙에서 언제든 다시 켤 수 있다. */
-const SCKEY = "kr_idea_screens";
-const DEF_SCREENS_ON = {vacancy:true, pullback:true, hotmoney:true, stealth:true, gate52:false,
+/* V5.4 검색식 토글 → V6.8 벤치 제도 (소유자 결정 2026-09-14).
+   개시 이후 누적 성적이 나쁜 검색식은 "벤치"(기본 숨김 · 채점은 계속). 서버(collect.py CONFIG_BENCH)가
+   매일 최근 성적으로 부활 여부를 판정해 screen_stats[k].benched/revived로 내려주고, 화면은 그 플래그만 읽는다.
+   사용자가 ⚙에서 직접 켬/끔을 고르면 그 기기에서는 그 선택이 우선(자동 판정 무시)이고 "자동"으로 되돌릴 수 있다.
+   저장 키를 kr_idea_screens2로 올렸다 (옛 키는 전 항목을 통째로 저장해 '자동' 상태를 표현할 수 없었다). */
+const SCKEY = "kr_idea_screens2";
+const BENCHED_DEFAULT = {gate52:true, hotmoney:true};   // 구 data.json(플래그 없음) 폴백 · 원본은 collect.py
+const DEF_SCREENS_ON = {vacancy:true, pullback:true, hotmoney:false, stealth:true, gate52:false,
   turnflow:true};
-const getScreensOn = () => { try { return {...DEF_SCREENS_ON, ...(JSON.parse(localStorage.getItem(SCKEY))||{})}; } catch(e){ return {...DEF_SCREENS_ON}; } };
-const setScreensOn = o => { try { localStorage.setItem(SCKEY, JSON.stringify(o)); } catch(e){} };
+const getOverrides = () => { try { return JSON.parse(localStorage.getItem(SCKEY)) || {}; } catch(e){ return {}; } };
+const setOverrides = o => { try { localStorage.setItem(SCKEY, JSON.stringify(o)); } catch(e){} };
+/* 벤치 상태 {benched, revived} · 플래그 없는 구 데이터는 기본 벤치 목록으로 */
+function screenBench(d, k){
+  const st = ((d && d.screen_stats) || {})[k] || {};
+  const benched = st.benched != null ? !!st.benched : !!BENCHED_DEFAULT[k];
+  return {benched, revived: benched && !!st.revived};
+}
+/* 실제 표시 여부: 사용자 선택 > 자동(벤치면 부활 시만, 아니면 기본값) */
+function getScreensOn(d){
+  const ov = getOverrides(), on = {};
+  for(const k in SCREEN_LABELS_UI){
+    if(ov[k] === true || ov[k] === false){ on[k] = ov[k]; continue; }
+    const b = screenBench(d, k);
+    on[k] = b.benched ? b.revived : !!DEF_SCREENS_ON[k];
+  }
+  return on;
+}
+const BENCH_TAG = s => !s || !s.benched ? "" : s.revived
+  ? ' <span style="font-size:10.5px;color:var(--sc-mom);font-weight:700">🔁 부활</span>'
+  : ' <span style="font-size:10.5px;color:var(--ink-3)">🪑 벤치</span>';
 let SCREEN_CFG_OPEN = false;
 
 function screenStatLine(d, k){
   const st = (d.screen_stats||{})[k];
-  if(!st || !st.n1) return "성적 집계 준비 중 (다음 수집부터 쌓임)";
+  const b = screenBench(d, k);
+  const bench = b.benched ? (b.revived ? " · 🔁 부활 중 (최근 성적이 조건 충족)"
+                                       : " · 🪑 벤치 (누적 부진 · 채점은 계속 · 살아나면 자동 부활)") : "";
+  if(!st || !st.n1) return "성적 집계 준비 중 (다음 수집부터 쌓임)" + bench;
   const pct = Math.round(st.win1 / st.n1 * 100);
   const small = st.n1 < 10 ? " · 참고만" : "";
-  return `최근 4주 적중 ${st.hits}건 · 다음날 승률 ${pct}% (표본 ${st.n1}건${small})`;
+  const avg = st.avg1 != null ? ` · 평균 ${st.avg1>0?"+":""}${st.avg1}%` : "";
+  const w = (st.w1 && st.w1.n1)
+    ? ` · 최근 10일 승률 ${Math.round(st.w1.win1/st.w1.n1*100)}%` +
+      ((st.w2 && st.w2.n1) ? ` / 그 앞 10일 ${Math.round(st.w2.win1/st.w2.n1*100)}%` : "")
+    : "";
+  return `최근 4주 적중 ${st.hits}건 · 다음날 승률 ${pct}%${avg} (표본 ${st.n1}건${small})${w}${bench}`;
 }
 
 function screensBox(d){
@@ -982,22 +1013,31 @@ function screensBox(d){
       if(g){ SCREEN_CFG_OPEN = !SCREEN_CFG_OPEN; screensBox(el._d); return; }
       const t = e.target.closest("[data-sctoggle]");
       if(t){
-        const on = getScreensOn();
         const k = t.getAttribute("data-sctoggle");
-        on[k] = !on[k]; setScreensOn(on); screensBox(el._d);
+        const ov = getOverrides();
+        if(screenBench(el._d, k).benched){
+          /* 벤치 검색식: 자동 → 켬 → 끔 → 자동 순환 */
+          const cur = ov[k];
+          if(cur == null) ov[k] = true; else if(cur === true) ov[k] = false; else delete ov[k];
+        } else {
+          /* 일반 검색식: 켬 ↔ 끔 (기본값과 같아지면 저장하지 않는다) */
+          const next = !getScreensOn(el._d)[k];
+          if(next === !!DEF_SCREENS_ON[k]) delete ov[k]; else ov[k] = next;
+        }
+        setOverrides(ov); screensBox(el._d);
       }
     });
   }
   el._d = d;
   const sc = d.screens || {};
-  const on = getScreensOn();
+  const on = getScreensOn(d);
   const parts = [];
   let hiddenHits = 0;
   for(const k in SCREEN_LABELS_UI){
     const hits = sc[k] || [];
     if(!hits.length) continue;
     if(!on[k]){ hiddenHits += hits.length; continue; }
-    parts.push(`<div style="margin:4px 0"><b>${SCREEN_LABELS_UI[k]}</b> · ` +
+    parts.push(`<div style="margin:4px 0"><b>${SCREEN_LABELS_UI[k]}</b>${BENCH_TAG(screenBench(d,k))} · ` +
       hits.map(h=>`<span class="qn" data-c="${h.code}" data-n="${esc(h.name)}">${esc(h.name)}</span>`+
                   ` <span style="color:var(--ink-3);font-size:11.5px">${esc(h.why)}</span>`).join(" / ") +
       `</div>`);
@@ -1008,19 +1048,24 @@ function screensBox(d){
   if(parts.length){
     body = `<div style="font-size:13px;line-height:1.9">${parts.join("")}</div>`;
   } else if(hiddenHits){
-    body = `<div style="font-size:12.5px;color:var(--ink-3)">꺼둔 검색식에서만 ${hiddenHits}건 적중 · ⚙에서 켤 수 있어요</div>`;
+    body = `<div style="font-size:12.5px;color:var(--ink-3)">숨긴 검색식(🪑 벤치·끔)에서만 ${hiddenHits}건 적중 · ⚙에서 볼 수 있어요</div>`;
   }
   let cfg = "";
   if(SCREEN_CFG_OPEN){
+    const ovAll = getOverrides();
     cfg = `<div style="margin-top:8px;border-top:1px dashed var(--ink-3);padding-top:6px;font-size:12.5px">` +
       Object.keys(SCREEN_LABELS_UI).map(k=>{
         const isOn = !!on[k];
+        const auto = ovAll[k] !== true && ovAll[k] !== false;
+        const b = screenBench(d, k);
+        const label = (b.benched && auto) ? (isOn ? "🔁 자동 켬" : "🪑 자동 숨김") : (isOn ? "켬" : "끔") + (auto ? "" : " (직접)");
+        const tip = b.benched ? "누르면 자동 → 켬 → 끔 → 자동 순환" : "켜기/끄기";
         return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0">
           <span><b>${SCREEN_LABELS_UI[k]}</b><br><span style="color:var(--ink-3);font-size:11.5px">${screenStatLine(d,k)}</span></span>
-          <span data-sctoggle="${k}" role="button" style="cursor:pointer;user-select:none;white-space:nowrap;padding:2px 11px;border-radius:99px;font-size:11.5px;font-weight:700;${isOn?"background:var(--series-1);color:#fff":"border:1px solid var(--ink-3);color:var(--ink-3)"}">${isOn?"켬":"끔"}</span>
+          <span data-sctoggle="${k}" role="button" title="${tip}" style="cursor:pointer;user-select:none;white-space:nowrap;padding:2px 11px;border-radius:99px;font-size:11.5px;font-weight:700;${isOn?"background:var(--series-1);color:#fff":"border:1px solid var(--ink-3);color:var(--ink-3)"}">${label}</span>
         </div>`;
       }).join("") +
-      `<div style="color:var(--ink-3);font-size:11px;margin-top:4px">설정은 이 기기 브라우저에 저장 · 텔레그램 브리핑에는 적용 안 됨</div></div>`;
+      `<div style="color:var(--ink-3);font-size:11px;margin-top:4px">🪑 벤치 = 누적 성적 부진으로 숨김 (채점은 계속). 최근 10일 창 2번 연속 승률 55%↑·평균 + 이거나 최근 20일 승률 60%↑·평균 +1%↑면 서버가 자동 부활시킴 · 직접 고른 켬/끔은 이 기기에만 저장, 텔레그램에는 서버 판정만 적용</div></div>`;
   }
   el.style.display = "";
   el.innerHTML = `<div class="bars" style="border-left:3px solid var(--series-1)">
@@ -1398,6 +1443,14 @@ function raceChart(d){
 }
 
 /* ---------- 내 포트폴리오 (브라우저 저장) ---------- */
+/* S18 리스크 예산 지킴이 (V6.9, C3 손절 지킴이 포함): 손실 한도 2개를 브라우저에 저장하고
+   포트폴리오 리스크 진단이 도달(🔴)·접근(⚠️, 한도의 60%)을 조건부로 알린다. 판정은 전부 브라우저(0원),
+   조건 밖이면 0픽셀. 한도는 "보유 종목" 타일의 ⚙ 줄을 눌러 바꾼다. 월 누적 한도는 2단계(일별 평가액 스냅샷 필요) */
+const RISK_KEY = "kr_idea_risk_budget";
+const RISK_DEF = {stock: 7, total: 10};   // 손실 한도(%) · 양수로 저장, 표시는 -7% · -10%
+const getRisk = () => { try { const r = JSON.parse(localStorage.getItem(RISK_KEY)) || {};
+  return {stock: Math.abs(+r.stock) || RISK_DEF.stock, total: Math.abs(+r.total) || RISK_DEF.total}; } catch(e){ return {...RISK_DEF}; } };
+const setRisk = r => { try { localStorage.setItem(RISK_KEY, JSON.stringify(r)); } catch(e){} };
 const PKEY = "kr_idea_port";
 const getPort = () => { try { return JSON.parse(localStorage.getItem(PKEY)) || []; } catch(e){ return []; } };
 const setPort = a => { try { localStorage.setItem(PKEY, JSON.stringify(a)); } catch(e){} };
@@ -1438,8 +1491,11 @@ function portSection(d){
 
   tiles.style.display="";
   const totRet = totCost? (totVal/totCost-1)*100 : 0;
+  const rb = getRisk();
   tiles.innerHTML =
-    `<div class="tile"><div class="lbl">총 평가액</div><div class="val">${won(totVal)}</div></div>`+
+    /* S18 한도 줄은 "총 평가액" 타일에 둔다: 옆 "총 손익" 타일이 이미 3줄이라 모바일 2열에서도 행 높이가 안 늘어난다 (0픽셀) */
+    `<div class="tile"><div class="lbl">총 평가액</div><div class="val">${won(totVal)}</div>
+      <div class="lbl" data-riskcfg role="button" title="손실 한도 바꾸기" style="cursor:pointer;white-space:nowrap">한도 -${rb.stock}%·계좌 -${rb.total}% ⚙</div></div>`+
     `<div class="tile"><div class="lbl">총 손익</div><div class="val">${pn(totRet)}</div>
       <div class="lbl">${won(Math.abs(totVal-totCost))} ${totVal>=totCost?"이익":"손실"}</div></div>`+
     `<div class="tile"><div class="lbl">오늘 변동</div><div class="val">${pn(totVal? totDay/totVal*100:0)}</div></div>`+
@@ -1474,6 +1530,25 @@ function portSection(d){
   (d.mines||[]).forEach(m=>{
     if(rows.some(h=>h.code===m.code))
       notes.unshift(`💣 <b>${esc(m.name)}</b> 위험 신호 ${m.score}점 · ${esc((m.reasons||[])[0]||"")} · <a href="mine.html" style="color:inherit">지뢰탐지기</a>`);
+  });
+  // S18 리스크 예산 지킴이: 종목 손실 한도(매수단가 대비) · 계좌 손실 한도(전체 매입가 대비).
+  // 도달 🔴은 맨 앞, 접근 ⚠️(한도의 60%)는 뒤에. 한도 숫자는 위 rb (브라우저 저장)
+  rows.forEach(h=>{
+    h.ret = +h.ret.toFixed(2);   // 표시 숫자와 같은 값으로 비교 (-5.00%가 -5% 한도에 '접근'으로 나오는 경계 오차 방지)
+    if(h.ret <= -rb.stock)
+      notes.unshift(`🔴 <b>${esc(h.name)}</b> ${pn(h.ret,1)} · 종목 손실 한도 -${rb.stock}% 도달 · 손절 규칙대로 할지 지금 정하세요`);
+    else if(h.ret <= -rb.stock*0.6)
+      notes.push(`⚠️ <b>${esc(h.name)}</b> ${pn(h.ret,1)} · 종목 손실 한도 -${rb.stock}%에 접근`);
+  });
+  if(totCost && totRet <= -rb.total)
+    notes.unshift(`🔴 계좌 전체 ${pn(totRet,1)} · 계좌 손실 한도 -${rb.total}% 도달 · 신규 매수 중단 검토`);
+  else if(totCost && totRet <= -rb.total*0.6)
+    notes.push(`⚠️ 계좌 전체 ${pn(totRet,1)} · 계좌 손실 한도 -${rb.total}%에 접근`);
+  // S16 킬 스위치 교차: 보유 종목이 스윙 킬 스위치(시간 무반응·거래대금 급감)에 걸려 있으면
+  (d.kill_watch||[]).forEach(k=>{
+    if(!rows.some(h=>h.code===k.code)) return;
+    const f = (k.flags||[]).map(x=>x==="time" ? `${k.days}영업일째 무반응` : x==="volume" ? "거래대금 급감" : x).join(" · ");
+    notes.push(`⏱ <b>${esc(k.name)}</b> 킬 스위치: ${esc(f)} · <a href="swing.html" style="color:inherit">스윙 레이더</a>`);
   });
   // 백업 리마인더: 보유 종목이 있는데 30일 넘게 백업(CSV)을 안 눌렀으면
   try{
@@ -1691,6 +1766,19 @@ function initPaper(d){
 function initPort(d){
   const search = document.getElementById("portSearch");
   const hint = document.getElementById("portHint");
+  /* S18: "보유 종목" 타일의 한도 줄 클릭 → 물음창 2개로 한도 변경 (브라우저 저장) */
+  document.getElementById("portTiles").addEventListener("click", e=>{
+    if(!e.target.closest("[data-riskcfg]")) return;
+    const cur = getRisk();
+    const s = prompt("종목 손실 한도(%) · 매수단가 대비 이만큼 빠지면 🔴 경고 (숫자만)", cur.stock);
+    if(s === null) return;
+    const t = prompt("계좌 손실 한도(%) · 전체 매입가 대비 (숫자만)", cur.total);
+    if(t === null) return;
+    const ns = Math.abs(+s) || cur.stock, nt = Math.abs(+t) || cur.total;
+    setRisk({stock: ns, total: nt});
+    portSection(d);
+    toast(`손실 한도 저장: 종목 -${ns}% · 계좌 -${nt}% (이 기기 브라우저에만)`);
+  });
   let picked = null;
   search.addEventListener("input", ()=>{
     const q = search.value.trim().toLowerCase();
@@ -1821,12 +1909,39 @@ function silenceSection(d){
       <td>${s.dvr==null?"–":s.dvr.toFixed(1)+"%"}</td></tr>`).join("")+"</tbody>";
 }
 
+/* ---------- W4 포모 방지기 (V6.7): 급등·돌파 당일 "쫓아가면 어땠나"를 실측으로 ----------
+   2026-07-14 검수에서 "경고문의 통계 수치가 출처 없는 임의값"이라 코드가 반려됐던 도구.
+   지금은 data.json에 자동 채점된 실제 성적(chase_stats · phase_track)이 있으므로 그 숫자만 쓴다.
+   표본 10건 미만이면 숫자를 내지 않는다 (🏃 추격 통계 한 줄 · 📋 통지표와 같은 기준).
+   급등(+5%↑)도 돌파(52주 고점 99.9%↑)도 아니면 빈 배열 = 화면 0픽셀.
+   악마의 변호인 반론 목록 맨 앞에 끼워지므로 담기 힌트 · 😈 패널 · 퀵메뉴 · AI 프롬프트에 자동 반영. */
+function fomoNotes(s, d){
+  const out = [];
+  if(isEtf(s.name)) return out;   // CD금리 ETF는 매일 52주 고점이라 돌파 문구가 헛돈다 (ETF 제외 범위 결정과 동일)
+  const chg = s.change_pct || 0;
+  const near = s.near_52w_pct;
+  const stat = o => (o && o.n >= 10 && o.avg_pct != null)
+    ? `${o.n}건 승률 ${Math.round(o.win/o.n*100)}% · 평균 ${o.avg_pct>0?"+":""}${o.avg_pct}%` : null;
+  if(chg >= 5){
+    const t = stat(d.chase_stats);
+    out.push(t ? `🏃 오늘 +${chg.toFixed(1)}% 급등 · 급등주를 종가에 쫓아간 우리 기록 ${t} (다음날 종가 기준)`
+               : `🏃 오늘 +${chg.toFixed(1)}% 급등 · 추격 매수 구간 (추격 성적은 아직 집계 중)`);
+  }
+  if(near != null && near >= 99.9){
+    const ph = d.phase_track || {};
+    const c = stat(ph.chase), p = stat(ph.pullback);
+    out.push(c ? `🪜 52주 신고가 돌파 당일 · 돌파일 추격 ${c}` + (p ? ` / 첫 조정 대기 매수 ${p}` : "")
+               : `🪜 52주 신고가 돌파 당일 · 돌파 추격 성적은 아직 집계 중`);
+  }
+  return out;
+}
+
 /* ---------- 악마의 변호인: 종목 반론 자동 생성 ---------- */
 function devilNotes(code, d){
   const pool = allStocks(d);
   const s = pool.find(x=>x.code===code);
   if(!s) return ["데이터 없음"];
-  const notes = [];
+  const notes = fomoNotes(s, d);   // W4: 급등·돌파 당일이면 실측 성적이 맨 앞 (아니면 빈 배열)
   const pers = pool.map(x=>x.per).filter(v=>v>0).sort((a,b)=>a-b);
   if(s.per && pers.length > 20){
     const rank = pers.filter(v=>v<=s.per).length / pers.length;
@@ -1836,7 +1951,6 @@ function devilNotes(code, d){
   if(s.pbr >= 4) notes.push(`PBR ${s.pbr.toFixed(1)}배 · 장부가의 ${s.pbr.toFixed(0)}배 가격`);
   if((s.trend_ratio||0) >= 3) notes.push(`검색량 이미 ${s.trend_ratio}배 과열 · 대중이 이미 알고 있음`);
   if((s.news_24h||0) >= 10) notes.push(`24시간 기사 ${s.news_24h}건 · 뉴스가 가장 뜨거울 때가 종종 단기 고점`);
-  if((s.change_pct||0) >= 5) notes.push(`오늘 +${s.change_pct.toFixed(1)}% 급등 · 추격 매수 구간`);
   if((s.f_5d_amt_100m||0) < 0) notes.push(`외국인 5일 순매도 ${fmt(Math.abs(s.f_5d_amt_100m))}억 · 수급 이탈 중`);
   if((s.flow_delta||0) <= -8) notes.push(`수급 점수 전일 대비 ${s.flow_delta} 급락`);
   if(s.near_52w_pct != null && s.near_52w_pct <= 60)
@@ -2324,8 +2438,14 @@ function openQsheet(code, name){
     background:rgba(208,59,59,.1);border-radius:8px;padding:8px 10px;margin-bottom:10px">
     💣 위험 신호 ${mine.score}점 · ${esc((mine.reasons||[])[0]||"")}
     <a href="mine.html" style="color:inherit">상세</a></div>` : "";
+  /* W4 포모 방지기: 급등·돌파 당일에만 실측 성적 한 상자 (조건부 · 평소엔 0픽셀) */
+  const stk = allStocks(window.DATA||{}).find(x=>x.code===code);
+  const fomo = stk ? fomoNotes(stk, window.DATA||{}) : [];
+  const fomoWarn = fomo.length ? `<div style="font-size:12.5px;color:var(--ink-2);
+    background:rgba(237,161,0,.12);border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.7">
+    ${fomo.map(esc).join("<br>")}</div>` : "";
   s.innerHTML = `
-    <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}
+    <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}${fomoWarn}
     <div class="qrow">
       <a class="qbtn" href="chart.html?c=${code}">📊 차트 카드</a>
       <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">📈 네이버 차트</a>
@@ -2439,14 +2559,16 @@ function openTrust(){
   rows.push(best
     ? ["🏁 전략 리그 1위", `${bestN}일`, `${esc(best.nm)} ${pctTxt(best.r)}`, trustGrade(bestN)]
     : ["🏁 전략 리그", "·", "기록 없음", trustGrade(0)]);
-  /* ③ 검색식 5종 (screen_stats) · 꺼둔 것도 성적은 계속 쌓인다 */
-  const on = getScreensOn();
+  /* ③ 검색식 6종 (screen_stats) · 꺼둔 것·🪑 벤치도 성적은 계속 쌓인다 (V6.8) */
+  const on = getScreensOn(d);
   for(const k in SCREEN_LABELS_UI){
     const st = (d.screen_stats||{})[k];
+    const b = screenBench(d, k);
+    const tag = b.benched ? BENCH_TAG(b) : (on[k] ? "" : ' <span style="font-size:10.5px;color:var(--ink-3)">(꺼짐)</span>');
     if(st && st.n1){
       const pct = Math.round(st.win1/st.n1*100);
-      rows.push([SCREEN_LABELS_UI[k] + (on[k]?"":' <span style="font-size:10.5px;color:var(--ink-3)">(꺼짐)</span>'),
-        `${st.n1}건`, `승률 ${pct}% · 적중 ${st.hits}건`, trustGrade(st.n1)]);
+      rows.push([SCREEN_LABELS_UI[k] + tag,
+        `${st.n1}건`, `승률 ${pct}%${st.avg1!=null?" · 평균 "+pctTxt(st.avg1):""} · 적중 ${st.hits}건`, trustGrade(st.n1)]);
     } else {
       rows.push([SCREEN_LABELS_UI[k], "·", "집계 준비 중", trustGrade(0)]);
     }
@@ -2471,7 +2593,7 @@ function openTrust(){
   /* ⑦ 돌파 국면 (V5.9): 신고가 돌파 후 첫 조정 1~2일차 매수 성적 */
   const pb = (d.phase_track||{}).pullback;
   rows.push(pb && pb.n
-    ? ["🪜 조정 대기 매수", `${pb.n}건`, `승률 ${Math.round(pb.win/pb.n*100)}% · 평균 ${pctTxt(pb.avg_pct)}`, trustGrade(pb.n)]
+    ? ["🪜 조정 대기 매수" + BENCH_TAG(pb), `${pb.n}건`, `승률 ${Math.round(pb.win/pb.n*100)}% · 평균 ${pctTxt(pb.avg_pct)}`, trustGrade(pb.n)]
     : ["🪜 조정 대기 매수", "·", "집계 준비 중", trustGrade(0)]);
   /* ⑧ 파동 에너지 눌림 (V6.0): 거래 실종 등급의 조정 매수 성적 (최상급 밴드만 대표로) */
   const wt = ((d.wave_pullback||{}).stats||{}).tight;
@@ -2481,7 +2603,7 @@ function openTrust(){
   /* ⑨ 마감 투매 눌림 (V6.0) */
   const ds = d.dump_stats;
   rows.push(ds && ds.n
-    ? ["🩸 마감 투매 눌림", `${ds.n}건`, `승률 ${Math.round(ds.win/ds.n*100)}% · 평균 ${pctTxt(ds.avg_pct)}`, trustGrade(ds.n)]
+    ? ["🩸 마감 투매 눌림" + BENCH_TAG(ds), `${ds.n}건`, `승률 ${Math.round(ds.win/ds.n*100)}% · 평균 ${pctTxt(ds.avg_pct)}`, trustGrade(ds.n)]
     : ["🩸 마감 투매 눌림", "·", "집계 준비 중", trustGrade(0)]);
   const body = rows.map(([nm, n, perf, g]) =>
     `<tr>
