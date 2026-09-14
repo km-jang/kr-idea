@@ -156,9 +156,13 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
-          FRESH=$(python -c "from datetime import datetime,timedelta,timezone; g='$GEN'; now=datetime.now(timezone(timedelta(hours=9))); lim=(now-timedelta(days=4)).strftime('%Y-%m-%d'); print('yes' if g[:10]>=lim and g[11:16]>='15:40' else 'no')" 2>/dev/null || echo no)
+          # 신선도 = "직전 거래일 마감(15:40 이후) 데이터가 있는가" (V6.6, 2026-09-14).
+          # 예전 규칙 "4일 이내"는 금요일 저녁 실패를 월요일 아침이 그냥 통과시켰다 (사고 10).
+          # LASTDAY 계산이 실패하면 빈 문자열 → 비교가 항상 참 → 재수집 안 함 (예전과 같은 안전한 쪽).
+          LASTDAY=$(python holidays_kr.py --last 2>/dev/null || echo "")
+          FRESH=$(python -c "g='$GEN'; print('yes' if g[:10]>='$LASTDAY' and g[11:16]>='15:40' else 'no')" 2>/dev/null || echo no)
           if [ "$FRESH" != "yes" ]; then
-            echo "마감 확정 데이터 없음(현재: $GEN), 아침 자가복구 수집 시도"
+            echo "직전 거래일($LASTDAY) 마감 데이터 없음(현재: $GEN), 아침 자가복구 수집 시도"
             if python test_parsers.py && python collect.py; then
               git config user.name "dashboard-bot"
               git config user.email "actions@github.com"
