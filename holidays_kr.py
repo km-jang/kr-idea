@@ -73,8 +73,32 @@ def is_trading_day(date_str=None):
     return closed_reason(date_str) is None
 
 
+def last_trading_day(date_str=None, max_back=15):
+    """기준일(없으면 오늘 KST) '이전'의 가장 최근 거래일을 'YYYY-MM-DD'로 돌려준다.
+
+    용도 (V6.6, 2026-09-14): 아침 자가복구의 신선도 판정. 예전 규칙은 "4일 이내면 신선"이라
+    금요일 저녁 수집이 실패해도 월요일 아침이 목요일 데이터를 그대로 통과시켰다 (사고 10).
+    이제 "직전 거래일 마감분이 있어야 신선"으로 판정한다. 주말·연휴는 달력이 건너뛴다.
+    CLI: `python holidays_kr.py --last` → 직전 거래일 출력."""
+    try:
+        base = (datetime.strptime(date_str, "%Y-%m-%d") if date_str
+                else datetime.now(KST).replace(tzinfo=None))
+    except ValueError:
+        base = datetime.now(KST).replace(tzinfo=None)
+    d = base
+    for _ in range(max_back):
+        d = d - timedelta(days=1)
+        s = d.strftime("%Y-%m-%d")
+        if closed_reason(s) is None:
+            return s
+    return (base - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else None
-    reason = closed_reason(arg)
-    if reason:
-        print(reason)
+    if arg == "--last":
+        print(last_trading_day(sys.argv[2] if len(sys.argv) > 2 else None))
+    else:
+        reason = closed_reason(arg)
+        if reason:
+            print(reason)

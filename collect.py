@@ -5,7 +5,12 @@
 
 데이터 소스 (모두 무료, 로그인 불필요):
   1. 네이버 증권 모바일 JSON API  - 시세/시가총액/PER/PBR/배당 (m.stock.naver.com)
-  2. 네이버 증권 투자자별 매매동향 - 외국인/기관 순매매 (finance.naver.com/item/frgn.naver)
+  2. 네이버 증권 투자자별 매매동향 - 외국인/기관 순매매 (m.stock.naver.com/api/stock/{code}/trend)
+     (2026-09-11까지는 finance.naver.com/item/frgn.naver 표를 긁었으나 그날 저녁부터 네이버가
+      PC 금융 페이지를 stock.naver.com으로 리다이렉트해 표가 사라졌다. 사고 10, V6.6)
+  2b. 네이버 일봉 차트 API         - 차트 카드용 120일 시가·고가·저가·종가·거래량
+     (api.stock.naver.com/chart/domestic/item/{code}/day)
+  2c. 네이버 리서치 목록 API       - 증권사 종목분석 리포트 (m.stock.naver.com/api/research/company)
   3. DART RSS                     - 당일 공시 (dart.fss.or.kr/api/todayRSS.xml)
   4. OpenDART API (선택)          - DART_API_KEY 환경변수 설정 시 최근 3일 공시로 확장
 
@@ -278,19 +283,56 @@ def parse_integration(data):
 
 
 # ---------------------------------------------------------------------------
-# 3) 수급: 외국인/기관 순매매 (frgn 페이지 크롤링)
+# 3) 수급: 외국인/기관 순매매 (모바일 trend API. 옛 frgn 표 파서는 비상용으로 보존)
 # ---------------------------------------------------------------------------
 
 FRGN_ROW_RE = re.compile(
     r"(\d{4}\.\d{2}\.\d{2})"      # 날짜
 )
 
-def fetch_investor_flows(code):
-    """finance.naver.com/item/frgn.naver → 최근 거래일별 기관/외국인 순매매량 리스트
-    반환: [{date, close, inst, frgn}] (최신순)"""
-    url = f"https://finance.naver.com/item/frgn.naver?code={code}"
-    html = get_text(url, encoding="euc-kr")
+TREND_URL = "https://m.stock.naver.com/api/stock/{code}/trend?pageSize={n}&page=1"
+FRGN_URL = "https://finance.naver.com/item/frgn.naver?code={code}"
+
+
+def fetch_investor_flows(code, days=21, fetch_json=None):
+    """최근 거래일별 기관/외국인 순매매량 리스트. 반환: [{date, close, vol, inst, frgn}] (최신순).
+
+    1순위: m.stock.naver.com/api/stock/{code}/trend (JSON, 요청 1건. 옛 frgn 표와 같은 내용)
+    2순위: finance.naver.com/item/frgn.naver 표 파싱 (2026-09-11 저녁부터 stock.naver.com으로
+           리다이렉트돼 0건이 나오지만, 되돌아올 가능성과 비용 0을 감안해 비상용으로 남긴다)
+    사고 10 (2026-09-11~14): 수급 0/700 → 품질 가드가 수집을 막아 사흘치 마감 데이터가 비었다."""
+    try:
+        data = (fetch_json or get_json)(TREND_URL.format(code=code, n=days))
+        rows = parse_trend_api(data)
+        if rows:
+            return rows
+    except Exception:
+        pass
+    html = get_text(FRGN_URL.format(code=code), encoding="euc-kr")
     return parse_frgn_html(html)
+
+
+def parse_trend_api(data):
+    """trend API 응답(리스트) → frgn 표 파서와 같은 행 형식 (최신순).
+    숫자는 "+3,643,746" / "-2,208,594" / "259,500" 같은 부호·쉼표 문자열로 온다."""
+    items = data if isinstance(data, list) else ((data or {}).get("trends") or [])
+    rows = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        bd = str(it.get("bizdate") or "")
+        if not re.match(r"\d{8}$", bd):
+            continue
+        close = to_num(it.get("closePrice"))
+        inst = to_num(it.get("organPureBuyQuant"))
+        frgn = to_num(it.get("foreignerPureBuyQuant"))
+        if close is None or (inst is None and frgn is None):
+            continue
+        rows.append({"date": f"{bd[:4]}.{bd[4:6]}.{bd[6:]}", "close": close,
+                     "vol": to_num(it.get("accumulatedTradingVolume")) or 0,
+                     "inst": inst or 0.0, "frgn": frgn or 0.0})
+    rows.sort(key=lambda r: r["date"], reverse=True)   # 최신순 보장
+    return rows
 
 
 def parse_frgn_html(html):
@@ -318,26 +360,60 @@ def parse_frgn_html(html):
     return rows  # 페이지 특성상 최신순
 
 
-def fetch_price_history(code, days=120, fetch_page=None, delay=None):
-    """frgn 페이지를 여러 장 이어붙여 장기 종가·거래량 이력 확보.
-    반환: [{date, close, vol}, ...] 과거→현재 순. 차트 카드(chart_pack) 전용."""
-    if fetch_page is None:
-        def fetch_page(page):
-            return get_text(
-                f"https://finance.naver.com/item/frgn.naver?code={code}&page={page}",
-                encoding="euc-kr")
-    rows, page = [], 1
-    while len(rows) < days and page <= 10:
-        prows = parse_frgn_html(fetch_page(page))
-        seen = {r["date"] for r in rows}
-        fresh = [r for r in prows if r["date"] not in seen]
-        if not fresh:
-            break                      # 마지막 페이지 도달(반복 시작) → 종료
-        rows.extend(fresh)
-        page += 1
-        time.sleep(delay if delay is not None else REQUEST_DELAY)
-    rows = rows[:days]
-    rows.reverse()                     # 과거→현재
+CHART_URL = ("https://api.stock.naver.com/chart/domestic/item/{code}/day"
+             "?startDateTime={start}0000&endDateTime={end}0000")
+
+
+def fetch_price_history(code, days=120, fetch_page=None, delay=None, fetch_json=None, today=None):
+    """장기 시가·고가·저가·종가·거래량 이력. 반환: [{date, close, vol, open, high, low}] 과거→현재.
+    차트 카드(chart_pack) 전용.
+
+    기본 경로 (V6.6): 일봉 차트 API 1건 (옛 frgn 표 6장 이어붙이기 대비 요청 1/6).
+    고가·저가가 함께 오므로 V6.3이 '구조적 불가'로 묶어둔 정통 일목·윗꼬리의 재료가 된다
+    (아직 chart_pack엔 종가·거래량만 싣는다. 스키마 추가는 별도 결정).
+    fetch_page가 주어지면 옛 frgn 표 경로로 동작한다 (테스트·비상용)."""
+    if fetch_page is not None:
+        rows, page = [], 1
+        while len(rows) < days and page <= 10:
+            prows = parse_frgn_html(fetch_page(page))
+            seen = {r["date"] for r in rows}
+            fresh = [r for r in prows if r["date"] not in seen]
+            if not fresh:
+                break                  # 마지막 페이지 도달(반복 시작) → 종료
+            rows.extend(fresh)
+            page += 1
+            time.sleep(delay if delay is not None else REQUEST_DELAY)
+        rows = rows[:days]
+        rows.reverse()                 # 과거→현재
+        return rows
+    end = today or datetime.now(KST)
+    start = end - timedelta(days=int(days * 1.6) + 14)   # 거래일 → 달력일 여유 (휴장 포함)
+    data = (fetch_json or get_json)(CHART_URL.format(
+        code=code, start=start.strftime("%Y%m%d"), end=end.strftime("%Y%m%d")))
+    rows = parse_chart_api(data)
+    return rows[-days:]
+
+
+def parse_chart_api(data):
+    """일봉 차트 API 응답(리스트) → [{date, close, vol, open, high, low}] 과거→현재.
+    맨 끝 행이 거래량 0이면 장 시작 전 자리표시 행(전일 종가 복사)이므로 뺀다.
+    옛 frgn 표는 장 전엔 당일 행이 없었으므로 그 동작을 그대로 따른다."""
+    items = data if isinstance(data, list) else ((data or {}).get("items") or [])
+    rows = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        d = str(it.get("localDate") or "")
+        close = to_num(it.get("closePrice"))
+        if not re.match(r"\d{8}$", d) or close is None:
+            continue
+        rows.append({"date": f"{d[:4]}.{d[4:6]}.{d[6:]}", "close": close,
+                     "vol": to_num(it.get("accumulatedTradingVolume")) or 0,
+                     "open": to_num(it.get("openPrice")), "high": to_num(it.get("highPrice")),
+                     "low": to_num(it.get("lowPrice"))})
+    rows.sort(key=lambda r: r["date"])
+    if rows and not rows[-1]["vol"]:
+        rows.pop()
     return rows
 
 
@@ -694,16 +770,20 @@ def parse_research_html(html_text):
     return out
 
 
-def fetch_research_reports(pages=2):
-    """네이버 금융 리서치 종목분석 목록 최근 2페이지 (약 60건)."""
+RESEARCH_URL = "https://m.stock.naver.com/api/research/company?pageSize={n}&page={page}"
+
+
+def fetch_research_reports(pages=2, page_size=30, fetch_json=None):
+    """네이버 리서치 종목분석 최근 목록 (기본 2쪽 × 30건 = 약 60건).
+    V6.6: 목록 페이지가 stock.naver.com으로 리다이렉트돼 HTML 파서가 0건이 됐다. 같은 목록을
+    주는 모바일 JSON API로 교체. API가 비면 옛 HTML 경로를 한 번 시도한다 (비상용)."""
     out, seen = [], set()
     for page in range(1, pages + 1):
         try:
-            txt = get_text("https://finance.naver.com/research/company_list.naver"
-                           f"?&page={page}", encoding="euc-kr")
+            rows = parse_research_api((fetch_json or get_json)(
+                RESEARCH_URL.format(n=page_size, page=page)))
         except Exception:
             break
-        rows = parse_research_html(txt)
         if not rows:
             break
         for r in rows:
@@ -711,6 +791,34 @@ def fetch_research_reports(pages=2):
                 seen.add(r["nid"])
                 out.append(r)
         time.sleep(REQUEST_DELAY)
+    if out:
+        return out
+    try:
+        txt = get_text("https://finance.naver.com/research/company_list.naver?&page=1",
+                       encoding="euc-kr")
+        return parse_research_html(txt)
+    except Exception:
+        return []
+
+
+def parse_research_api(data):
+    """리서치 API 응답(리스트) → HTML 파서와 같은 형식 [{code,name,title,broker,date,nid}].
+    날짜는 옛 표 형식(yy.mm.dd)으로 맞춘다 (build_reports·화면 표시 호환)."""
+    items = data if isinstance(data, list) else ((data or {}).get("researchs") or [])
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        code = str(it.get("itemCode") or "").strip()
+        nid = str(it.get("researchId") or "").strip()
+        if not re.match(r"\d{6}$", code) or not nid:
+            continue
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(it.get("writeDate") or ""))
+        date = f"{m.group(1)[2:]}.{m.group(2)}.{m.group(3)}" if m else str(it.get("writeDate") or "")
+        out.append({"code": code, "name": unescape(str(it.get("itemName") or "")).strip(),
+                    "title": unescape(str(it.get("title") or "")).strip(),
+                    "broker": str(it.get("brokerName") or "").strip(),
+                    "date": date, "nid": nid})
     return out
 
 

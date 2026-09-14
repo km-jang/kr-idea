@@ -2181,6 +2181,118 @@ def test_scan_send_no_retry_on_client_error():
         _restore_env(env)
 
 
+# ---------------------------------------------------------------------------
+# V6.6 (2026-09-14): 네이버 PC 금융 페이지 폐지 대응. 수급·차트·리서치가 JSON API로 바뀜
+# ---------------------------------------------------------------------------
+TREND_FIX = [
+    {"itemCode": "005930", "bizdate": "20260910", "closePrice": "269,000",
+     "organPureBuyQuant": "+4,266,985", "foreignerPureBuyQuant": "-5,769,453",
+     "accumulatedTradingVolume": "22,517,075", "foreignerHoldRatio": "46.71%"},
+    {"itemCode": "005930", "bizdate": "20260911", "closePrice": "259,500",
+     "organPureBuyQuant": "-2,208,594", "foreignerPureBuyQuant": "-3,531,147",
+     "accumulatedTradingVolume": "13,939,111"},
+    {"itemCode": "005930", "bizdate": "20260909", "closePrice": "269,500",
+     "organPureBuyQuant": "+10", "foreignerPureBuyQuant": "+2,000"},
+    {"itemCode": "005930", "bizdate": "bad", "closePrice": "1"},             # 날짜 불량 → 제외
+    {"itemCode": "005930", "bizdate": "20260908", "closePrice": None},        # 종가 없음 → 제외
+]
+
+
+def test_parse_trend_api():
+    """수급 trend API: 부호·쉼표 문자열 → 숫자, 최신순 정렬, 옛 frgn 표 파서와 같은 행 형식."""
+    rows = collect.parse_trend_api(TREND_FIX)
+    assert [r["date"] for r in rows] == ["2026.09.11", "2026.09.10", "2026.09.09"]
+    assert rows[0]["close"] == 259500.0 and rows[0]["inst"] == -2208594.0
+    assert rows[0]["frgn"] == -3531147.0 and rows[0]["vol"] == 13939111.0
+    assert rows[1]["inst"] == 4266985.0 and rows[2]["vol"] == 0        # 거래량 결측은 0
+    assert set(rows[0]) == set(collect.parse_frgn_html(FRGN_HTML)[0])   # 행 형식 동일
+    m = collect.flow_metrics(rows, price=259500)
+    assert m["days"] == 3 and m["d1_date"] == "2026-09-11" and m["f_streak"] == 0
+    assert collect.parse_trend_api([]) == [] and collect.parse_trend_api(None) == []
+    assert collect.parse_trend_api({"trends": TREND_FIX[:1]})[0]["date"] == "2026.09.10"
+
+
+def test_fetch_investor_flows_prefers_api_then_html():
+    """API가 비면 옛 HTML 표를 한 번 더 시도한다 (비상용 경로)."""
+    orig = collect.get_text
+    try:
+        collect.get_text = lambda url, **kw: FRGN_HTML
+        rows = collect.fetch_investor_flows("005930", fetch_json=lambda url: TREND_FIX)
+        assert rows[0]["date"] == "2026.09.11"                           # API 우선
+        rows = collect.fetch_investor_flows("005930", fetch_json=lambda url: [])
+        assert rows[0]["date"] == "2026.07.09"                           # 빈 API → HTML 폴백
+        def boom(url):
+            raise RuntimeError("timeout")
+        rows = collect.fetch_investor_flows("005930", fetch_json=boom)
+        assert rows[0]["date"] == "2026.07.09"                           # API 예외 → HTML 폴백
+    finally:
+        collect.get_text = orig
+
+
+def test_fetch_price_history_chart_api():
+    """차트 API: 과거→현재 정렬, days 상한, 고가·저가 동봉, 장 전 자리표시 행(거래량 0) 제거."""
+    from datetime import datetime
+    seen = {}
+    def fake(url):
+        seen["url"] = url
+        return [
+            {"localDate": "20260911", "closePrice": 259500.0, "openPrice": 258000.0,
+             "highPrice": 261500.0, "lowPrice": 256500.0, "accumulatedTradingVolume": 13939111},
+            {"localDate": "20260910", "closePrice": 269000.0, "openPrice": 269000.0,
+             "highPrice": 270500.0, "lowPrice": 263500.0, "accumulatedTradingVolume": 22517075},
+            {"localDate": "20260909", "closePrice": 269500.0, "accumulatedTradingVolume": 1},
+            {"localDate": "20260914", "closePrice": 259500.0, "openPrice": 259500.0,
+             "highPrice": 259500.0, "lowPrice": 259500.0, "accumulatedTradingVolume": 0},
+        ]
+    rows = collect.fetch_price_history("005930", days=120, fetch_json=fake,
+                                       today=datetime(2026, 9, 14, 8, 0))
+    assert [r["date"] for r in rows] == ["2026.09.09", "2026.09.10", "2026.09.11"]
+    assert rows[-1]["high"] == 261500.0 and rows[-1]["low"] == 256500.0
+    assert rows[-1]["vol"] == 13939111 and "close" in rows[0]
+    assert "005930" in seen["url"] and "endDateTime=202609140000" in seen["url"]
+    assert "startDateTime=2026" in seen["url"]
+    assert collect.fetch_price_history("005930", days=2, fetch_json=fake,
+                                       today=datetime(2026, 9, 14)) [0]["date"] == "2026.09.10"
+    assert collect.parse_chart_api(None) == [] and collect.parse_chart_api([{"x": 1}]) == []
+    # 차트팩 조립은 그대로 (종가·거래량만 싣는다)
+    pack = collect.build_chart_pack(["005930"], {"005930": "삼성전자"},
+                                    fetch_hist=lambda c, d=120: [
+                                        {"date": f"d{i}", "close": 1000 + i, "vol": 10,
+                                         "high": 1001 + i, "low": 999 + i} for i in range(120)])
+    assert set(pack["005930"]) == {"name", "closes", "vols", "ichimoku"}
+
+
+def test_parse_research_api():
+    """리서치 API → HTML 파서와 같은 형식. 날짜는 yy.mm.dd로 맞춘다."""
+    fix = [
+        {"itemCode": "005930", "itemName": "삼성전자", "researchId": 96118,
+         "title": "HBM &amp; 파운드리", "brokerName": "미리내증권", "writeDate": "2026-09-14"},
+        {"itemCode": "012450", "itemName": "한화에어로스페이스", "researchId": 96100,
+         "title": "수주 잔고", "brokerName": "가온투자증권", "writeDate": "2026-09-11"},
+        {"itemCode": "", "itemName": "산업 리포트", "researchId": 1, "writeDate": "2026-09-14"},
+    ]
+    rows = collect.parse_research_api(fix)
+    assert len(rows) == 2 and rows[0]["nid"] == "96118" and rows[0]["date"] == "26.09.14"
+    assert rows[0]["title"] == "HBM & 파운드리" and rows[0]["broker"] == "미리내증권"
+    assert set(rows[0]) == {"code", "name", "title", "broker", "date", "nid"}
+    out = collect.build_reports(rows, [{"code": "005930"}, {"code": "012450"}])
+    assert len(out) == 1 and out[0]["code"] == "005930"                  # 최신일만
+    got = collect.fetch_research_reports(pages=2, page_size=30, fetch_json=lambda u: fix)
+    assert len(got) == 2                                                  # 2쪽 중복 제거
+    assert collect.parse_research_api(None) == []
+
+
+def test_last_trading_day():
+    """아침 자가복구 신선도 기준: 직전 거래일 (주말·휴장일 건너뜀)."""
+    import holidays_kr
+    assert holidays_kr.last_trading_day("2026-09-14") == "2026-09-11"   # 월 → 금
+    assert holidays_kr.last_trading_day("2026-09-15") == "2026-09-14"   # 화 → 월
+    assert holidays_kr.last_trading_day("2026-09-28") == "2026-09-23"   # 추석 연휴 뒤 월 → 수
+    assert holidays_kr.last_trading_day("2026-09-25") == "2026-09-23"   # 휴장일 당일 기준도 동작
+    assert len(holidays_kr.last_trading_day()) == 10                    # 기본 인자 경로 (사고 6 교훈)
+    assert holidays_kr.last_trading_day("garbage").count("-") == 2       # 불량 입력도 죽지 않음
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

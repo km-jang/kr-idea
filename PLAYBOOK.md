@@ -32,7 +32,8 @@ AI에게 맡길 땐 "PLAYBOOK.md 보고 ○○ 증상 고쳐줘"라고 하면 �
 ### 로그에 "수집 품질 미달 - 갱신 중단"
 안전장치가 정상 작동한 것 (반쪽 데이터 배포 방지). 하루 이틀 지나도 반복되면
 어떤 항목이 미달인지 로그에 나옴 (유니버스/수급/펀더멘털) → 해당 수집 함수 수리 요청:
-- 수급 미달 → `fetch_investor_flows` / `parse_frgn_html`
+- 수급 미달 → `fetch_investor_flows` / `parse_trend_api` (V6.6부터 모바일 JSON API. 옛 표 파서
+  `parse_frgn_html`은 폴백). **2026-09-11 실사고**: 네이버가 PC 수급 표를 없애 0/700 → 사흘 공백 (HANDOFF 사고 10)
 - 펀더멘털 미달 → `fetch_fundamentals` / `parse_integration`
 
 ### 업종만 안 나옴 (대시보드 "업종 데이터는 다음 갱신부터")
@@ -86,8 +87,14 @@ CLAUDE.md의 "자정 넘김 보정" 항목도 함께 참조.
 3. **브라우저로 소스 생사 확인** (클릭만 하면 됨, 로그 없이도 원인 절반은 좁혀진다):
    - https://m.stock.naver.com/api/stocks/marketValue/KOSPI?page=1&pageSize=100
      → 글자 빽빽한 JSON에 `stockName`·`closePrice` 같은 단어가 보이면 유니버스 소스 정상
-   - https://finance.naver.com/item/frgn.naver?code=005930
-     → 외국인·기관 매매 표가 보이면 수급 소스 정상
+   - https://m.stock.naver.com/api/stock/005930/trend?pageSize=21&page=1
+     → `bizdate`·`closePrice`·`foreignerPureBuyQuant`가 보이면 수급 소스 정상 (V6.6~)
+   - https://api.stock.naver.com/chart/domestic/item/005930/day?startDateTime=202601010000&endDateTime=202612310000
+     → `localDate`·`closePrice`·`highPrice`가 보이면 차트 카드 소스 정상 (V6.6~)
+   - https://m.stock.naver.com/api/research/company?pageSize=5&page=1
+     → `researchId`·`itemCode`·`title`이 보이면 리포트 소스 정상 (V6.6~, 부가 기능)
+   (옛 주소 `finance.naver.com/item/frgn.naver`는 2026-09-11부터 새 사이트로 넘어가 표가 없다.
+    `finance.naver.com/...naver` 주소가 갑자기 다른 곳으로 이동하면 그게 원인이다)
    안 열리거나 모양이 완전히 다르면 그 소스가 바뀐 것 → 위 2번 절의 해당 파서 수리 요청.
 4. **지난 날짜는 소급 수집이 안 된다** (collect.py는 당일 시세만 수집). 고친 날부터 자동
    재개되고, 구멍 난 날짜는 history에 빈 날로 남는다 (성과 트래킹엔 하루 이틀 구멍 무방).
