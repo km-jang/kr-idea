@@ -104,8 +104,9 @@ h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
 .bguide.on{display:block}
 .bguide h4{margin:6px 0 3px;font-size:11.5px;color:var(--ink-3);font-weight:700}
 .bguide table{width:100%;min-width:0;border-collapse:collapse;table-layout:fixed}
-.bguide td{padding:3px 4px;vertical-align:top;border-top:1px solid var(--ring);word-break:keep-all;text-align:left;overflow-wrap:anywhere}
-.bguide td:first-child{width:36%;font-weight:700;line-height:1.9}
+/* 전역 th,td 규칙(오른쪽 정렬·nowrap·첫 열 sticky)은 시세표용이라 여기선 전부 되돌린다 (모바일에서 설명 글이 오른쪽으로 밀려 나가던 원인) */
+.bguide td{padding:3px 4px;vertical-align:top;border-top:1px solid var(--ring);word-break:keep-all;text-align:left;white-space:normal;overflow-wrap:anywhere;position:static;background:transparent;font-variant-numeric:normal}
+.bguide td:first-child{width:36%;font-weight:700;line-height:1.9;position:static}
 .bguide .badge-days,.bguide .badge-new,.bguide .rchip{vertical-align:middle}
 .disc-neg{font-size:11px;font-weight:700;color:var(--down)}
 /* 신호 리본: 다른 레이더들이 이 종목에 대해 감지한 것을 카드 상단 한 줄로 */
@@ -266,6 +267,8 @@ table.slim{min-width:0}
 .qn{cursor:pointer;border-bottom:1px dotted var(--ink-3)}
 .qn:hover{color:var(--series-1-deep)}
 #qsheetBack{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40}
+#qsheet table{min-width:0}
+#qsheet th,#qsheet td{white-space:normal;position:static;background:transparent;overflow-wrap:anywhere}
 #qsheet{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:430px;
   background:var(--surface-1);border:1px solid var(--ring);border-radius:16px 16px 0 0;
   padding:16px 16px 22px;z-index:41;box-shadow:0 -8px 30px rgba(0,0,0,.18)}
@@ -958,6 +961,13 @@ function badgeGuideHtml(){
     `<h4>${h}</h4><table>${items.map(([b, t]) => `<tr><td>${b}</td><td>${t}</td></tr>`).join("")}</table>`
   ).join("") + `<div style="font-size:11px;color:var(--ink-3);margin-top:6px">배지는 조건에 걸릴 때만 붙습니다 · 색: 빨강=상승·호재 계열, 파랑=하락 · 마우스를 올리면(길게 누르면) 수치가 뜹니다</div>`;
 }
+/* 터치 기기엔 title 툴팁이 없으므로 배지·칩을 누르면 같은 내용을 토스트로 보여준다 (V7.0) */
+document.addEventListener("click", e=>{
+  const b = e.target.closest(".badge-days[title], .rchip[title], .badge-new[title]");
+  if(!b || b.closest(".bguide")) return;
+  e.preventDefault(); e.stopPropagation();
+  toast(b.getAttribute("title"));
+});
 function toggleBadgeGuide(force){
   const g = document.getElementById("badgeGuide"), b = document.getElementById("bguideBtn");
   if(!g) return;
@@ -999,11 +1009,11 @@ function ideaCards(d, override){
   <div class="card">
     <div class="row1"><span class="rank">${i+1}</span>
       <span class="nm">${esc(s.name)}</span><span class="cd">${s.code}</span>
-      ${s.idea_days===1?'<span class="badge-new">NEW</span>':
-        s.idea_days>1?`<span class="badge-days">${s.idea_days}일째</span>`:""}
+      ${s.idea_days===1?'<span class="badge-new" title="오늘 5선에 처음 들어온 종목">NEW</span>':
+        s.idea_days>1?`<span class="badge-days" title="${s.idea_days}일 연속 5선에 남아 있음">${s.idea_days}일째</span>`:""}
       ${regularBadge(s.code)}${earnBadge(s)}
-      ${(s.trend_ratio||0)>=3?`<span class="badge-days" title="검색량 30일 평균 대비 ${s.trend_ratio}배">🔍${s.trend_ratio}x</span>`:""}
-      ${(s.news_24h||0)>=10?`<span class="badge-days" title="24시간 기사 ${s.news_24h}건">📰${s.news_24h}</span>`:""}
+      ${(s.trend_ratio||0)>=3?`<span class="badge-days" title="🔍 검색량이 30일 평균의 ${s.trend_ratio}배 (대중이 이미 보고 있음)">🔍${s.trend_ratio}x</span>`:""}
+      ${(s.news_24h||0)>=10?`<span class="badge-days" title="📰 24시간 기사 ${s.news_24h}건 (뉴스가 가장 뜨거울 때가 종종 단기 고점)">📰${s.news_24h}</span>`:""}
       <span class="px ${cls(s.change_pct)}">${fmt(s.price)} ${arrow(s.change_pct)}${s.change_pct==null?"":Math.abs(s.change_pct).toFixed(2)+"%"}</span>
     </div>
     ${signalRibbon(s, d)}
@@ -1304,7 +1314,7 @@ function buildRegulars(d){
 }
 function regularBadge(code){
   const g = REGULARS[code];
-  return g ? `<span class="badge-days" title="${g.join(" · ")} ${g.length}곳에 동시 등장">🔁${g.length}</span>` : "";
+  return g ? `<span class="badge-days" title="🔁 단골: ${g.join(" · ")} ${g.length}곳에 동시 등장">🔁${g.length}</span>` : "";
 }
 
 /* V7.0 분기 실적 태그 (data.json all_stocks[].earn · 서버가 판정). 없으면 빈 문자열(0픽셀).
@@ -1323,8 +1333,13 @@ function earnBadge(s){
 function earnLine(s){
   const e = s && s.earn;
   if(!e || !e.q) return "";
+  const parts = [];
+  if(e.sales_yoy != null) parts.push(`매출 전년比 ${earnPct(e.sales_yoy)}`);
+  if(e.op_yoy != null) parts.push(`영업이익 전년比 ${earnPct(e.op_yoy)}`);
+  else if(e.op != null) parts.push(`영업이익 ${e.op < 0 ? "-" : ""}${fmt(Math.abs(Math.round(e.op)))}억`);   // 기준 분기가 적자면 성장률 대신 금액
+  if(e.op_qoq != null) parts.push(`전분기比 ${earnPct(e.op_qoq)}`);
   const tag = e.tag && EARN_LABEL[e.tag] ? ` (${EARN_LABEL[e.tag]})` : "";
-  return `분기 실적 ${e.q} · 매출 YoY ${earnPct(e.sales_yoy)} · 영업이익 YoY ${earnPct(e.op_yoy)} · 전분기比 ${earnPct(e.op_qoq)}${tag}`;
+  return `최근 분기 ${e.q} · ${parts.join(" · ") || "성장률 산출 불가"}${tag}`;
 }
 
 const nameCell = s=>`${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>${regularBadge(s.code)}${earnBadge(s)}`;
