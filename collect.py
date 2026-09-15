@@ -275,11 +275,190 @@ def parse_integration(data):
             m["bps"] = val
         if "52주 최고" in key or "52주최고" in key:
             m["h52"] = val
+        if "52주 최저" in key or "52주최저" in key:
+            m["l52"] = val
     dvr = m.get("dvr") or m.get("dividend") or m.get("dividendrate")
     h52 = m.get("h52") or m.get("highpriceof52weeks")
+    l52 = m.get("l52") or m.get("lowpriceof52weeks")     # V7.0: 같은 응답에 이미 오던 값 (요청 증가 0)
     return {"per": to_num(m.get("per")), "pbr": to_num(m.get("pbr")),
             "dvr": to_num(dvr), "eps": to_num(m.get("eps")),
-            "bps": to_num(m.get("bps")), "h52": to_num(h52)}
+            "bps": to_num(m.get("bps")), "h52": to_num(h52), "l52": to_num(l52)}
+
+
+# ---------------------------------------------------------------------------
+# 2.5) 분기 실적 (V7.0): 네이버 모바일 finance/quarter API (키 불필요)
+#      최근 5개 확정 분기의 매출액·영업이익·순이익. 분기 실적은 3개월에 한 번 바뀌므로
+#      종목별 refresh_days 간격으로 나눠 받고 earnings.json에 캐시한다 (봇이 커밋).
+#      태그는 표시·기록·채점만 한다. 점수 반영 여부는 표본이 쌓인 뒤 결정 (벤치 제도 절차).
+# ---------------------------------------------------------------------------
+
+CONFIG_EARN = {
+    "refresh_days": 7,      # 종목별 재수집 간격(일). 분기 실적은 분기에 한 번 바뀐다
+    "daily_cap": 250,       # 하루 최대 수집 종목 수 (요청 예의. 첫 3일에 700종목이 채워지고 이후 하루 100건 안팎)
+    "growth_min_pct": 0.0,  # 실적 성장 태그: 매출·영업이익의 YoY·QoQ 넷 다 이 값(%) 초과
+}
+EARN_URL = "https://m.stock.naver.com/api/stock/{code}/finance/quarter"
+EARN_PATH = ROOT / "earnings.json"
+EARN_TAG_LABEL = {"growth": "실적 성장", "turn_profit": "흑자 전환",
+                  "turn_loss": "적자 전환", "loss": "연속 적자"}
+
+
+def parse_finance_quarter(data):
+    """finance/quarter 응답 → {"periods": ["2025.06", ...], "sales": [...], "op": [...], "net": [...]}
+    확정 분기만(isConsensus != "Y"), 오래된 것 → 최신 순. 값 단위 억원, "-"는 None.
+    아직 발표 안 된 꼬리 분기(매출·영업이익 둘 다 None)는 잘라낸다. 매출액 행이 없으면 None (ETF·리츠 등)."""
+    info = (data or {}).get("financeInfo") or {}
+    keys = sorted(t.get("key") for t in (info.get("trTitleList") or [])
+                  if t.get("key") and (t.get("isConsensus") or "N") != "Y")
+    rows = {(r.get("title") or ""): (r.get("columns") or {}) for r in (info.get("rowList") or [])}
+    if not keys or "매출액" not in rows:
+        return None
+
+    def series(title):
+        cols = rows.get(title) or {}
+        return [to_num((cols.get(k) or {}).get("value")) for k in keys]
+
+    sales, op, net = series("매출액"), series("영업이익"), series("당기순이익")
+    while keys and sales[-1] is None and op[-1] is None:
+        keys, sales, op, net = keys[:-1], sales[:-1], op[:-1], net[:-1]
+    if not keys:
+        return None
+    return {"periods": [f"{k[:4]}.{k[4:6]}" for k in keys],
+            "sales": sales, "op": op, "net": net}
+
+
+def _growth_pct(now, base):
+    """기준값이 0 이하이거나 없으면 성장률을 정의하지 않는다 (적자 기준 YoY는 의미가 없다)."""
+    if now is None or base is None or base <= 0:
+        return None
+    return round((now / base - 1) * 100, 1)
+
+
+def earnings_tag(q, cfg=None):
+    """5분기 시계열 → 최신 확정 분기의 성장률과 태그 하나.
+    growth: 매출·영업이익 YoY·QoQ 넷 다 양수 / turn_profit: 적자→흑자 / turn_loss: 흑자→적자 /
+    loss: 두 분기 연속 적자 / 그 밖엔 None. 5분기 미만이면 YoY는 None이라 growth가 나올 수 없다."""
+    cfg = cfg or CONFIG_EARN
+    if not q or not q.get("periods"):
+        return None
+    sales, op = q.get("sales") or [], q.get("op") or []
+    n = len(sales)
+    if n == 0 or len(op) != n:
+        return None
+    s_now, o_now = sales[-1], op[-1]
+    s_q, o_q = (sales[-2], op[-2]) if n >= 2 else (None, None)
+    s_y, o_y = (sales[-5], op[-5]) if n >= 5 else (None, None)
+    out = {"q": q["periods"][-1], "sales": s_now, "op": o_now,
+           "sales_qoq": _growth_pct(s_now, s_q), "op_qoq": _growth_pct(o_now, o_q),
+           "sales_yoy": _growth_pct(s_now, s_y), "op_yoy": _growth_pct(o_now, o_y),
+           "tag": None}
+    if o_now is not None and o_q is not None:
+        if o_now < 0 and o_q < 0:
+            out["tag"] = "loss"
+        elif o_now < 0 <= o_q:
+            out["tag"] = "turn_loss"
+        elif o_now > 0 > o_q:
+            out["tag"] = "turn_profit"
+    m = cfg["growth_min_pct"]
+    if out["tag"] is None and all(v is not None and v > m for v in
+                                  (out["sales_qoq"], out["op_qoq"], out["sales_yoy"], out["op_yoy"])):
+        out["tag"] = "growth"
+    return out
+
+
+def load_earnings(path=EARN_PATH):
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def update_earnings(stocks, cache, today, cfg=None, fetch=None, sleep=None):
+    """캐시(earnings.json 내용)를 갱신하고 각 종목에 earn 필드(earnings_tag 결과)를 단다.
+    refresh_days가 지났거나 없는 종목만, 오래된 순으로 daily_cap개까지 받는다.
+    유니버스를 떠난 종목은 캐시에서 지운다. 반환: (수신 수, 실패 수, 태그 붙은 종목 수)"""
+    cfg = cfg or CONFIG_EARN
+    if fetch is None:
+        fetch = lambda code: parse_finance_quarter(get_json(EARN_URL.format(code=code)))
+    if sleep is None:
+        sleep = time.sleep
+    items = cache.setdefault("items", {})
+    codes = [s["code"] for s in stocks if s.get("code")]
+    keep = set(codes)
+    for c in [c for c in items if c not in keep]:
+        items.pop(c, None)
+    t0 = datetime.strptime(today, "%Y-%m-%d")
+
+    def asof(code):
+        return (items.get(code) or {}).get("asof") or "0000-00-00"
+
+    def fresh(code):
+        try:
+            return (t0 - datetime.strptime(asof(code), "%Y-%m-%d")).days < cfg["refresh_days"]
+        except ValueError:
+            return False
+
+    due = sorted([c for c in codes if not fresh(c)], key=asof)[:cfg["daily_cap"]]
+    n_ok = n_fail = 0
+    for code in due:
+        try:
+            q = fetch(code)
+            items[code] = {"asof": today, **(q or {})}   # q None(재무 없음)이면 asof만 → 7일 뒤 재시도
+            n_ok += 1
+        except Exception:
+            n_fail += 1
+        sleep(REQUEST_DELAY)
+    cache["asof"] = today
+    n_tag = 0
+    for s in stocks:
+        e = items.get(s.get("code"))
+        t = earnings_tag(e, cfg) if e and e.get("periods") else None
+        if t:
+            s["earn"] = t
+            n_tag += 1
+    return n_ok, n_fail, n_tag
+
+
+def build_earnings_stats(hist_dir, max_days=60):
+    """실적 태그별 다음날 성적 (V7.0 · 통지표 표시용). 히스토리 all_stocks의 earn.tag와
+    다음 기록일 종가로 센다. 반환: {tag: {"n1","win1","avg1"}, "base": 전 종목 기준선}.
+    태그를 점수에 반영할지는 이 표본으로 결정한다 (벤치 제도 절차). 실패해도 빈 dict."""
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))[-(max_days + 1):]
+    except Exception:
+        return {}
+    days = []
+    for f in files:
+        try:
+            days.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    if len(days) < 2:
+        return {}
+    acc = {}
+
+    def bump(key, r):
+        b = acc.setdefault(key, {"n1": 0, "win1": 0, "_sum": 0.0})
+        b["n1"] += 1
+        b["_sum"] += r
+        if r > 0:
+            b["win1"] += 1
+
+    for i in range(len(days) - 1):
+        px1 = {s.get("code"): s.get("price") for s in days[i + 1].get("all_stocks") or []}
+        for s in days[i].get("all_stocks") or []:
+            p0, p1 = s.get("price"), px1.get(s.get("code"))
+            if not p0 or not p1:
+                continue
+            r = (p1 / p0 - 1) * 100
+            bump("base", r)
+            tag = (s.get("earn") or {}).get("tag")
+            if tag:
+                bump(tag, r)
+    for b in acc.values():
+        b["avg1"] = round(b.pop("_sum") / b["n1"], 2) if b["n1"] else None
+    return acc if len(acc) > 1 else {}
 
 
 # ---------------------------------------------------------------------------
@@ -1744,6 +1923,9 @@ def score_stocks(stocks, disclosure_signals):
                 reasons.append(f"52주 신고가 근접({near*100:.0f}%) + 외인 매집")
             elif near >= 0.97:
                 reasons.append(f"52주 신고가 근접 ({near*100:.0f}%)")
+        l52 = s.get("l52")
+        if l52 and price and l52 > 0:            # V7.0: 52주 최저 대비 몇 % 위인지 (표시·기록용, 점수 미반영)
+            s["above_low52_pct"] = round((price / l52 - 1) * 100, 1)
 
         # --- 공시 (20) ---
         for d in disc_by_company.get(s["name"], []):
@@ -1851,8 +2033,17 @@ def build_sample():
               "커뮤니케이션", "유틸리티", "에너지", "필수소비재"]
     for i, s in enumerate(stocks):         # 미리보기용 업종
         s["sector"] = _sects[i % len(_sects)]
-    for s in stocks:                       # 미리보기용 52주 최고가
+    for s in stocks:                       # 미리보기용 52주 최고가·최저가
         s["h52"] = round(s["price"] / random.choice((0.72, 0.85, 0.93, 0.96, 0.99)))
+        s["l52"] = round(s["price"] / random.choice((1.15, 1.4, 1.8, 2.3)))
+    _earn = [("growth", 12.4, 31.0, 4.1, 9.8), ("turn_loss", -8.2, None, -15.0, None),
+             ("turn_profit", 6.0, None, 3.3, None), ("loss", -3.1, None, -1.2, None),
+             (None, 2.0, -4.5, 0.8, -12.0)]
+    for i, s in enumerate(stocks):         # 미리보기용 분기 실적 태그 (V7.0)
+        tag, sy, oy, sq, oq = _earn[i % len(_earn)]
+        s["earn"] = {"q": "2026.06", "tag": tag, "sales": 12345.0,
+                     "op": -120.0 if tag in ("loss", "turn_loss") else 987.0,
+                     "sales_yoy": sy, "op_yoy": oy, "sales_qoq": sq, "op_qoq": oq}
     stocks = score_stocks(stocks, disclosures)
     for i, s in enumerate(stocks):         # 미리보기용 심리 시그널
         s["trend_ratio"] = round(random.uniform(0.5, 5.0), 1)
@@ -3074,7 +3265,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              insider_watch=None, graduates=None, screens=None, insider_trades=None,
              mines=None, swing=None, swing_review=None, chart_pack=None,
              screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None,
-             phase_track=None, reports=None, wave_pullback=None, dump_stats=None):
+             phase_track=None, reports=None, wave_pullback=None, dump_stats=None,
+             earnings=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -3086,6 +3278,9 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
             "disclosures")}
         if with_closes:
             out["closes"] = s.get("closes")
+        for k in ("earn", "above_low52_pct"):   # V7.0 — 있을 때만 싣는다
+            if s.get(k) is not None:
+                out[k] = s[k]
         return out
 
     def compact(s):
@@ -3105,6 +3300,9 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
             r["ma20"] = round(m20)
         for k in ("day_open", "day_high", "day_low"):   # V6.3 — 있을 때만 싣는다
             if s.get(k):
+                r[k] = s[k]
+        for k in ("earn", "above_low52_pct"):          # V7.0 — 있을 때만 싣는다
+            if s.get(k) is not None:
                 r[k] = s[k]
         return r
 
@@ -3139,6 +3337,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "reports": reports or [],
         "wave_pullback": wave_pullback or {},
         "dump_stats": dump_stats or {},
+        "earnings": earnings or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -3359,6 +3558,28 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"chart_pack: {e}")
         chart_pack = {}
+    # 분기 실적 (V7.0) — 부가 기능이므로 실패해도 수집을 막지 않는다.
+    # earnings.json 캐시를 읽어 오래된 종목만 daily_cap개까지 받고, 캐시를 다시 쓴다 (update.yml이 커밋).
+    earnings = {}
+    try:
+        cache = load_earnings()
+        n_ok, n_fail, n_tag = update_earnings(stocks, cache, market_date)
+        EARN_PATH.write_text(json.dumps(cache, ensure_ascii=False, separators=(",", ":")),
+                             encoding="utf-8")
+        counts = {}
+        for s in stocks:
+            t = (s.get("earn") or {}).get("tag")
+            if t:
+                counts[t] = counts.get(t, 0) + 1
+        earnings = {"asof": cache.get("asof"), "cached": len(cache.get("items") or {}),
+                    "tagged": n_tag, "counts": counts, "labels": EARN_TAG_LABEL,
+                    "stats": build_earnings_stats(hist_dir)}
+        print(f"  → 분기 실적 수신 {n_ok}종목 (실패 {n_fail}) · 캐시 {earnings['cached']}종목 · "
+              f"판정 {n_tag}종목 {counts}")
+        if n_fail and not n_ok:
+            errors.append(f"earnings: {n_fail}종목 전부 실패 (API 구조 변경 의심)")
+    except Exception as e:
+        errors.append(f"earnings: {e}")
     # 당일 시가·고가·저가 (V6.3) — 부가 기능이므로 실패해도 수집을 막지 않는다.
     # 첫 실행 로그의 수신 종목 수로 실시간 API에 저가 필드가 있는지 바로 확인된다.
     try:
@@ -3390,7 +3611,8 @@ def run_full(max_universe=None, out_path=None):
                     screen_stats=screen_stats, chase_stats=chase_stats,
                     swing_stats=swing_stats, kill_watch=kill_watch,
                     phase_track=phase_track, reports=reports,
-                    wave_pullback=wave_pullback, dump_stats=dump_stats)
+                    wave_pullback=wave_pullback, dump_stats=dump_stats,
+                    earnings=earnings)
 
 
 def main():

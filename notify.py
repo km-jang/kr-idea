@@ -81,6 +81,7 @@ def arrow(pct):
 US_INDICES = [
     ("^spx", "S&P500"), ("^ndq", "나스닥"), ("^sox", "반도체SOX"),
     ("usdkrw", "환율"), ("cl.f", "WTI"),
+    ("10usy.b", "미국10년물"),   # V7.0: 금리 수준 한 줄 (야후 ^TNX 폴백). 자동 대응 규칙은 없다
 ]
 US_MAP_PATH = ROOT / "us_kr_map.json"
 
@@ -88,7 +89,7 @@ US_MAP_PATH = ROOT / "us_kr_map.json"
 # stooq 실패 시 야후 파이낸스로 자동 전환하기 위한 심볼 대응표
 YAHOO_MAP = {
     "^spx": "^GSPC", "^ndq": "^IXIC", "^sox": "^SOX",
-    "usdkrw": "KRW=X", "cl.f": "CL=F",
+    "usdkrw": "KRW=X", "cl.f": "CL=F", "10usy.b": "^TNX",
     "nvda.us": "NVDA", "mu.us": "MU", "amd.us": "AMD", "tsla.us": "TSLA",
     "aapl.us": "AAPL", "lly.us": "LLY", "avgo.us": "AVGO",
 }
@@ -205,6 +206,26 @@ def gap_signal_lines(fetch=None, threshold=3.0):
     return out[:4]
 
 
+def us_part(name, val, chg):
+    """미국장 블록의 항목 하나를 문구로. 금리는 %p 등락이 아니라 수준(4.98%)이 정보라 값만 싣는다."""
+    arrow_s = "" if chg is None else ("▲" if chg > 0 else "▼")
+    if name == "환율":
+        return f"환율 {val:,.0f}원{arrow_s}"
+    if name == "WTI":
+        return f"WTI {val:,.1f}"
+    if name == "미국10년물":
+        return f"미국10년물 {val:.2f}%{arrow_s}"
+    chg_s = "" if chg is None else f"{arrow_s}{abs(chg):.1f}%"
+    return f"{name} {chg_s}"
+
+
+def earn_note(s):
+    """V7.0 분기 실적 태그를 아침 브리핑 5선 줄에 한 단어로 (없으면 빈 문자열)."""
+    tag = (s.get("earn") or {}).get("tag")
+    return {"growth": " · 📈실적 성장", "turn_profit": " · 📈흑자 전환",
+            "turn_loss": " · 🩹적자 전환", "loss": " · 🩹연속 적자"}.get(tag, "")
+
+
 def us_market_block():
     """아침 브리핑용 미국장 블록. 어떤 실패에도 빈 리스트 반환 (브리핑 발송은 계속)."""
     try:
@@ -215,15 +236,7 @@ def us_market_block():
                 misses.append(name)
                 continue
             chg_map[name] = chg
-            if name == "환율":
-                arrow_s = "" if chg is None else ("▲" if chg > 0 else "▼")
-                parts.append(f"환율 {val:,.0f}원{arrow_s}")
-            elif name == "WTI":
-                parts.append(f"WTI {val:,.1f}")
-            else:
-                arrow_s = "" if chg is None else ("▲" if chg > 0 else "▼")
-                chg_s = "" if chg is None else f"{arrow_s}{abs(chg):.1f}%"
-                parts.append(f"{name} {chg_s}")
+            parts.append(us_part(name, val, chg))
         print(f"미국장 데이터: {len(parts)}/{len(US_INDICES)} 수신"
               + (f" (실패: {', '.join(misses)})" if misses else ""))
         if not parts:
@@ -292,7 +305,7 @@ def build_message(data):
         for i, s in enumerate(ideas, 1):
             reasons = " · ".join(s.get("reasons", [])[:2]) or "-"
             lines.append(f"{i}. <b>{e(s['name'])}</b> ({s.get('score')}점)")
-            lines.append(f"   {e(reasons)}")
+            lines.append(f"   {e(reasons)}{earn_note(s)}")
     else:
         lines.append("오늘은 조건을 만족하는 종목이 없습니다.")
     lines.append("")

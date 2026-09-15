@@ -2359,6 +2359,134 @@ def test_scan_message_dumps_bench():
     assert "마감 투매 눌림" not in cs.build_scan_message([], dumps=dumps, show_dumps=False)
 
 
+# ---------------------------------------------------------------------------
+# V7.0 분기 실적 태그 + 52주 최저 + 미국 10년물 한 줄
+# ---------------------------------------------------------------------------
+
+def _fq_fixture():
+    """finance/quarter 실응답 구조 (2026-09-15 삼성전자 응답을 본뜸). 202609는 컨센서스(Y)."""
+    def cols(vals):
+        return {k: {"value": v, "cx": None} for k, v in vals.items()}
+    return {"itemCode": "000000", "financePeriodType": "quarter", "financeInfo": {
+        "trTitleList": [{"isConsensus": "N", "title": "2025.06.", "key": "202506"},
+                        {"isConsensus": "N", "title": "2025.09.", "key": "202509"},
+                        {"isConsensus": "N", "title": "2025.12.", "key": "202512"},
+                        {"isConsensus": "N", "title": "2026.03.", "key": "202603"},
+                        {"isConsensus": "N", "title": "2026.06.", "key": "202606"},
+                        {"isConsensus": "Y", "title": "2026.09.", "key": "202609"}],
+        "rowList": [
+            {"title": "매출액", "columns": cols({"202509": "860,617", "202609": "2,063,821", "202606": "1,714,995",
+                                                "202506": "745,663", "202603": "1,338,734", "202512": "938,374"})},
+            {"title": "영업이익", "columns": cols({"202509": "121,661", "202609": "1,131,257", "202606": "894,924",
+                                                  "202506": "46,761", "202603": "572,328", "202512": "200,737"})},
+            {"title": "당기순이익", "columns": cols({"202509": "122,257", "202609": "962,798", "202606": "716,245",
+                                                    "202506": "51,164", "202603": "472,253", "202512": "-"})},
+        ]}}
+
+
+def test_parse_finance_quarter():
+    q = collect.parse_finance_quarter(_fq_fixture())
+    assert q["periods"] == ["2025.06", "2025.09", "2025.12", "2026.03", "2026.06"], q["periods"]  # 컨센서스 제외·오름차순
+    assert q["sales"][0] == 745663.0 and q["sales"][-1] == 1714995.0
+    assert q["op"][-1] == 894924.0
+    assert q["net"][2] is None                      # "-" → None
+    assert collect.parse_finance_quarter({}) is None
+    assert collect.parse_finance_quarter({"financeInfo": {"trTitleList": [{"key": "202606"}], "rowList": []}}) is None
+
+
+def test_parse_finance_quarter_trims_unreported_tail():
+    """최신 분기가 아직 미발표('-')면 그 분기를 잘라내 직전 확정 분기를 최신으로 본다."""
+    d = _fq_fixture()
+    for r in d["financeInfo"]["rowList"]:
+        r["columns"]["202606"]["value"] = "-"
+    q = collect.parse_finance_quarter(d)
+    assert q["periods"][-1] == "2026.03" and len(q["sales"]) == 4
+
+
+def test_earnings_tag():
+    q = collect.parse_finance_quarter(_fq_fixture())
+    t = collect.earnings_tag(q)
+    assert t["q"] == "2026.06" and t["tag"] == "growth", t
+    assert t["sales_yoy"] == 130.0 and t["op_qoq"] == 56.4, t   # 1714995/745663-1, 894924/572328-1
+    # 흑자 → 적자
+    t2 = collect.earnings_tag({"periods": ["a", "b"], "sales": [100, 90], "op": [10, -5], "net": [None, None]})
+    assert t2["tag"] == "turn_loss" and t2["op_qoq"] == -150.0 and t2["sales_yoy"] is None
+    # 적자 → 흑자
+    assert collect.earnings_tag({"periods": ["a", "b"], "sales": [100, 120], "op": [-10, 5], "net": []})["tag"] == "turn_profit"
+    # 연속 적자
+    assert collect.earnings_tag({"periods": ["a", "b"], "sales": [100, 120], "op": [-10, -5], "net": []})["tag"] == "loss"
+    # 4분기뿐이면 YoY가 없어 growth 불가 (성장률만 남고 태그 None)
+    q4 = {"periods": ["a", "b", "c", "d"], "sales": [100, 110, 120, 130], "op": [1, 2, 3, 4], "net": []}
+    assert collect.earnings_tag(q4)["tag"] is None
+    # 매출은 늘고 영업이익이 줄면 growth 아님
+    q5 = {"periods": list("abcde"), "sales": [100, 110, 120, 130, 140], "op": [10, 9, 8, 7, 6], "net": []}
+    assert collect.earnings_tag(q5)["tag"] is None
+    assert collect.earnings_tag(None) is None and collect.earnings_tag({"periods": []}) is None
+
+
+def test_update_earnings_cache():
+    """오래된 순 · daily_cap 상한 · refresh_days 안이면 재요청 없음 · 유니버스 이탈 종목 정리 · earn 부착."""
+    calls = []
+    good = collect.parse_finance_quarter(_fq_fixture())
+    def fetch(code):
+        calls.append(code)
+        if code == "ETF001":
+            return None                      # 재무 없는 상품
+        if code == "BAD":
+            raise RuntimeError("boom")
+        return good
+    stocks = [{"code": c} for c in ("A", "B", "C", "ETF001", "BAD")]
+    cache = {"items": {"A": {"asof": "2026-09-14", **good},        # 어제 받음 → 신선
+                       "B": {"asof": "2026-09-01", **good},        # 2주 전 → 갱신 대상
+                       "ZZZ": {"asof": "2026-09-10", **good}}}     # 유니버스 이탈 → 삭제
+    cfg = dict(collect.CONFIG_EARN, daily_cap=3)
+    n_ok, n_fail, n_tag = collect.update_earnings(stocks, cache, "2026-09-15", cfg=cfg, fetch=fetch,
+                                                  sleep=lambda *_: None)
+    assert "A" not in calls and "ZZZ" not in cache["items"], (calls, cache["items"].keys())
+    assert len(calls) == 3 and calls[0] in ("C", "ETF001", "BAD"), calls   # 캐시 없는 것(0000-00-00)이 B보다 먼저
+    assert cache["items"]["ETF001"] == {"asof": "2026-09-15"} if "ETF001" in calls else True
+    assert n_ok + n_fail == 3
+    tagged = {s["code"] for s in stocks if s.get("earn")}
+    assert "A" in tagged and stocks[0]["earn"]["tag"] == "growth"
+    assert "ETF001" not in tagged and cache["asof"] == "2026-09-15"
+
+
+def test_build_earnings_stats(tmp_path=None):
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    day1 = {"all_stocks": [{"code": "A", "price": 100, "earn": {"tag": "growth"}},
+                           {"code": "B", "price": 100, "earn": {"tag": "growth"}},
+                           {"code": "C", "price": 100}]}
+    day2 = {"all_stocks": [{"code": "A", "price": 110}, {"code": "B", "price": 95}, {"code": "C", "price": 100}]}
+    (d / "2026-09-14.json").write_text(json.dumps(day1), encoding="utf-8")
+    (d / "2026-09-15.json").write_text(json.dumps(day2), encoding="utf-8")
+    st = collect.build_earnings_stats(d)
+    assert st["growth"]["n1"] == 2 and st["growth"]["win1"] == 1 and st["growth"]["avg1"] == 2.5, st
+    assert st["base"]["n1"] == 3
+    assert collect.build_earnings_stats(d / "none") == {}
+
+
+def test_parse_integration_l52():
+    data = {"totalInfos": [{"code": "highPriceOf52Weeks", "key": "52주 최고", "value": "380,000"},
+                           {"code": "lowPriceOf52Weeks", "key": "52주 최저", "value": "75,300"},
+                           {"code": "per", "key": "PER", "value": "11.15배"}]}
+    f = collect.parse_integration(data)
+    assert f["h52"] == 380000.0 and f["l52"] == 75300.0 and f["per"] == 11.15
+    assert collect.parse_integration({})["l52"] is None
+
+
+def test_notify_us_part_and_earn_note():
+    import notify
+    assert notify.us_part("미국10년물", 4.984, 0.6) == "미국10년물 4.98%▲"
+    assert notify.us_part("미국10년물", 4.5, None) == "미국10년물 4.50%"
+    assert notify.us_part("환율", 1387.4, -0.2) == "환율 1,387원▼"
+    assert notify.us_part("나스닥", 20000, 1.23) == "나스닥 ▲1.2%"
+    assert ("10usy.b", "미국10년물") in notify.US_INDICES and notify.YAHOO_MAP["10usy.b"] == "^TNX"
+    assert notify.earn_note({"earn": {"tag": "growth"}}) == " · 📈실적 성장"
+    assert notify.earn_note({"earn": {"tag": "turn_loss"}}) == " · 🩹적자 전환"
+    assert notify.earn_note({}) == "" and notify.earn_note({"earn": {"tag": None}}) == ""
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

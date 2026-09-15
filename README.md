@@ -36,6 +36,7 @@
 | `notify.py` | 텔레그램 발송 (아침/마감/주간, 미국장·갭 시그널 포함) |
 | `closing_scan.py` | 종가매매 후보 스캔 + 점심 맥박 (튜닝은 상단 CONFIG_SCAN) |
 | `scans.json` `ops.json` `sent_log.json` | 봇이 쓰는 장부: 스캔 기록 · 실행 성적표 · 발송 장부 (직접 수정 금지) |
+| `earnings.json` | 분기 실적 캐시 (저녁 수집이 종목별 7일 간격으로 갱신 · 직접 수정 금지) |
 | `ops_log.py` | 실행 성적표 기록기 (야간 자가 점검이 사용) |
 | `holidays_kr.py` | KRX 휴장일 달력 (매년 12월 다음 해 목록 확인 · 2027년분 등록 완료) |
 | `us_kr_map.json` `theme_map.json` | 미국↔국내 연동주 · 테마 매핑 (직접 편집 가능) |

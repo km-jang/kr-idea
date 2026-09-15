@@ -99,6 +99,14 @@ h2{font-size:16.5px;font-weight:700;margin:0 0 3px}
 .sblegend{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;color:var(--ink-3);margin:2px 0 10px}
 .sblegend span{display:inline-flex;align-items:center;gap:4px}
 .sblegend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+/* 🏷 배지 설명표 (V7.1): 기본 접힘 · 범례 줄의 링크로 펼침 · 상태는 이 기기에 저장 */
+.bguide{display:none;margin:-4px 0 12px;padding:8px 10px;border:1px solid var(--ring);border-radius:10px;background:var(--surface-1);font-size:12px;line-height:1.55}
+.bguide.on{display:block}
+.bguide h4{margin:6px 0 3px;font-size:11.5px;color:var(--ink-3);font-weight:700}
+.bguide table{width:100%;min-width:0;border-collapse:collapse;table-layout:fixed}
+.bguide td{padding:3px 4px;vertical-align:top;border-top:1px solid var(--ring);word-break:keep-all;text-align:left;overflow-wrap:anywhere}
+.bguide td:first-child{width:36%;font-weight:700;line-height:1.9}
+.bguide .badge-days,.bguide .badge-new,.bguide .rchip{vertical-align:middle}
 .disc-neg{font-size:11px;font-weight:700;color:var(--down)}
 /* 신호 리본: 다른 레이더들이 이 종목에 대해 감지한 것을 카드 상단 한 줄로 */
 .ribbon{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 2px}
@@ -540,6 +548,7 @@ table.slim{min-width:0}
     투자 판단과 책임은 투자자 본인에게 있습니다.<br>
     자동 갱신: 매 영업일 19시 (GitHub Actions) · 소스: 네이버 증권 · DART RSS ·
     <a href="#" onclick="openTrust();return false" style="color:inherit;font-weight:600">📋 신호 신뢰도 통지표</a> ·
+    <a href="#" onclick="showBadgeGuide();return false" style="color:inherit;font-weight:600">🏷 배지 설명</a> ·
     <a href="pair.html" style="color:inherit;font-weight:600">🤝 동료주 발굴기</a> ·
     <a href="backtest.html" style="color:inherit;font-weight:600">🧪 백테스트 실험실</a>
   </footer>
@@ -916,6 +925,55 @@ function scoreBar(s){
   return `<div class="sbar" role="img" aria-label="점수 구성: 수급 ${s.flow_score} 밸류 ${s.value_score} 모멘텀 ${s.mom_score||0} 공시 ${s.disc_score}">${segs}</div>${neg?`<div style="margin:-2px 0 4px">${neg}</div>`:""}`;
 }
 
+/* ---------- 🏷 배지 설명표 (V7.1) ----------
+   화면에 실제로 쓰는 배지·칩만 적는다. 새 배지를 만들면 여기에 한 줄 추가할 것 (기본 접힘 · 0픽셀). */
+function badgeGuideHtml(){
+  const B = (t, extra="") => `<span class="badge-days"${extra}>${t}</span>`;
+  const rows = {
+    "종목 이름 옆": [
+      ['<span class="star on">★</span> / <span class="star">☆</span>', "관심종목 등록 여부 · 별을 누르면 추가·제거 (이 기기에만 저장)"],
+      ['<span class="badge-new">NEW</span> · ' + B("3일째"), "오늘 5선에 처음 들어옴 · 며칠 연속 5선에 남아 있는지"],
+      [B("🔁2"), "단골: 5선·수급·밸류·스윙 중 두 곳 이상에 동시에 뜬 종목 (숫자 = 등장한 곳 수)"],
+      [B("🔍3.2x"), "네이버 검색량이 30일 평균의 몇 배인지 · 3배 이상일 때만 표시 (대중이 이미 보고 있다는 뜻)"],
+      [B("📰12"), "24시간 안에 나온 기사 수 · 10건 이상일 때만 표시"],
+      [B("📈실적 성장", ' style="color:var(--up)"') + "<br>" + B("📈흑자 전환", ' style="color:var(--up)"'), "최근 확정 분기 매출·영업이익이 전년·전분기 대비 모두 늘었음 / 적자에서 흑자로 돌아섬. 점수엔 반영 안 함, 마우스를 올리면 수치"],
+      [B("🩹적자 전환", ' style="color:var(--crit)"') + "<br>" + B("🩹연속 적자", ' style="color:var(--crit)"'), "흑자에서 적자로 꺾임 / 두 분기 연속 영업적자. 😈 반론과 🤖 AI 프롬프트에도 자동으로 들어감"],
+      ['<span class="badge-new">5선</span> · ' + B("급등") + " · " + B("공시"), "포트폴리오·관심종목 줄: 오늘 5선 포함 / 당일 ±5% 이상 / 오늘 공시 시그널 있음"],
+    ],
+    "5선 카드의 신호 리본": [
+      ['<span class="rchip buy">👤 내부자매수</span>', "최근 14일 임원·대주주 순매수 (금액은 억원)"],
+      ['<span class="rchip risk">💣 위험 N</span>', "지뢰탐지기 위험 점수 · 30일간 CB·유상증자·최대주주 변경 등 위험 공시 누적 (퀵메뉴에도 빨간 상자)"],
+      ['<span class="rchip hot">🔥 테마명</span>', "뉴스 나침반이 오늘 점화 판정한 테마의 관련주"],
+      ['<span class="rchip scr">🔎 검색식명</span>', "오늘 조건 검색식(빈집털이·눌림목·종합수급·몰래매집·신고가문앞)에 걸림"],
+      ['<span class="rchip sil">🤫 침묵</span>', "침묵 레이더: 뉴스·검색 조용한데 수급이 들어오는 종목"],
+    ],
+    "검색식·성적표": [
+      ['<span style="color:var(--ink-3)">🪑 벤치</span>', "누적 성적이 부진해 서버가 자동으로 숨긴 검색식 · 채점은 계속되고 살아나면 자동 부활"],
+      ['<span style="color:var(--ink-3)">🔁 부활 · 🔁 자동 켬</span>', "벤치였다가 최근 성적이 기준을 넘어 다시 보이는 검색식"],
+      ["🏃 노란 상자", "포모 방지기: 급등(+5%↑)·52주 신고가 돌파 당일에만 퀵메뉴·반론에 실측 추격 성적 표시"],
+      ["✅ · ⚠️ · 🌱", "📋 통지표의 신뢰 등급: 표본 30건 이상 / 10건 이상 / 그 미만 (성적이 좋아도 표본이 적으면 우연일 수 있음)"],
+    ],
+  };
+  return Object.entries(rows).map(([h, items]) =>
+    `<h4>${h}</h4><table>${items.map(([b, t]) => `<tr><td>${b}</td><td>${t}</td></tr>`).join("")}</table>`
+  ).join("") + `<div style="font-size:11px;color:var(--ink-3);margin-top:6px">배지는 조건에 걸릴 때만 붙습니다 · 색: 빨강=상승·호재 계열, 파랑=하락 · 마우스를 올리면(길게 누르면) 수치가 뜹니다</div>`;
+}
+function toggleBadgeGuide(force){
+  const g = document.getElementById("badgeGuide"), b = document.getElementById("bguideBtn");
+  if(!g) return;
+  const on = force === true ? true : force === false ? false : !g.classList.contains("on");
+  g.classList.toggle("on", on);
+  if(b) b.textContent = on ? "🏷 배지 설명 ▾" : "🏷 배지 설명 ▸";
+  try { localStorage.setItem("kr_idea_badge_guide", on ? "1" : "0"); } catch(e){}
+}
+function showBadgeGuide(){
+  const sec = document.getElementById("badgeGuide") && document.getElementById("badgeGuide").closest("section");
+  if(sec && sec.classList.contains("folded")) sec.querySelector("h2").click();
+  toggleBadgeGuide(true);
+  const g = document.getElementById("badgeGuide");
+  if(g) g.scrollIntoView({behavior:"smooth", block:"center"});
+}
+
 function ideaCards(d, override){
   const el = document.getElementById("ideaCards");
   const list = override || d.ideas || [];
@@ -928,8 +986,14 @@ function ideaCards(d, override){
       `<span><i style="background:var(--sc-val)"></i>밸류</span>`+
       `<span><i style="background:var(--sc-mom)"></i>모멘텀</span>`+
       `<span><i style="background:var(--sc-disc)"></i>공시</span>`+
-      `<span style="color:var(--ink-3)">· 막대 폭 = 각 축의 점수 기여도</span>`;
+      `<span style="color:var(--ink-3)">· 막대 폭 = 각 축의 점수 기여도</span>`+
+      `<span>· <a href="#" id="bguideBtn" onclick="toggleBadgeGuide();return false" style="color:var(--series-1-deep);font-weight:700">🏷 배지 설명 ▸</a></span>`;
     el.parentNode.insertBefore(lg, el);
+    const g = document.createElement("div"); g.id = "badgeGuide"; g.className = "bguide";
+    g.innerHTML = badgeGuideHtml();
+    el.parentNode.insertBefore(g, el);
+    let on = false; try { on = localStorage.getItem("kr_idea_badge_guide") === "1"; } catch(e){}
+    if(on) toggleBadgeGuide(true);
   }
   el.innerHTML = list.map((s,i)=>`
   <div class="card">
@@ -937,7 +1001,7 @@ function ideaCards(d, override){
       <span class="nm">${esc(s.name)}</span><span class="cd">${s.code}</span>
       ${s.idea_days===1?'<span class="badge-new">NEW</span>':
         s.idea_days>1?`<span class="badge-days">${s.idea_days}일째</span>`:""}
-      ${regularBadge(s.code)}
+      ${regularBadge(s.code)}${earnBadge(s)}
       ${(s.trend_ratio||0)>=3?`<span class="badge-days" title="검색량 30일 평균 대비 ${s.trend_ratio}배">🔍${s.trend_ratio}x</span>`:""}
       ${(s.news_24h||0)>=10?`<span class="badge-days" title="24시간 기사 ${s.news_24h}건">📰${s.news_24h}</span>`:""}
       <span class="px ${cls(s.change_pct)}">${fmt(s.price)} ${arrow(s.change_pct)}${s.change_pct==null?"":Math.abs(s.change_pct).toFixed(2)+"%"}</span>
@@ -1243,7 +1307,27 @@ function regularBadge(code){
   return g ? `<span class="badge-days" title="${g.join(" · ")} ${g.length}곳에 동시 등장">🔁${g.length}</span>` : "";
 }
 
-const nameCell = s=>`${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>${regularBadge(s.code)}`;
+/* V7.0 분기 실적 태그 (data.json all_stocks[].earn · 서버가 판정). 없으면 빈 문자열(0픽셀).
+   점수엔 반영하지 않는다. 채점 표본이 쌓인 뒤 결정 (벤치 제도 절차, 통지표에 성적 표시). */
+const EARN_LABEL = {growth:"실적 성장", turn_profit:"흑자 전환", turn_loss:"적자 전환", loss:"연속 적자"};
+const earnPct = v => v==null ? "·" : (v>0?"+":"")+v+"%";
+function earnTitle(e){
+  return `최근 확정 분기 ${e.q} · 매출 전년比 ${earnPct(e.sales_yoy)} / 전분기比 ${earnPct(e.sales_qoq)} · 영업이익 전년比 ${earnPct(e.op_yoy)} / 전분기比 ${earnPct(e.op_qoq)}`;
+}
+function earnBadge(s){
+  const e = s && s.earn;
+  if(!e || !e.tag || !EARN_LABEL[e.tag]) return "";
+  const bad = e.tag==="turn_loss" || e.tag==="loss";
+  return `<span class="badge-days" style="color:${bad?"var(--crit)":"var(--up)"}" title="${esc(earnTitle(e))}">${bad?"🩹":"📈"}${EARN_LABEL[e.tag]}</span>`;
+}
+function earnLine(s){
+  const e = s && s.earn;
+  if(!e || !e.q) return "";
+  const tag = e.tag && EARN_LABEL[e.tag] ? ` (${EARN_LABEL[e.tag]})` : "";
+  return `분기 실적 ${e.q} · 매출 YoY ${earnPct(e.sales_yoy)} · 영업이익 YoY ${earnPct(e.op_yoy)} · 전분기比 ${earnPct(e.op_qoq)}${tag}`;
+}
+
+const nameCell = s=>`${starHtml(s.code)}<span class="nm2 qn" data-c="${s.code}" data-n="${esc(s.name)}">${esc(s.name)}</span><span class="cd2">${s.code}</span>${regularBadge(s.code)}${earnBadge(s)}`;
 const streakCell = (n,hi)=>`<span class="streak${(n||0)>=hi?" hi":""}">${n||0}일</span>`;
 const pctCell = s=>`<span class="${cls(s.change_pct)}">${s.change_pct==null?"–":(s.change_pct>0?"+":"")+s.change_pct.toFixed(2)+"%"}</span>`;
 const signAmt = v=>v==null?"–":`<span class="${cls(v)}">${fmt(v)}</span>`;
@@ -1948,6 +2032,12 @@ function devilNotes(code, d){
     if(rank >= 0.9) notes.push(`PER ${s.per.toFixed(1)}배 · 유니버스 상위 ${Math.round((1-rank)*100)||1}% 고평가 구간`);
   }
   if(s.per != null && s.per <= 0) notes.push("적자 기업 (PER 산출 불가)");
+  const en = s.earn || {};   // V7.0 분기 실적: 나쁜 쪽만 반론에 (성장은 반론이 아니다)
+  if(en.tag==="turn_loss") notes.push(`최근 분기(${en.q}) 영업이익 적자 전환 · 실적 사이클 꺾임 신호`);
+  else if(en.tag==="loss") notes.push(`최근 분기(${en.q})까지 두 분기 연속 영업적자`);
+  else if(en.op_yoy != null && en.op_yoy <= -30) notes.push(`최근 분기(${en.q}) 영업이익 전년比 ${en.op_yoy}% 급감`);
+  if(en.sales_yoy != null && en.sales_yoy < 0 && en.tag!=="turn_loss" && en.tag!=="loss")
+    notes.push(`최근 분기(${en.q}) 매출 전년比 ${en.sales_yoy}% 역성장`);
   if(s.pbr >= 4) notes.push(`PBR ${s.pbr.toFixed(1)}배 · 장부가의 ${s.pbr.toFixed(0)}배 가격`);
   if((s.trend_ratio||0) >= 3) notes.push(`검색량 이미 ${s.trend_ratio}배 과열 · 대중이 이미 알고 있음`);
   if((s.news_24h||0) >= 10) notes.push(`24시간 기사 ${s.news_24h}건 · 뉴스가 가장 뜨거울 때가 종종 단기 고점`);
@@ -2382,6 +2472,7 @@ function buildAIPrompt(code, fallbackName){
     `- 종목명: ${s.name||code} (${code}) · 업종: ${nv(s.sector)}`,
     `- 현재가 ${nv(s.price,"원")} · 당일 등락률 ${nv(s.change_pct,"%")} · 시가총액 ${nv(s.mktcap_100m,"억원")}`,
     `- 밸류: PBR ${nv(s.pbr,"배")} · PER ${nv(s.per,"배")} · 배당수익률 ${nv(s.dvr,"%")}`,
+    `- 실적: ${s.earn && s.earn.q ? earnLine(s) : "분기 실적 정보없음"}`,
     `- 수급: 외국인 ${nv(s.f_streak,"일 연속")} 순매수(5일 누적 ${nv(s.f_5d_amt_100m,"억원")}) · 기관 ${nv(s.i_streak,"일 연속")}(5일 ${nv(s.i_5d_amt_100m,"억원")})`,
     `- 심리: 24시간 뉴스 ${nv(s.news_24h,"건")} · 검색량 평소 대비 ${nv(s.trend_ratio,"배")} · 52주 고점 대비 ${s.near_52w_pct!=null?(100-s.near_52w_pct).toFixed(0)+"% 아래":"정보없음"}`,
     `- 공시 점수: ${nv(s.disc_score,"점")} (양수=호재성, 음수=악재성 공시 감지)`,
@@ -2444,8 +2535,11 @@ function openQsheet(code, name){
   const fomoWarn = fomo.length ? `<div style="font-size:12.5px;color:var(--ink-2);
     background:rgba(237,161,0,.12);border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.7">
     ${fomo.map(esc).join("<br>")}</div>` : "";
+  /* V7.0 분기 실적 한 줄 (있을 때만) */
+  const el = stk ? earnLine(stk) : "";
+  const earnBox = el ? `<div style="font-size:12px;color:var(--ink-2);margin:-2px 0 10px">${earnBadge(stk)} ${esc(el)}</div>` : "";
   s.innerHTML = `
-    <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}${fomoWarn}
+    <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}${fomoWarn}${earnBox}
     <div class="qrow">
       <a class="qbtn" href="chart.html?c=${code}">📊 차트 카드</a>
       <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">📈 네이버 차트</a>
@@ -2502,6 +2596,9 @@ function openCompare(a, b){
     ["PBR", s=>fp(s.pbr), s=>s.pbr==null?null:-s.pbr],
     ["배당률", s=>s.dvr==null?"·":s.dvr+"%", s=>s.dvr],
     ["52주 위치", s=>s.near_52w_pct==null?"·":s.near_52w_pct+"%", null],
+    ["52주 저점 대비", s=>s.above_low52_pct==null?"·":"+"+s.above_low52_pct+"%", null],
+    ["영업이익 YoY", s=>pct((s.earn||{}).op_yoy), s=>(s.earn||{}).op_yoy],
+    ["매출 YoY", s=>pct((s.earn||{}).sales_yoy), s=>(s.earn||{}).sales_yoy],
   ];
   const cell = (v, isWin) => `<td style="text-align:right;padding:5px 6px;overflow:hidden;${isWin?"font-weight:800":""}">${v}</td>`;
   const body = rows.map(([label, show, val])=>{
@@ -2605,6 +2702,12 @@ function openTrust(){
   rows.push(ds && ds.n
     ? ["🩸 마감 투매 눌림" + BENCH_TAG(ds), `${ds.n}건`, `승률 ${Math.round(ds.win/ds.n*100)}% · 평균 ${pctTxt(ds.avg_pct)}`, trustGrade(ds.n)]
     : ["🩸 마감 투매 눌림", "·", "집계 준비 중", trustGrade(0)]);
+  /* ⑩ 분기 실적 태그 (V7.0): 실적 성장 종목의 다음날 성적 vs 전 종목 기준선. 점수 반영은 이 표본으로 결정 */
+  const es = (d.earnings||{}).stats || {};
+  const eg = es.growth, eb = es.base;
+  rows.push(eg && eg.n1
+    ? ["📈 실적 성장 태그", `${eg.n1}건`, `승률 ${Math.round(eg.win1/eg.n1*100)}% · 평균 ${pctTxt(eg.avg1)}${eb&&eb.n1?" (전체 "+pctTxt(eb.avg1)+")":""}`, trustGrade(eg.n1)]
+    : ["📈 실적 성장 태그", "·", (d.earnings||{}).tagged ? `판정 ${d.earnings.tagged}종목 · 집계 준비 중` : "집계 준비 중", trustGrade(0)]);
   const body = rows.map(([nm, n, perf, g]) =>
     `<tr>
       <td style="padding:6px 2px;font-size:12px;word-break:keep-all">${nm}</td>
