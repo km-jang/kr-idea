@@ -139,6 +139,7 @@ jobs:
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
           git add data.json history/ 2>/dev/null || git add data.json
+          git add earnings.json 2>/dev/null || true   # V7.0 분기 실적 캐시 (없어도 통과)
           if git diff --cached --quiet; then
             echo "변경 없음"
           else
@@ -167,6 +168,7 @@ jobs:
               git config user.name "dashboard-bot"
               git config user.email "actions@github.com"
               git add data.json history/ 2>/dev/null || git add data.json
+              git add earnings.json 2>/dev/null || true   # V7.0 분기 실적 캐시 (없어도 통과)
               git diff --cached --quiet || (git commit -m "data(아침복구): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
             else
               echo "아침 복구 실패, 기존 데이터로 발송 진행"
@@ -247,6 +249,7 @@ jobs:
           git config user.name "dashboard-bot"
           git config user.email "actions@github.com"
           git add data.json history/ 2>/dev/null || git add data.json
+          git add earnings.json 2>/dev/null || true   # V7.0 분기 실적 캐시 (없어도 통과)
           if git diff --cached --quiet; then
             echo "변경 없음"
           else
@@ -355,6 +358,7 @@ jobs:
               git config user.name "dashboard-bot"
               git config user.email "actions@github.com"
               git add data.json history/ 2>/dev/null || git add data.json
+              git add earnings.json 2>/dev/null || true   # V7.0 분기 실적 캐시 (없어도 통과)
               git diff --cached --quiet || (git commit -m "data(자가복구): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
               NEWGEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
               NEWFRESH=$(python -c "g='$NEWGEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
