@@ -200,8 +200,17 @@ def parse_market_value_item(it, market):
         rate = -rate
     mv = to_num(it.get("marketValue") or it.get("marketSum"))  # 단위: 억원
     vol = to_num(it.get("accumulatedTradingVolume") or it.get("aq"))
-    return {"code": str(code).zfill(6), "name": name, "market": market,
-            "price": price, "change_pct": rate, "mktcap_100m": mv, "volume": vol}
+    out = {"code": str(code).zfill(6), "name": name, "market": market,
+           "price": price, "change_pct": rate, "mktcap_100m": mv, "volume": vol}
+    # V7.1: 기준가(= 전일 정규장 종가) = 현재가 - 전일대비. 애프터마켓 중에도 기준가는
+    # 정규장 종가라서 정규장 등락률을 다시 계산할 때 쓴다. 밑줄 키는 내부용이라
+    # data.json에는 실리지 않는다 (compact·slim이 허용 목록 방식).
+    cmp_ = to_num(it.get("compareToPreviousClosePrice"))
+    if price and cmp_ is not None:
+        if cmp_ > 0 and crt in ("5", "4"):
+            cmp_ = -cmp_
+        out["_base"] = price - cmp_
+    return out
 
 
 def fetch_universe_fallback(market, want):
@@ -507,9 +516,18 @@ def parse_trend_api(data):
         frgn = to_num(it.get("foreignerPureBuyQuant"))
         if close is None or (inst is None and frgn is None):
             continue
-        rows.append({"date": f"{bd[:4]}.{bd[4:6]}.{bd[6:]}", "close": close,
-                     "vol": to_num(it.get("accumulatedTradingVolume")) or 0,
-                     "inst": inst or 0.0, "frgn": frgn or 0.0})
+        row = {"date": f"{bd[:4]}.{bd[4:6]}.{bd[6:]}", "close": close,
+               "vol": to_num(it.get("accumulatedTradingVolume")) or 0,
+               "inst": inst or 0.0, "frgn": frgn or 0.0}
+        # V7.1: 전일대비. close - cmp = 전날 정규장 종가 (derive_regular_closes 참조)
+        cmp_ = to_num(it.get("compareToPreviousClosePrice"))
+        if cmp_ is not None:
+            cpp = it.get("compareToPreviousPrice")
+            crt = str(cpp.get("code", "") if isinstance(cpp, dict) else (cpp or ""))
+            if cmp_ > 0 and crt in ("5", "4"):          # 부호 없이 올 때 대비 (5=하락, 4=하한)
+                cmp_ = -cmp_
+            row["cmp"] = cmp_
+        rows.append(row)
     rows.sort(key=lambda r: r["date"], reverse=True)   # 최신순 보장
     return rows
 
@@ -626,14 +644,39 @@ def read_watchlist_codes(path=None):
     return codes
 
 
-def build_chart_pack(codes, name_of, fetch_hist=None, days=120):
-    """대상 종목의 장기 이력 팩 조립. 실패 종목은 건너뜀 (부가 기능 — 수집 전체를 막지 않음)."""
+def history_price_ledger(hist_dir, codes, since=None):
+    """history/의 since 이후 기록에서 종목별 {날짜(YYYY.MM.DD): 가격}. 차트 카드 보정용 (V7.1).
+    수급 자료 유도값(최근 20거래일)이 닿지 않는 오래된 날의 정규장 종가를 우리 기록에서 찾는다.
+    기록은 backfill_history가 먼저 정규장 값으로 고쳐 둔다."""
+    since = since or CONFIG_REGULAR["since"]
+    want = set(codes or [])
+    out = {}
+    files = sorted(f for f in Path(hist_dir).glob("*.json") if f.stem >= since)
+    for f in files[-CONFIG_REGULAR["ledger_files"]:] if want else []:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        key = f.stem.replace("-", ".")
+        for r in d.get("all_stocks") or []:
+            if r.get("code") in want and r.get("price"):
+                out.setdefault(r["code"], {})[key] = r["price"]
+    return out
+
+
+def build_chart_pack(codes, name_of, fetch_hist=None, days=120, regular=None):
+    """대상 종목의 장기 이력 팩 조립. 실패 종목은 건너뜀 (부가 기능 — 수집 전체를 막지 않음).
+    regular = {코드: {날짜: 정규장 종가}} (V7.1). 일봉 API의 since 이후 종가는 애프터마켓
+    마지막 체결가라서, 이 표에 있는 날은 정규장 종가로 바꿔 싣는다."""
+    since = CONFIG_REGULAR["since"].replace("-", ".")
     pack = {}
     for c in codes:
         try:
             rows = (fetch_hist or fetch_price_history)(c, days)
             if len(rows) >= 40:        # 최소 60일선 근처는 그릴 수 있어야 수록
-                closes = [round(r["close"]) for r in rows]
+                reg = (regular or {}).get(c) or {}
+                closes = [round(reg.get(r["date"], r["close"]) if r["date"] >= since else r["close"])
+                          for r in rows]
                 item = {
                     "name": name_of.get(c, ""),
                     "closes": closes,
@@ -708,6 +751,289 @@ def fetch_daily_hl(codes, fetch=None):
         if rec:
             out[code] = rec
     return out
+
+
+# ---------------------------------------------------------------------------
+# 2.9) 정규장 기준 보정 (V7.1): KRX 애프터마켓(16:00~20:00) 대응
+#      2026-09-14부터 19:13 저녁 수집 시점의 현재가·거래량·고저, 그리고 네이버 일봉·수급
+#      자료의 지난날 종가까지 애프터마켓 가격으로 바뀌었다 (REVIEW-AFTERMARKET-260915.md).
+#      우리 등락률·채점·과거 기록은 전부 정규장 종가 기준이라 세 갈래로 되돌린다.
+#      ① 오늘 값: 30분봉 1건/종목 (15:30 봉 = 마감 단일가 = 정규장 종가)
+#      ② 지난날 종가: 수급 자료의 '종가 - 전일대비' = 전날 정규장 종가 (요청 증가 0)
+#      ③ 지난 기록(history/): ②로 가격·등락률, ①로 거래량·시고저
+#      30분봉은 오늘 포함 7거래일치만 남는다 (2026-09-18 실측: 9/10 있음, 9/9 없음).
+# ---------------------------------------------------------------------------
+
+CONFIG_REGULAR = {
+    "since": "2026-09-14",        # 애프터마켓 시작일. 이 날부터의 종가만 보정한다
+    "guard_pct": 8.0,             # 유도한 정규장 종가가 원래 종가와 이만큼(%) 넘게 다르면 버린다
+                                  # (권리락·액면분할로 기준가가 조정된 날 방어)
+    "abort_after": 20,            # 30분봉이 처음 이만큼 연속 실패하면 나머지를 건너뛴다 (API 장애 시 헛요청 방지)
+    "fail_warn_ratio": 0.3,       # 30분봉 실패 비율이 이 이상이면 errors에 한 줄
+    "backfill_bars_per_run": 7,   # 지난 기록 거래량·시고저 보정: 한 번에 고칠 날짜 수 (날짜당 요청 약 570건).
+                                  # 30분봉 보관이 7거래일뿐이라 첫 실행에서 밀린 날을 한꺼번에 처리한다
+    "backfill_scan_files": 30,    # 지난 기록 보정이 살펴볼 최근 기록 수 (수급 자료 유도값이 약 20거래일까지라 그 너머는 못 고친다)
+    "ledger_files": 130,          # 차트 카드 보정용 장부가 읽을 최근 기록 수 (차트 120거래일 + 여유)
+    "check_tol_pct": 0.3,         # 어제 기록 자가 대조: 이 오차(%) 넘게 다르면 불일치로 센다
+    "check_warn_ratio": 0.05,     # 불일치 종목이 이 비율 이상이면 errors에 한 줄
+}
+
+MIN30_URL = ("https://api.stock.naver.com/chart/domestic/item/{code}/minute30"
+             "?startDateTime={ymd}0900&endDateTime={ymd}1530")
+
+
+def parse_minute30(data, ymd):
+    """30분봉 응답 → 그날 정규장 {close, open, high, low, vol} 또는 None.
+    봉 시각은 시작 시각이다 (0900 = 09:00~09:30 · 1530 = 마감 단일가). 거래량은 봉별 값이라
+    합하면 정규장 거래량이다 (시간외 종가매매 15:40~16:00은 빠진다). 1530 봉이 없으면
+    (거래정지·자료 미완성) 정규장 종가를 확정할 수 없으므로 None을 돌려 원래 값을 두게 한다."""
+    bars = []
+    for b in data if isinstance(data, list) else []:
+        if not isinstance(b, dict):
+            continue
+        t = str(b.get("localDateTime") or "")
+        if len(t) >= 12 and t.startswith(ymd) and t[8:12] <= "1530":
+            bars.append((t, b))
+    bars.sort(key=lambda x: x[0])
+    if not bars or bars[-1][0][8:12] != "1530":
+        return None
+    close = to_num(bars[-1][1].get("currentPrice"))
+    if not close:
+        return None
+    highs = [h for h in (to_num(b.get("highPrice")) for _, b in bars) if h]
+    lows = [x for x in (to_num(b.get("lowPrice")) for _, b in bars) if x]
+    return {"close": close,
+            "open": to_num(bars[0][1].get("openPrice")),
+            "high": max(highs) if highs else None,
+            "low": min(lows) if lows else None,
+            "vol": int(sum(to_num(b.get("accumulatedTradingVolume"), 0) for _, b in bars))}
+
+
+def fetch_regular_session(codes, ymd, fetch_json=None, delay=None):
+    """종목별 30분봉 1건으로 그날 정규장 값을 모은다. 반환: ({코드: 값}, 실패 수, 중단 여부).
+    처음 abort_after건이 연속으로 실패하면 API 장애로 보고 나머지를 요청하지 않는다."""
+    out, fail = {}, 0
+    for i, c in enumerate(codes):
+        if i >= CONFIG_REGULAR["abort_after"] and not out:
+            return out, fail + (len(codes) - i), True
+        try:
+            sess = parse_minute30((fetch_json or get_json)(MIN30_URL.format(code=c, ymd=ymd)), ymd)
+        except Exception:
+            sess = None
+        if sess:
+            out[c] = sess
+        else:
+            fail += 1
+        time.sleep(REQUEST_DELAY if delay is None else delay)
+    return out, fail, False
+
+
+def derive_regular_closes(rows, guard_pct=None):
+    """수급 자료 행(최신순) → {날짜(YYYY.MM.DD): 정규장 종가}.
+    D일 행의 '종가 - 전일대비' = D 전날의 기준가 = 전날 정규장 종가다 (애프터마켓이 있어도
+    다음 날 기준가는 정규장 종가. 2026-09-18 삼성전자 9/14~9/16 실측 일치). 그래서 가장 최근
+    날은 여기서 나오지 않는다 (오늘 값은 30분봉이 채운다). 유도값이 원래 종가와 guard_pct 넘게
+    다르면 권리락·액면분할로 기준가가 조정된 날이므로 버린다."""
+    g = CONFIG_REGULAR["guard_pct"] if guard_pct is None else guard_pct
+    out = {}
+    for newer, older in zip(rows, rows[1:]):
+        cmp_ = newer.get("cmp")
+        if cmp_ is None or not newer.get("close") or not older.get("close"):
+            continue
+        reg = newer["close"] - cmp_
+        if reg > 0 and abs(reg / older["close"] - 1) * 100 <= g:
+            out[older["date"]] = reg
+    return out
+
+
+def add_base_close(reg, rows, base, market_date, guard_pct=None):
+    """수급 자료에 오늘 행이 아직 없으면(가장 최근 행이 어제) 어제 정규장 종가는 유도되지 않는다.
+    그때는 유니버스 자료의 기준가(_base = 전일 정규장 종가)로 그 칸을 채운다.
+    오늘 행이 있으면 derive_regular_closes가 이미 채웠으므로 아무것도 안 한다
+    (아침 자가복구처럼 프리마켓 시간에 돌 때 기준가가 엉뚱한 날을 가리키는 것도 이걸로 피한다)."""
+    if not rows or not base or not market_date:
+        return reg
+    top = rows[0]
+    if top["date"] >= market_date.replace("-", ".") or not top.get("close"):
+        return reg
+    g = CONFIG_REGULAR["guard_pct"] if guard_pct is None else guard_pct
+    if abs(base / top["close"] - 1) * 100 <= g:
+        reg.setdefault(top["date"], base)
+    return reg
+
+
+def regular_closes_series(rows, reg, since=None):
+    """수급 자료 행(최신순) → 과거→현재 종가 리스트. since 이후 날짜는 정규장 종가로 바꾼다
+    (유도값이 없는 날은 원래 값). 스윙 5일선·20일선의 재료."""
+    since = (since or CONFIG_REGULAR["since"]).replace("-", ".")
+    return [reg.get(r["date"], r["close"]) if r["date"] >= since else r["close"]
+            for r in reversed(rows)]
+
+
+def apply_regular_session(stocks, sess_map, market_date, reg_by_code=None):
+    """오늘 값(현재가·등락률·거래량·시고저, 종가 이력의 오늘 칸)을 정규장 값으로 덮어쓴다.
+    등락률 기준 = 전 거래일 정규장 종가: 수급 자료 유도값이 있으면 그것, 없으면 유니버스 자료의
+    기준가(_base). 반환: 적용 종목 수."""
+    today = market_date.replace("-", ".")
+    n = 0
+    for s in stocks:
+        sess = sess_map.get(s.get("code"))
+        if not sess:
+            continue
+        px = sess["close"]
+        s["price"] = px
+        reg = (reg_by_code or {}).get(s.get("code")) or {}
+        prevs = [k for k in reg if k < today]
+        base = reg[max(prevs)] if prevs else s.get("_base")
+        if base:
+            s["change_pct"] = round((px / base - 1) * 100, 2)
+        if sess.get("vol"):
+            s["volume"] = sess["vol"]
+        for src, dst in (("open", "day_open"), ("high", "day_high"), ("low", "day_low")):
+            if sess.get(src):
+                s[dst] = sess[src]
+        closes = s.get("closes")
+        if closes and s.get("_last_close_date") == today:
+            closes[-1] = px
+        n += 1
+    return n
+
+
+def _fix_record_prices(d, reg_by_code, key, only=None):
+    """기록 하나(history 파일 내용)의 가격 필드를 정규장 종가로 고친다. 반환: 고친 all_stocks 종목 코드 집합.
+    읽는 쪽이 쓰는 자리만 고친다: all_stocks·ideas·flow_scan·value_screen의 price·change_pct
+    (성과 트래킹 진입가 = ideas.price), swing의 entry·chg (스윙 성적표 진입가).
+    only가 주어지면 그 종목만 고친다 (그날 30분봉을 못 받은 종목)."""
+    def pair(code):
+        reg = reg_by_code.get(code) or {}
+        px = reg.get(key)
+        if not px:
+            return None, None
+        prevs = [k for k in reg if k < key]
+        pv = reg[max(prevs)] if prevs else None
+        return px, (round((px / pv - 1) * 100, 2) if pv else None)
+
+    done = set()
+    for sec in ("all_stocks", "ideas", "flow_scan", "value_screen", "swing"):
+        for r in d.get(sec) or []:
+            code = r.get("code")
+            if only is not None and code not in only:
+                continue
+            px, chg = pair(code)
+            if px is None:
+                continue
+            if sec == "swing":
+                r["entry"] = round(px)
+                if chg is not None:
+                    r["chg"] = chg
+                continue
+            r["price"] = px
+            if chg is not None:
+                r["change_pct"] = chg
+            if sec == "all_stocks":
+                done.add(code)
+    return done
+
+
+def backfill_history(hist_dir, reg_by_code, market_date, fetch_json=None, bars_cap=None, delay=None):
+    """애프터마켓에 오염된 채 저장된 기록(since ~ 어제)을 정규장 값으로 고친다. 반환: 로그 줄 목록.
+    ① 가격·등락률: reg_by_code(수급 자료에서 유도한 정규장 종가)로. 요청 0건
+    ② 거래량·시고저(all_stocks): 30분봉으로. 날짜당 약 700건이라 bars_cap개 날짜까지.
+       먼저 한 종목으로 찔러 보고 자료가 없으면(보관 기간 7거래일 경과) 그 날짜는 건너뛴다.
+    V7.1 이후 저녁 수집이 쓴 기록(regular_session 키가 있음)은 이미 정규장 값이라 건드리지 않는다.
+    파일에 regular_fix 표시를 남겨 같은 일을 두 번 하지 않는다 (소유자 결정 2026-09-18: 보정해서 다시 씀)."""
+    cap = CONFIG_REGULAR["backfill_bars_per_run"] if bars_cap is None else bars_cap
+    since = CONFIG_REGULAR["since"]
+    logs = []
+    files = sorted(f for f in Path(hist_dir).glob("*.json") if since <= f.stem < market_date)
+    for f in files[-CONFIG_REGULAR["backfill_scan_files"]:]:
+        day = f.stem
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if d.get("sample"):
+            continue
+        key = day.replace("-", ".")
+        rs = d.get("regular_session") or {}
+        if rs.get("applied"):
+            # V7.1 이후 기록: 그날 30분봉을 못 받은 종목만 가격·등락률을 고친다 (거래량·고저는 둔다)
+            todo = set(rs.get("failed_codes") or [])
+            done = _fix_record_prices(d, reg_by_code, key, only=todo) if todo else set()
+            if done:
+                rs["failed_codes"] = sorted(todo - done)
+                d["regular_session"] = rs
+                f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+                logs.append(f"{day} 실패분 가격 {len(done)}종목")
+            continue
+        fix = d.get("regular_fix") or {}
+        changed = False
+        if not fix.get("price"):
+            n = len(_fix_record_prices(d, reg_by_code, key))
+            if n:
+                fix["price"] = True
+                changed = True
+                logs.append(f"{day} 가격 {n}종목")
+        if fix.get("bars") is None and cap > 0:
+            rows = d.get("all_stocks") or []
+            codes = [r["code"] for r in rows
+                     if r.get("code") and not is_index_product(r.get("name"))]
+            ymd = day.replace("-", "")
+            probe, _, _ = fetch_regular_session(codes[:1], ymd, fetch_json, delay)
+            if codes and not probe:
+                tries = int(fix.get("bars_tries", 0)) + 1
+                fix["bars_tries"] = tries
+                if tries >= 2:
+                    fix["bars"] = "unavailable"     # 보관 기간 경과. 다시 시도하지 않는다
+                changed = True
+                logs.append(f"{day} 30분봉 없음 ({tries}회째)")
+            elif codes:
+                cap -= 1
+                sess, fail, _ = fetch_regular_session(codes[1:], ymd, fetch_json, delay)
+                sess.update(probe)
+                for r in rows:
+                    v = sess.get(r.get("code"))
+                    if not v:
+                        continue
+                    if v.get("vol"):
+                        r["volume"] = v["vol"]
+                    for src, dst in (("open", "day_open"), ("high", "day_high"), ("low", "day_low")):
+                        if v.get(src):
+                            r[dst] = v[src]
+                if len(sess) >= len(codes) * (1 - CONFIG_REGULAR["fail_warn_ratio"]):
+                    fix["bars"] = True
+                changed = changed or bool(sess)
+                logs.append(f"{day} 거래량·고저 {len(sess)}/{len(codes)}종목")
+        if changed:
+            d["regular_fix"] = fix
+            f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    return logs
+
+
+def regular_check(hist_dir, reg_by_code, market_date):
+    """자가 대조: 직전 기록의 all_stocks 가격이 정규장 종가(수급 자료에서 유도)와 맞는지.
+    반환: (대조 종목 수, 불일치 수, 날짜). 오염이 다시 생겨도 조용히 묻히지 않게 하는 장치."""
+    files = sorted(f for f in Path(hist_dir).glob("*.json")
+                   if CONFIG_REGULAR["since"] <= f.stem < market_date)
+    if not files:
+        return 0, 0, None
+    f = files[-1]
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return 0, 0, f.stem
+    key = f.stem.replace("-", ".")
+    tol = CONFIG_REGULAR["check_tol_pct"]
+    n = bad = 0
+    for r in d.get("all_stocks") or []:
+        reg = (reg_by_code.get(r.get("code")) or {}).get(key)
+        px = r.get("price")
+        if not reg or not px:
+            continue
+        n += 1
+        if abs(px / reg - 1) * 100 > tol:
+            bad += 1
+    return n, bad, f.stem
 
 
 def flow_metrics(rows, price=None):
@@ -3266,7 +3592,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              mines=None, swing=None, swing_review=None, chart_pack=None,
              screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None,
              phase_track=None, reports=None, wave_pullback=None, dump_stats=None,
-             earnings=None):
+             earnings=None, regular_session=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -3338,6 +3664,9 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "wave_pullback": wave_pullback or {},
         "dump_stats": dump_stats or {},
         "earnings": earnings or {},
+        # V7.1: 정규장 기준 보정 기록. applied가 있으면 이 기록의 가격은 정규장 값이다
+        # (backfill_history가 이걸 보고 다시 고치지 않는다)
+        "regular_session": regular_session or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -3380,19 +3709,70 @@ def run_full(max_universe=None, out_path=None):
         time.sleep(REQUEST_DELAY)
 
     print("[3/5] 수급 (외국인/기관)...")
+    reg_by_code = {}      # V7.1: {코드: {날짜: 정규장 종가}} (수급 자료의 '종가 - 전일대비'에서 유도)
     for i, s in enumerate(stocks):
         try:
             rows = fetch_investor_flows(s["code"])
             m = flow_metrics(rows, s.get("price"))
             if m:
                 s.update(m)
-                # 21일치(과거→현재): 어제 기준 20일선 계산용 1일 여유 (스윙 골든크로스)
-                s["closes"] = [r["close"] for r in reversed(rows[:21])]
+                reg = add_base_close(derive_regular_closes(rows), rows, s.get("_base"), market_date)
+                if reg:
+                    reg_by_code[s["code"]] = reg
+                # 21일치(과거→현재): 어제 기준 20일선 계산용 1일 여유 (스윙 골든크로스).
+                # V7.1: 2026-09-14 이후 날짜는 정규장 종가로 (수급 자료 종가는 애프터마켓 마지막 체결가)
+                s["closes"] = regular_closes_series(rows[:21], reg)
+                s["_last_close_date"] = rows[0]["date"]
         except Exception as e:
             errors.append(f"flow {s['code']}: {e}")
         if i % 50 == 0:
             print(f"  ... {i}/{len(stocks)}")
         time.sleep(REQUEST_DELAY)
+
+    # V7.1 정규장 기준 보정 — 점수화 전에 해야 등락률·검색식·스윙이 정규장 값으로 계산된다.
+    # 실패해도 수집은 계속한다 (그 종목은 애프터마켓 기준으로 남고 errors에 한 줄).
+    print("[3.2/5] 정규장 기준 보정 (애프터마켓 대응)...")
+    hist_dir_reg = Path(out_path or OUT_PATH).parent / "history"
+    regular_session = {}
+    try:
+        if not market_date:
+            raise ValueError("장 기준일 없음")
+        targets = [s["code"] for s in stocks if not is_index_product(s.get("name"))]
+        sess, n_fail, aborted = fetch_regular_session(targets, market_date.replace("-", ""))
+        n_ok = apply_regular_session(stocks, sess, market_date, reg_by_code)
+        regular_session = {"applied": n_ok, "failed": n_fail,
+                           "etf_skipped": len(stocks) - len(targets)}
+        if n_ok and n_fail:
+            # 30분봉을 못 받은 종목 (15:30 봉 지연 등). 다음 날 수집이 수급 자료 유도값으로 고친다
+            regular_session["failed_codes"] = [c for c in targets if c not in sess]
+        print(f"  → 정규장 값 {n_ok}종목 적용 (실패 {n_fail} · ETF·ETN {len(stocks) - len(targets)} 제외)")
+        if aborted:
+            errors.append(f"regular_session: 30분봉 처음 {CONFIG_REGULAR['abort_after']}건 연속 실패로 "
+                          f"중단 (API 변경 의심). 오늘 값은 애프터마켓 기준")
+        elif targets and n_fail >= len(targets) * CONFIG_REGULAR["fail_warn_ratio"]:
+            errors.append(f"regular_session: 30분봉 {n_fail}/{len(targets)}종목 실패 "
+                          f"(그 종목은 애프터마켓 기준)")
+    except Exception as e:
+        errors.append(f"regular_session: {e}")
+    try:
+        if market_date:
+            logs = backfill_history(hist_dir_reg, reg_by_code, market_date)
+            if logs:
+                regular_session["backfill"] = logs
+                print("  → 지난 기록 보정:", " · ".join(logs))
+    except Exception as e:
+        errors.append(f"backfill: {e}")
+    try:
+        if market_date:
+            n_chk, n_bad, chk_day = regular_check(hist_dir_reg, reg_by_code, market_date)
+            if chk_day:
+                regular_session["check"] = {"day": chk_day, "n": n_chk, "bad": n_bad}
+                print(f"  → 자가 대조 {chk_day}: {n_chk}종목 중 불일치 {n_bad}")
+            if n_chk and n_bad >= n_chk * CONFIG_REGULAR["check_warn_ratio"]:
+                errors.append(f"regular_check: {chk_day} 기록 {n_bad}/{n_chk}종목이 정규장 종가와 "
+                              f"다름 (애프터마켓 오염 재발 의심)")
+    except Exception as e:
+        errors.append(f"regular_check: {e}")
 
     print("[3.5/5] 업종 매핑...")
     try:
@@ -3552,7 +3932,18 @@ def run_full(max_universe=None, out_path=None):
     try:
         targets = chart_targets(ideas, swing, read_watchlist_codes())
         name_of = {s["code"]: s.get("name", "") for s in stocks}
-        chart_pack = build_chart_pack(targets, name_of)
+        # V7.1: 차트 종가의 2026-09-14 이후 날짜를 정규장 종가로. 우선순위는 수급 자료 유도값,
+        # 그다음 우리 기록(history, 위에서 보정됨), 오늘은 방금 적용한 정규장 값
+        regular = {c: dict(reg_by_code.get(c) or {}) for c in targets}
+        ledger = history_price_ledger(hist_dir, targets)
+        px_of = {s["code"]: s.get("price") for s in stocks}
+        today_key = (market_date or "").replace("-", ".")
+        for c in targets:
+            for k, v in (ledger.get(c) or {}).items():
+                regular[c].setdefault(k, v)
+            if today_key and px_of.get(c):
+                regular[c][today_key] = px_of[c]
+        chart_pack = build_chart_pack(targets, name_of, regular=regular)
         if chart_pack:
             print(f"  → 차트 카드 이력 {len(chart_pack)}종목 (120일)")
     except Exception as e:
@@ -3585,7 +3976,10 @@ def run_full(max_universe=None, out_path=None):
     try:
         hl = fetch_daily_hl([s["code"] for s in stocks])
         for s in stocks:
-            s.update(hl.get(s["code"]) or {})
+            # V7.1: 30분봉 정규장 값이 이미 있으면 그대로 둔다 (실시간 값은 애프터마켓 체결 포함).
+            # ETF·ETN과 30분봉 실패 종목만 여기서 채워진다
+            for k, v in (hl.get(s["code"]) or {}).items():
+                s.setdefault(k, v)
         n_hi = sum(1 for s in stocks if s.get("day_high"))
         n_lo = sum(1 for s in stocks if s.get("day_low"))
         n_op = sum(1 for s in stocks if s.get("day_open"))
@@ -3612,7 +4006,7 @@ def run_full(max_universe=None, out_path=None):
                     swing_stats=swing_stats, kill_watch=kill_watch,
                     phase_track=phase_track, reports=reports,
                     wave_pullback=wave_pullback, dump_stats=dump_stats,
-                    earnings=earnings)
+                    earnings=earnings, regular_session=regular_session)
 
 
 def main():

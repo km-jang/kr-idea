@@ -2487,6 +2487,239 @@ def test_notify_us_part_and_earn_note():
     assert notify.earn_note({}) == "" and notify.earn_note({"earn": {"tag": None}}) == ""
 
 
+# ---------------------------------------------------------------------------
+# V7.1 정규장 기준 보정 (애프터마켓 대응). 숫자는 2026-09-18 삼성전자 실측
+# ---------------------------------------------------------------------------
+
+def _trend_item(bd, close, cmp_, code="2"):
+    return {"bizdate": bd, "closePrice": close, "compareToPreviousClosePrice": cmp_,
+            "compareToPreviousPrice": {"code": code}, "organPureBuyQuant": "+1",
+            "foreignerPureBuyQuant": "-1", "accumulatedTradingVolume": "100"}
+
+
+SAMSUNG_TREND = [                      # 수급 자료: 9/14부터 종가가 애프터마켓 마지막 체결가
+    _trend_item("20260917", "256,000", "2,500"),
+    _trend_item("20260916", "253,500", "5,000"),
+    _trend_item("20260915", "250,500", "1,500"),
+    _trend_item("20260914", "248,500", "-11,000", "5"),
+    _trend_item("20260911", "259,500", "-9,500", "5"),
+]
+
+
+def test_regular_base_and_trend_cmp():
+    it = {"itemCode": "005930", "stockName": "삼성전자", "closePrice": "260,500",
+          "compareToPreviousClosePrice": "8,000", "fluctuationsRatio": "3.17",
+          "compareToPreviousPrice": {"code": "2"}}
+    assert collect.parse_market_value_item(it, "KOSPI")["_base"] == 252500.0   # 전일 정규장 종가
+    down = dict(it, compareToPreviousClosePrice="8,000", compareToPreviousPrice={"code": "5"})
+    assert collect.parse_market_value_item(down, "KOSPI")["_base"] == 268500.0  # 부호 없는 하락 보정
+    assert "_base" not in collect.parse_market_value_item({"itemCode": "1", "stockName": "x"}, "KOSPI")
+    rows = collect.parse_trend_api(SAMSUNG_TREND)
+    assert rows[0]["date"] == "2026.09.17" and rows[0]["cmp"] == 2500.0
+    assert rows[3]["cmp"] == -11000.0
+    unsigned = collect.parse_trend_api([_trend_item("20260914", "248,500", "11,000", "5")])
+    assert unsigned[0]["cmp"] == -11000.0
+
+
+def test_derive_regular_closes():
+    rows = collect.parse_trend_api(SAMSUNG_TREND)
+    reg = collect.derive_regular_closes(rows)
+    # 30분봉 15:30 봉(정규장 종가)과 원 단위까지 일치해야 한다
+    assert reg == {"2026.09.16": 253500.0, "2026.09.15": 248500.0,
+                   "2026.09.14": 249000.0, "2026.09.11": 259500.0}
+    assert "2026.09.17" not in reg                     # 가장 최근 날은 다음 날 행이 있어야 나온다
+    split = collect.parse_trend_api([_trend_item("20260915", "50,000", "1,000"),
+                                     _trend_item("20260914", "240,000", "0")])
+    assert collect.derive_regular_closes(split) == {}  # 액면분할 같은 기준가 조정은 버린다
+    series = collect.regular_closes_series(rows, reg)  # 과거→현재, 9/14 이후만 교체
+    assert series == [259500.0, 249000.0, 248500.0, 253500.0, 256000.0]
+    assert collect.regular_closes_series(rows, reg, since="2026-09-16") == \
+        [259500.0, 248500.0, 250500.0, 253500.0, 256000.0]
+    assert collect.regular_closes_series(rows, {}) == [r["close"] for r in reversed(rows)]
+
+
+def _bar(t, o, h, lo, c, v):
+    return {"localDateTime": t, "openPrice": o, "highPrice": h, "lowPrice": lo,
+            "currentPrice": c, "accumulatedTradingVolume": v}
+
+
+BARS_0918 = [_bar("20260918090000", 261000.0, 261000.0, 258000.0, 259500.0, 2025608),
+             _bar("20260918140000", 261000.0, 262000.0, 257500.0, 261000.0, 1012782),
+             _bar("20260918153000", 261000.0, 261000.0, 261000.0, 261000.0, 3650117),
+             _bar("20260918160000", 261000.0, 263000.0, 250000.0, 260500.0, 999999)]  # 애프터마켓 봉
+
+
+def test_parse_minute30():
+    s = collect.parse_minute30(BARS_0918, "20260918")
+    assert s == {"close": 261000.0, "open": 261000.0, "high": 262000.0, "low": 257500.0,
+                 "vol": 2025608 + 1012782 + 3650117}           # 16:00 봉은 빠진다
+    assert collect.parse_minute30(BARS_0918[:2], "20260918") is None   # 마감 단일가 봉 없음
+    assert collect.parse_minute30(BARS_0918, "20260917") is None       # 다른 날
+    assert collect.parse_minute30([], "20260918") is None
+    assert collect.parse_minute30({"error": 1}, "20260918") is None
+
+
+def test_fetch_regular_session_abort():
+    calls = []
+
+    def fj(url):
+        calls.append(url)
+        return []
+    codes = [f"{i:06d}" for i in range(50)]
+    out, fail, aborted = collect.fetch_regular_session(codes, "20260918", fetch_json=fj, delay=0)
+    assert out == {} and aborted and fail == 50
+    assert len(calls) == collect.CONFIG_REGULAR["abort_after"]    # 헛요청은 처음 20건에서 멈춘다
+    ok, fail, aborted = collect.fetch_regular_session(
+        ["005930"], "20260918", fetch_json=lambda u: BARS_0918, delay=0)
+    assert ok["005930"]["close"] == 261000.0 and fail == 0 and not aborted
+    assert "minute30?startDateTime=202609180900&endDateTime=202609181530" in \
+        collect.MIN30_URL.format(code="005930", ymd="20260918")
+
+
+def test_apply_regular_session():
+    s = {"code": "005930", "price": 260500.0, "change_pct": 3.17, "volume": 14673683,
+         "_base": 252500.0, "closes": [253500.0, 252500.0, 260500.0],
+         "_last_close_date": "2026.09.18"}
+    etf = {"code": "069500", "name": "KODEX 200", "price": 109285.0, "closes": [1, 2]}
+    sess = {"005930": {"close": 261000.0, "open": 261000.0, "high": 262000.0,
+                       "low": 257500.0, "vol": 14652390}}
+    assert collect.apply_regular_session([s, etf], sess, "2026-09-18") == 1
+    assert s["price"] == 261000.0 and s["change_pct"] == 3.37
+    assert s["volume"] == 14652390 and s["day_high"] == 262000.0 and s["day_low"] == 257500.0
+    assert s["closes"][-1] == 261000.0
+    assert etf["price"] == 109285.0 and "day_high" not in etf
+    old = {"code": "005930", "price": 1.0, "closes": [5.0], "_last_close_date": "2026.09.17"}
+    collect.apply_regular_session([old], sess, "2026-09-18")
+    assert old["closes"] == [5.0]              # 수급 자료에 오늘 행이 없으면 이력은 건드리지 않는다
+    assert old["price"] == 261000.0 and "change_pct" not in old   # 기준가 없으면 등락률 유지
+    # 등락률 기준은 수급 자료 유도값이 우선 (_base가 엉뚱해도 영향 없음)
+    w = {"code": "005930", "_base": 261000.0}
+    collect.apply_regular_session([w], sess, "2026-09-18",
+                                  {"005930": {"2026.09.16": 1.0, "2026.09.17": 252500.0}})
+    assert w["change_pct"] == 3.37
+
+
+def test_add_base_close():
+    rows = collect.parse_trend_api(SAMSUNG_TREND)          # 최신 행 = 9/17 (오늘 9/18 행 아직 없음)
+    reg = collect.derive_regular_closes(rows)
+    collect.add_base_close(reg, rows, 252500.0, "2026-09-18")
+    assert reg["2026.09.17"] == 252500.0                    # 어제 정규장 종가를 기준가로 채움
+    reg2 = collect.derive_regular_closes(rows)
+    collect.add_base_close(reg2, rows, 999.0, "2026-09-17")  # 오늘 행이 있으면 손대지 않는다
+    assert "2026.09.17" not in reg2
+    reg3 = {}
+    collect.add_base_close(reg3, rows, 100000.0, "2026-09-18")   # 원래 종가와 너무 다르면 버린다
+    assert reg3 == {}
+    assert collect.add_base_close({}, [], 1.0, "2026-09-18") == {}
+
+
+def test_backfill_history_and_check():
+    import tempfile
+    from pathlib import Path as P
+    reg = {"005930": {"2026.09.11": 259500.0, "2026.09.14": 249000.0, "2026.09.15": 248500.0}}
+
+    def snap(day, px, **extra):
+        d = {"market_date": day,
+             "all_stocks": [{"code": "005930", "name": "삼성전자", "price": px, "change_pct": -4.43,
+                             "volume": 17420000, "day_low": 247000.0}],
+             "ideas": [{"code": "005930", "price": px}],
+             "swing": [{"code": "005930", "entry": round(px), "chg": -4.43}]}
+        d.update(extra)
+        return d
+
+    calls = []
+
+    def fj(url):
+        calls.append(url)
+        if "20260914" in url:
+            return [_bar("20260914090000", 249500.0, 254500.0, 248500.0, 250000.0, 16000000),
+                    _bar("20260914153000", 249000.0, 249000.0, 249000.0, 249000.0, 560000)]
+        return []
+    with tempfile.TemporaryDirectory() as td:
+        h = P(td)
+        h.joinpath("2026-09-11.json").write_text(json.dumps(snap("2026-09-11", 259500.0)), encoding="utf-8")
+        h.joinpath("2026-09-14.json").write_text(json.dumps(snap("2026-09-14", 248000.0)), encoding="utf-8")
+        h.joinpath("2026-09-15.json").write_text(json.dumps(snap("2026-09-15", 250500.0)), encoding="utf-8")
+        h.joinpath("2026-09-16.json").write_text(json.dumps(
+            snap("2026-09-16", 253500.0, regular_session={"applied": 1})), encoding="utf-8")
+        before11 = h.joinpath("2026-09-11.json").read_text(encoding="utf-8")
+        logs = collect.backfill_history(h, reg, "2026-09-17", fetch_json=fj, delay=0)
+        d14 = json.loads(h.joinpath("2026-09-14.json").read_text(encoding="utf-8"))
+        a = d14["all_stocks"][0]
+        assert a["price"] == 249000.0 and a["change_pct"] == -4.05       # 정규장 기준 -4.05%
+        assert a["volume"] == 16560000 and a["day_low"] == 248500.0 and a["day_high"] == 254500.0
+        assert d14["ideas"][0]["price"] == 249000.0                       # 성과 트래킹 진입가
+        assert d14["swing"][0]["entry"] == 249000 and d14["swing"][0]["chg"] == -4.05
+        assert d14["regular_fix"] == {"price": True, "bars": True}
+        d15 = json.loads(h.joinpath("2026-09-15.json").read_text(encoding="utf-8"))
+        assert d15["all_stocks"][0]["price"] == 248500.0 and d15["all_stocks"][0]["change_pct"] == -0.2
+        assert d15["regular_fix"] == {"price": True, "bars_tries": 1}     # 30분봉 없음 1회째
+        assert h.joinpath("2026-09-11.json").read_text(encoding="utf-8") == before11   # 시작일 전은 그대로
+        d16 = json.loads(h.joinpath("2026-09-16.json").read_text(encoding="utf-8"))
+        assert d16["all_stocks"][0]["price"] == 253500.0 and "regular_fix" not in d16  # V7.1 이후 기록
+        assert any("2026-09-14" in x for x in logs)
+        n_calls = len(calls)
+        collect.backfill_history(h, reg, "2026-09-17", fetch_json=fj, delay=0)
+        d15 = json.loads(h.joinpath("2026-09-15.json").read_text(encoding="utf-8"))
+        assert d15["regular_fix"]["bars"] == "unavailable"                # 2회째에 포기
+        assert len(calls) == n_calls + 1                                   # 9/14는 다시 안 받는다
+        collect.backfill_history(h, reg, "2026-09-17", fetch_json=fj, delay=0)
+        assert len(calls) == n_calls + 1                                   # 끝난 날짜는 요청 0
+        # 자가 대조: 직전 기록(9/16)은 유도값이 없어 대조 0건, 9/15까지만 보면 일치
+        assert collect.regular_check(h, reg, "2026-09-17") == (0, 0, "2026-09-16")
+        assert collect.regular_check(h, reg, "2026-09-16") == (1, 0, "2026-09-15")
+        bad = {"005930": {"2026.09.15": 250500.0 * 1.01}}
+        assert collect.regular_check(h, bad, "2026-09-16") == (1, 1, "2026-09-15")
+
+
+def test_backfill_failed_codes_only():
+    """V7.1 이후 기록은 그날 30분봉을 못 받은 종목만 다음 날 고친다 (나머지는 이미 정규장 값)."""
+    import tempfile
+    from pathlib import Path as P
+    reg = {"012450": {"2026.09.17": 1097000.0, "2026.09.18": 1090000.0},
+           "005930": {"2026.09.17": 252500.0, "2026.09.18": 999.0}}
+    d = {"market_date": "2026-09-18",
+         "regular_session": {"applied": 1, "failed": 1, "failed_codes": ["012450"]},
+         "all_stocks": [{"code": "012450", "name": "한화에어로스페이스", "price": 1089000.0,
+                         "change_pct": -0.73},
+                        {"code": "005930", "name": "삼성전자", "price": 261000.0, "change_pct": 3.37}]}
+    with tempfile.TemporaryDirectory() as td:
+        f = P(td, "2026-09-18.json")
+        f.write_text(json.dumps(d), encoding="utf-8")
+        logs = collect.backfill_history(P(td), reg, "2026-09-21", fetch_json=lambda u: [], delay=0)
+        got = json.loads(f.read_text(encoding="utf-8"))
+        a, b = got["all_stocks"]
+        assert a["price"] == 1090000.0 and a["change_pct"] == -0.64       # 실패 종목만 고침
+        assert b["price"] == 261000.0                                      # 정상 종목은 그대로
+        assert got["regular_session"]["failed_codes"] == [] and "regular_fix" not in got
+        assert logs == ["2026-09-18 실패분 가격 1종목"]
+        assert collect.backfill_history(P(td), reg, "2026-09-21", fetch_json=lambda u: [], delay=0) == []
+
+
+def test_chart_pack_regular_closes():
+    rows = [{"date": f"2026.07.{i:02d}", "close": 100.0 + i, "vol": 1} for i in range(1, 32)] + \
+           [{"date": f"2026.08.{i:02d}", "close": 200.0, "vol": 1} for i in range(1, 11)] + \
+           [{"date": "2026.09.14", "close": 248500.0, "vol": 1},
+            {"date": "2026.09.15", "close": 250500.0, "vol": 1}]
+    regular = {"005930": {"2026.09.14": 249000.0, "2026.09.15": 248500.0, "2026.08.01": 1.0}}
+    pack = collect.build_chart_pack(["005930"], {"005930": "삼성전자"},
+                                    fetch_hist=lambda c, d: rows, regular=regular)
+    closes = pack["005930"]["closes"]
+    assert closes[-2:] == [249000, 248500]          # 9/14 이후만 정규장 종가
+    assert closes[31] == 200                        # 시작일 전 날짜는 표에 있어도 그대로
+    plain = collect.build_chart_pack(["005930"], {}, fetch_hist=lambda c, d: rows)
+    assert plain["005930"]["closes"][-2:] == [248500, 250500]   # regular 없으면 예전과 같다
+    import tempfile
+    from pathlib import Path as P
+    with tempfile.TemporaryDirectory() as td:
+        P(td, "2026-09-11.json").write_text(json.dumps({"all_stocks": [{"code": "005930", "price": 1.0}]}),
+                                            encoding="utf-8")
+        P(td, "2026-09-14.json").write_text(json.dumps({"all_stocks": [
+            {"code": "005930", "price": 249000.0}, {"code": "000660", "price": 9.0}]}), encoding="utf-8")
+        led = collect.history_price_ledger(P(td), ["005930"])
+        assert led == {"005930": {"2026.09.14": 249000.0}}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
