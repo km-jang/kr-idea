@@ -651,6 +651,49 @@ def test_weekly_message():
     # 데이터 없을 때도 안전
     msg2 = notify.build_weekly_message({"performance": {"days": 0}})
     assert "쌓이는 중" in msg2
+    # 최고의 날이 마이너스여도 "+-"로 찍히지 않는다 (2026-09-20 실제 발송분)
+    data["performance"]["records"] = [
+        {"date": "2026-09-04", "avg_ret_pct": -0.37, "ideas": []},
+        {"date": "2026-09-07", "avg_ret_pct": -5.68, "ideas": []}]
+    msg3 = notify.build_weekly_message(data)
+    assert "+-" not in msg3 and "(-0.37%)" in msg3
+
+
+def test_week_span_uses_prev_week_close():
+    import notify
+    trend = [{"d": "2026-09-10", "v": 7033.92}, {"d": "2026-09-14", "v": 6684.37},
+             {"d": "2026-09-15", "v": 6627.26}, {"d": "2026-09-18", "v": 6894.23}]
+    span = notify.week_span(trend)
+    assert [t["d"] for t in span] == ["2026-09-10", "2026-09-18"]   # 월요일 등락 포함
+    # 지난주 기록이 없으면 옛 방식, 점이 하나면 빈 목록
+    assert notify.week_span(trend[1:])[0]["d"] == "2026-09-14"
+    assert notify.week_span(trend[:1]) == []
+    assert notify.week_span([{"v": 1}, {"v": 2}]) == [{"v": 1}, {"v": 2}]
+
+
+def test_ideas_vs_market():
+    import notify, tempfile
+    from pathlib import Path as P
+    with tempfile.TemporaryDirectory() as td:
+        # 60종목이 매일 +1%, 5선(코드 0)만 매일 +3% → 매일 시장을 이긴다
+        for i in range(8):
+            stocks = [{"code": f"{c:06d}", "price": 100 * (1.03 if c == 0 else 1.01) ** i}
+                      for c in range(60)]
+            ideas = [{"code": "000000", "name": "가", "price": stocks[0]["price"],
+                      "sector": "금융"}] * 2
+            P(td, f"2026-09-{i + 1:02d}.json").write_text(
+                json.dumps({"all_stocks": stocks, "ideas": ideas}), encoding="utf-8")
+        vm = notify.ideas_vs_market(td)
+        assert vm["d1"]["n"] == 7 and vm["d1"]["win_pct"] == 100
+        assert 1.9 < vm["d1"]["avg"] < 2.0
+        assert "d5" not in vm                      # 표본 3일뿐이라 표시 안 함
+        assert vm["crowd"] == {"sector": "금융", "pct": 100}
+        msg = notify.build_weekly_message(
+            {"performance": {"days": 3, "summary": {}, "records": []}}, hist_dir=td)
+        assert "다음 거래일 시장 평균을 이긴 날: 100%" in msg and "쏠림" in msg
+        assert "—" not in msg
+    with tempfile.TemporaryDirectory() as td:      # 기록이 없으면 조용히 생략
+        assert notify.ideas_vs_market(td) is None
 
 
 def test_stooq_csv_parse():
@@ -889,7 +932,7 @@ def test_strategy_lab():
     ]
     scored = collect.score_stocks(stocks, [])
     strat = collect.build_strategies(scored)
-    assert set(strat.keys()) == {"기본형", "수급형", "가치형", "모멘텀형"}
+    assert set(strat.keys()) == {"기본형", "수급형", "가치형", "모멘텀형", "전환형"}
     assert all(len(v) == 5 for v in strat.values())
     # 각 전략의 1위가 성향과 일치하는지
     assert strat["수급형"][0]["name"] == "수급왕"
@@ -920,7 +963,87 @@ def test_strategy_race():
         assert abs(vals["수급형"] - (-5.0)) < 0.01
         assert race["rank"][0]["name"] in ("기본형", "가치형")   # +10% 전략이 1위
         assert len(race["curves"]["기본형"]) == 2
+        # 전환형: 그날 기록에 없으면 다시 뽑는다. 이 기록엔 점수·시총이 없어 빈 5선 = 100 유지
+        assert vals["전환형"] == 0.0 and len(race["curves"]["전환형"]) == 2
+        assert race["duel"]["days"] == 0          # 합류일(CONFIG_TURN since) 전
     assert collect.build_strategy_race("/없는폴더", None) is None
+
+
+def test_turn_preset_and_duel():
+    """전환형: 외국인 1~3일차에 가점, 7일부터 0점. 본 점수(flow_score)는 건드리지 않는다."""
+    import tempfile, os
+    t = collect.turn_flow_score
+    assert t({"f_streak": 1}) == 8 and t({"f_streak": 3}) == 18
+    assert t({"f_streak": 5}) == 8 and t({"f_streak": 7}) == 0 and t({"f_streak": 12}) == 0
+    assert t({"f_streak": -4, "i_streak": None}) == 0            # 순매도 연속·빈 값
+    assert t({"f_streak": 3, "i_streak": 3}) == 18 + 6 + collect.CONFIG["flow_both_bonus"]
+    assert t({"f_streak": 9, "f_5d_amt_100m": 500}) == 5         # 대금 가점은 현행 그대로
+    mk = lambda code, fs, price: {"code": code, "name": code, "price": price, "mktcap_100m": 9000,
+                                  "f_streak": fs, "flow_score": min(max(fs, 0), 10) * 2,
+                                  "value_score": 10, "mom_score": 0, "disc_score": 0}
+    day0 = [mk("OLD", 10, 1000)] + [mk(f"N{i}", 2, 1000) for i in range(5)]
+    picks = collect.pick_ideas_weighted(day0, collect.STRATEGY_PRESETS["전환형"])
+    assert "OLD" not in [p["code"] for p in picks]               # 오래 산 종목은 전환형에서 밀린다
+    assert collect.pick_ideas_weighted(day0, collect.STRATEGY_PRESETS["기본형"])[0]["code"] == "OLD"
+    since = collect.CONFIG_TURN["since"]
+    with tempfile.TemporaryDirectory() as td:
+        open(os.path.join(td, since + ".json"), "w").write(json.dumps({
+            "market_date": since, "all_stocks": day0,
+            "strategies": {"기본형": [{"code": "OLD", "price": 1000}]}}))   # 전환형 키 없는 옛 기록
+        today = {"market_date": "2099-01-01",
+                 "all_stocks": [{"code": "OLD", "price": 900}] +
+                               [{"code": f"N{i}", "price": 1100} for i in range(5)]}
+        race = collect.build_strategy_race(td, today)
+        assert race["duel"] == {"name": "전환형", "since": since, "days": 1,
+                                "pct": 10.0, "base_pct": -10.0}
+
+
+def test_ideas_bench():
+    import tempfile, os
+    def write(td, ideas_gain):
+        for i in range(21):
+            stocks = [{"code": f"{c:06d}", "price": 100 * (ideas_gain if c == 0 else 1.01) ** i}
+                      for c in range(60)]
+            open(os.path.join(td, f"2026-08-{i + 1:02d}.json"), "w").write(json.dumps({
+                "all_stocks": stocks,
+                "ideas": [{"code": "000000", "name": "가", "price": stocks[0]["price"]}]}))
+    with tempfile.TemporaryDirectory() as td:
+        write(td, 1.00)                       # 5선은 제자리, 시장은 매일 +1% → 벤치
+        b = collect.build_ideas_bench(td)
+        assert b["n"] == 20 and b["win"] == 0 and b["avg_pct"] < 0 and b["benched"] is True
+    with tempfile.TemporaryDirectory() as td:
+        write(td, 1.03)                       # 5선이 매일 시장을 이김 → 정상
+        b = collect.build_ideas_bench(td)
+        assert b["win"] == 20 and b["benched"] is False
+    with tempfile.TemporaryDirectory() as td:   # 표본 부족이면 판정 안 함
+        assert collect.build_ideas_bench(td)["benched"] is False
+    with tempfile.TemporaryDirectory() as td:   # 오늘 시세를 주면 어제 5선의 오늘 결과까지 센다
+        write(td, 1.00)
+        today = {"market_date": "2026-08-22",
+                 "all_stocks": [{"code": f"{c:06d}", "price": 100 * (1.0 if c == 0 else 1.01 ** 21)}
+                                for c in range(60)]}
+        b = collect.build_ideas_bench(td, today=today)
+        assert b["n"] == 20 and b["win"] == 0
+        # 같은 날 다시 돌려 오늘 파일이 이미 있어도 값이 같다 (오늘 파일은 재료에서 뺀다)
+        today["market_date"] = "2026-08-21"
+        assert collect.build_ideas_bench(td, today=today)["n"] == 20
+    assert collect.turn_flow_score({"f_streak": "x", "i_streak": float("nan")}) == 0
+    # 읽는 쪽: 벤치면 브리핑이 "관찰 목록"으로 낮춰 부르고, 아니면 예전 그대로
+    import notify
+    old_us = notify.us_market_block
+    try:
+        notify.us_market_block = lambda: []       # 시험이 외부 요청을 하지 않게
+        data = {"ideas": [{"code": "000000", "name": "가", "score": 50, "reasons": []}],
+                "ideas_bench": {"n": 20, "win": 7, "avg_pct": -0.5, "benched": True}}
+        msg = notify.build_message(data)
+        assert "관찰 목록 5선" in msg and "오늘의 아이디어 5선" not in msg and "—" not in msg
+        assert "관찰 목록 5선: 가" in notify.build_evening_message(data)
+        data["ideas_bench"]["benched"] = False
+        assert "오늘의 아이디어 5선" in notify.build_message(data)
+        assert "오늘의 아이디어 5선" in notify.build_message({"ideas": data["ideas"]})   # 옛 데이터
+        assert "오늘의 5선: 가" in notify.build_evening_message(data)
+    finally:
+        notify.us_market_block = old_us
 
 
 def test_silence_radar():

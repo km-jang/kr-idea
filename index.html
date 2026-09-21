@@ -446,7 +446,8 @@ table.slim{min-width:0}
       아직 관심종목이 없습니다. 아래 표에서 ☆를 눌러 추가하세요.</div>
   </section>
   <section id="ideas">
-    <h2>오늘의 아이디어 5선</h2>
+    <h2 id="ideasTitle">오늘의 아이디어 5선</h2>
+    <p class="sub" id="ideasBench" style="display:none"></p>
     <p class="sub">수급(40) + 밸류(40) + 모멘텀(10) + 공시(±20) 종합점수 상위 · 시총 3,000억 이상 · 악재 공시 종목 제외</p>
     <div class="sliders" id="sliderBox">
       <div class="slrow"><span class="sllbl">수급</span><input type="range" id="wFlow" min="0" max="200" value="100"><span class="slval" id="wFlowV">100%</span></div>
@@ -765,7 +766,7 @@ function initSliders(d){
       const cur = getW(); cur[k] = +e.target.value; setW(cur); paint(); apply();
     });
   }
-  initQuiz(d); initRaceBtn(d);
+  initQuiz(d); initRaceBtn(d); ideasBenchNote(d);
   document.getElementById("slReset").addEventListener("click", ()=>{
     setW({...DEF_W}); paint(); apply();
   });
@@ -851,16 +852,30 @@ function initQuiz(){
   };
 }
 
+/* ---------- 5선 벤치 (2026-09-21): 최근 성적이 시장 평균에 못 미치면 "관찰 목록"으로 낮춰 부른다.
+   판정은 collect.py CONFIG_BENCH(ideas_*)가 하고 여기는 플래그만 읽는다. 정상일 땐 0픽셀 ---------- */
+function ideasBenchNote(d){
+  const b = d.ideas_bench || {};
+  const el = document.getElementById("ideasBench");
+  if(!b.benched){ el.style.display = "none"; return; }
+  document.getElementById("ideasTitle").textContent = "오늘의 관찰 목록 5선";
+  el.style.display = "";
+  el.innerHTML = `🪑 <b>성적 부진으로 관찰 목록으로 낮춤</b> · 최근 ${b.n}거래일 중 다음날 시장 평균을 이긴 날 ${b.win}일`
+    + ` (평균 ${b.avg_pct>0?"+":""}${b.avg_pct}%p) · 절반 이상 이기고 평균이 플러스로 돌아서면 자동 복귀 · 채점은 계속됩니다`;
+}
+
 /* ---------- B안: 리그 1위 따라가기 ---------- */
 const RACE_W = {"기본형":{f:100,v:100,m:100,d:100}, "수급형":{f:150,v:70,m:120,d:100},
                 "가치형":{f:70,v:160,m:60,d:120}, "모멘텀형":{f:110,v:60,m:200,d:80}};
 function initRaceBtn(d){
   const btn = document.getElementById("raceBtn");
   const rank = ((d.strategy_race||{}).rank)||[];
-  const leader = rank[0];
-  if(!leader || !RACE_W[leader.name]){ btn.style.display = "none"; return; }
+  // 전환형은 가중치 조합이 아니라 수급 배점 자체가 다른 시험 선수라 슬라이더로 못 따라간다 → 건너뜀
+  const li = rank.findIndex(x=>RACE_W[x.name]);
+  const leader = rank[li];
+  if(!leader){ btn.style.display = "none"; return; }
   btn.style.display = "";
-  btn.textContent = `🏆 리그 1위(${leader.name} ${leader.total_pct>0?"+":""}${leader.total_pct}%) 따라가기`;
+  btn.textContent = `🏆 리그 ${li+1}위(${leader.name} ${leader.total_pct>0?"+":""}${leader.total_pct}%) 따라가기`;
   btn.onclick = ()=>{
     const cur = getW();
     window.__applyWeights({...cur, ...RACE_W[leader.name]});
@@ -1492,7 +1507,7 @@ function scanReview(d){
 
 
 /* ---------- 전략 리그전 차트 ---------- */
-const RACE_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#4a3aa7"];  // 검증된 카테고리 팔레트 1-4
+const RACE_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#4a3aa7", "#d6482a"];  // 검증된 카테고리 팔레트 1-5 (다섯 번째 = 전환형)
 function raceChart(d){
   const box = document.getElementById("raceBox");
   const r = d.strategy_race;
@@ -1527,10 +1542,10 @@ function raceChart(d){
   names.forEach((k,idx)=>{
     const c = r.curves[k];
     const pts = c.map((p,i)=>`${X(i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ");
-    svg += `<polyline points="${pts}" fill="none" stroke="${RACE_COLORS[idx%4]}"
+    svg += `<polyline points="${pts}" fill="none" stroke="${RACE_COLORS[idx%RACE_COLORS.length]}"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
     svg += `<text x="${W-padR+5}" y="${labelY[k].toFixed(1)}" font-size="11" font-weight="700"
-      fill="${RACE_COLORS[idx%4]}">${esc(k)}</text>`;
+      fill="${RACE_COLORS[idx%RACE_COLORS.length]}">${esc(k)}</text>`;
   });
   svg += "</svg>";
   document.getElementById("raceChart").innerHTML = svg;
@@ -1538,7 +1553,17 @@ function raceChart(d){
   document.getElementById("raceRank").innerHTML =
     "현재 순위: " + (r.rank||[]).map((x,i)=>
       `<b>${i+1}위</b> ${esc(x.name)} ${pn(x.total_pct)}`).join(" · ") +
-    ` <span style="color:var(--ink-3)">· 우승 전략의 가중치를 CONFIG에 반영하면 튜닝 완성</span>`;
+    (((r.rank||[])[0]||{}).name && !RACE_W[r.rank[0].name] ? ""   // 시험 선수가 1위면 반영할 가중치가 없다
+      : ` <span style="color:var(--ink-3)">· 우승 전략의 가중치를 CONFIG에 반영하면 튜닝 완성</span>`) +
+    duelNote(r.duel);
+}
+/* 전환형(시험 선수) 안내: 합류일 전 곡선은 과거 기록으로 다시 계산한 값이라 판단은 합류 후 맞대결로 한다 */
+function duelNote(u){
+  if(!u || !u.since) return "";
+  const pn = v => `<span class="${cls(v)}">${v>0?"+":""}${v}%</span>`;
+  const since = u.since.slice(5).replace("-", "/");
+  return `<br><span style="color:var(--ink-3)">🆕 ${esc(u.name)}은 외국인이 막 사기 시작한 종목에 가점을 주는 시험 선수 · ${since} 합류, 그 전 곡선은 과거 기록 재계산 · `
+    + (u.days > 0 ? `합류 후 ${u.days}일: ${esc(u.name)} ${pn(u.pct)} · 기본형 ${pn(u.base_pct)}` : "합류 후 성적 집계 전") + `</span>`;
 }
 
 /* ---------- 내 포트폴리오 (브라우저 저장) ---------- */
@@ -2664,6 +2689,7 @@ function openTrust(){
   let best = null, bestN = 0;
   for(const nm in curves){
     const c = curves[nm]; if(!c || !c.length) continue;
+    if(!RACE_W[nm]) continue;   // 전환형(시험 선수)의 합류 전 곡선은 재계산값이라 실적 1위로 세지 않는다
     const r = Math.round((c[c.length-1].v-100)*100)/100;
     bestN = Math.max(bestN, c.length);
     if(!best || r > best.r) best = {nm, r};

@@ -1692,7 +1692,35 @@ STRATEGY_PRESETS = {
     "수급형":   {"f": 1.5, "v": 0.7, "m": 1.2, "d": 1.0},
     "가치형":   {"f": 0.7, "v": 1.6, "m": 0.6, "d": 1.2},
     "모멘텀형": {"f": 1.1, "v": 0.6, "m": 2.0, "d": 0.8},
+    # 전환형 (2026-09-21 소유자 승인, REVIEW-SCORE-260921.md): 가중치는 기본형과 같고
+    # 수급 점수의 외국인 연속일 배점만 바꾼 시험 선수. 본 점수(score)에는 영향 없음.
+    "전환형":   {"f": 1.0, "v": 1.0, "m": 1.0, "d": 1.0, "flow": "turn"},
 }
+
+# 전환형의 외국인 연속 순매수일 배점. 현행은 길수록 가점(일당 2점, 10일 상한)인데
+# 44일 기록에서 7일 이상은 5일 뒤 시장 평균 대비 -0.99%p(이긴 날 28%)로 거꾸로였다.
+# 그래서 막 사기 시작한 1~3일차에 가점을 몰고 7일부터는 0점. 기관·동반·대금 가점은 현행 그대로.
+# since = 리그 합류일. 그 전 구간은 과거 기록으로 다시 계산한 값이라 판단은 since 이후 성적으로 한다.
+CONFIG_TURN = {"f_pts": {1: 8, 2: 14, 3: 18}, "f_mid": 8, "f_mid_max": 6,
+               "since": "2026-09-22"}
+
+
+def turn_flow_score(s, cfg=None):
+    """전환형 수급 점수. all_stocks에 이미 있는 필드만 쓴다 (요청 0). 순수 함수."""
+    cfg = cfg or CONFIG_TURN
+    def days_of(v):                       # 기록이 깨져 있어도 리그 계산을 죽이지 않는다
+        try:
+            return max(int(v or 0), 0)
+        except (TypeError, ValueError):
+            return 0
+    fs, ist = days_of(s.get("f_streak")), days_of(s.get("i_streak"))
+    pts = cfg["f_pts"].get(fs, cfg["f_mid"] if 3 < fs <= cfg["f_mid_max"] else 0)
+    pts += min(ist, CONFIG["flow_i_streak_cap"]) * 2.0
+    if fs >= 3 and ist >= 3:
+        pts += CONFIG["flow_both_bonus"]
+    if (s.get("f_5d_amt_100m") or 0) >= CONFIG["flow_big_amt_100m"]:
+        pts += 5
+    return pts
 
 
 def pick_ideas_weighted(stocks, w, n=None):
@@ -1707,7 +1735,8 @@ def pick_ideas_weighted(stocks, w, n=None):
         to = turnover_100m(s)
         if to is not None and to < min_to:
             continue
-        adj = ((s.get("flow_score") or 0) * w["f"] + (s.get("value_score") or 0) * w["v"]
+        flow = turn_flow_score(s) if w.get("flow") == "turn" else (s.get("flow_score") or 0)
+        adj = (flow * w["f"] + (s.get("value_score") or 0) * w["v"]
                + (s.get("mom_score") or 0) * w["m"] + (s.get("disc_score") or 0) * w["d"])
         if adj > 0:
             cands.append((adj, s))
@@ -1745,24 +1774,38 @@ def build_strategy_race(hist_dir, today_stub, max_days=60):
     curves = {k: [{"d": days[0][0], "v": 100.0}] for k in STRATEGY_PRESETS}
     vals = {k: 100.0 for k in STRATEGY_PRESETS}
     moved = False
+    since = CONFIG_TURN["since"]
+    duel = {"전환형": 100.0, "기본형": 100.0}     # 합류일 이후만 따로 잰 맞대결
+    duel_days = 0
     for (d0, prev), (d1, cur) in zip(days, days[1:]):
         strat = prev.get("strategies") or {}
         pm = pmap(cur)
-        for k in STRATEGY_PRESETS:
+        for k, w in STRATEGY_PRESETS.items():
+            picks = strat.get(k)
+            if picks is None and prev.get("all_stocks"):
+                # 나중에 합류한 선수: 그날 기록만으로 그날의 5선을 다시 뽑는다 (미래 값 안 씀)
+                picks = pick_ideas_weighted(prev["all_stocks"], w)
             rets = []
-            for s in strat.get(k) or []:
+            for s in picks or []:
                 p0, p1 = s.get("price"), pm.get(s.get("code"))
                 if p0 and p1:
                     rets.append(p1 / p0 - 1)
             if rets:
                 vals[k] *= 1 + sum(rets) / len(rets)
                 moved = True
+                if k in duel and d0 >= since:
+                    duel[k] *= 1 + sum(rets) / len(rets)
             curves[k].append({"d": d1, "v": round(vals[k], 2)})
+        if d0 >= since:
+            duel_days += 1
     if not moved:
         return None
     rank = sorted(({"name": k, "total_pct": round(vals[k] - 100, 2)}
                    for k in STRATEGY_PRESETS), key=lambda r: -r["total_pct"])
-    return {"curves": curves, "rank": rank}
+    return {"curves": curves, "rank": rank,
+            "duel": {"name": "전환형", "since": since, "days": duel_days,
+                     "pct": round(duel["전환형"] - 100, 2),
+                     "base_pct": round(duel["기본형"] - 100, 2)}}
 
 
 # ---------------------------------------------------------------------------
@@ -2436,7 +2479,7 @@ def build_sample():
         "themes_total": 15}
     strategies = build_strategies(stocks)
     race_curves, race_vals = {}, {}
-    for k in ("기본형", "수급형", "가치형", "모멘텀형"):
+    for k in STRATEGY_PRESETS:
         v, pts = 100.0, []
         for i in range(10):
             v *= random.uniform(0.99, 1.028)
@@ -2792,6 +2835,10 @@ CONFIG_BENCH = {
     "alive_min_n": 10, "alive_min_rate": 0.60, "alive_min_avg": 1.0,
     # 창이 없는 신호(투매·조정대기는 누적만 있음): 누적 표본 10건↑ · 승률 50%↑ · 평균 +
     "cum_min_n": 10, "cum_min_rate": 0.50, "cum_min_avg": 0.0,
+    # 5선 벤치 (2026-09-21 소유자 승인, REVIEW-SCORE-260921.md): 최근 20거래일 동안 5선의
+    # 다음날 수익이 전 종목 평균을 이긴 날이 절반 미만이거나 평균 초과수익이 0 이하면
+    # 화면·브리핑에서 "관찰 목록"으로 낮춰 표시. 표본 15일 미만이면 판정 안 함. 회복하면 자동 복귀.
+    "ideas_days": 20, "ideas_min_n": 15, "ideas_min_rate": 0.50, "ideas_min_avg": 0.0,
 }
 
 
@@ -2826,6 +2873,45 @@ def bench_flags(stat, benched, cfg=None):
     out["revived"] = bool(benched) and _good(out.get("n", 0), out.get("win", 0), out.get("avg_pct"),
                                              cfg["cum_min_n"], cfg["cum_min_rate"], cfg["cum_min_avg"])
     return out
+
+
+def build_ideas_bench(hist_dir, cfg=None, today=None):
+    """5선 벤치 판정 → {"n","win","avg_pct","days","benched"} (data.json `ideas_bench`, 키 추가만).
+    날짜마다 한 번씩만 센다: 그날 5선의 다음 거래일 수익 평균 - 그날 전 종목 평균(%p).
+    today = {"market_date", "all_stocks"}: 오늘 시세. 주면 어제 5선의 오늘 결과까지 센다
+    (build_strategy_race와 같은 방식). 오늘 5선은 아직 다음날이 없으므로 재료가 아니다.
+    "다음 거래일"은 history의 다음 파일이다. 수집이 빈 날이 끼면 그 구간은 여러 날치지만
+    5선과 시장 평균을 같은 구간으로 재므로 비교는 성립한다."""
+    cfg = cfg or CONFIG_BENCH
+    days = []
+    md = (today or {}).get("market_date")
+    try:
+        files = [f for f in sorted(Path(hist_dir).glob("*.json")) if not md or f.stem < md]
+        for f in files[-(cfg["ideas_days"] + (0 if md else 1)):]:
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            px = {s["code"]: s["price"] for s in d.get("all_stocks") or []
+                  if s.get("code") and s.get("price")}
+            days.append((px, [s for s in d.get("ideas") or []
+                              if s.get("code") and s.get("price")]))
+    except Exception:
+        pass
+    if md:
+        days.append(({s["code"]: s["price"] for s in today.get("all_stocks") or []
+                      if s.get("code") and s.get("price")}, []))
+    ex = []
+    for (px, ideas), (nxt, _) in zip(days, days[1:]):
+        uni = [nxt[c] / p - 1 for c, p in px.items() if c in nxt]
+        mine = [nxt[s["code"]] / s["price"] - 1 for s in ideas if s["code"] in nxt]
+        if len(uni) >= 50 and mine:
+            ex.append((sum(mine) / len(mine) - sum(uni) / len(uni)) * 100)
+    n, win = len(ex), sum(1 for x in ex if x > 0)
+    avg = round(sum(ex) / n, 2) if n else None
+    benched = n >= cfg["ideas_min_n"] and not _good(
+        n, win, avg, cfg["ideas_min_n"], cfg["ideas_min_rate"], cfg["ideas_min_avg"])
+    return {"n": n, "win": win, "avg_pct": avg, "days": cfg["ideas_days"], "benched": benched}
 
 # 검색식 공통 ETF 제외 (V5.4): 검색식은 개별 종목 발굴이 목적인데 지수 상품이 섞이면
 # 잡음이 된다 (2026-08-06 신고가 문앞에 채권 ETF가 실제로 잡힌 사례).
@@ -3592,7 +3678,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              mines=None, swing=None, swing_review=None, chart_pack=None,
              screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None,
              phase_track=None, reports=None, wave_pullback=None, dump_stats=None,
-             earnings=None, regular_session=None):
+             earnings=None, regular_session=None, ideas_bench=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -3667,6 +3753,8 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         # V7.1: 정규장 기준 보정 기록. applied가 있으면 이 기록의 가격은 정규장 값이다
         # (backfill_history가 이걸 보고 다시 고치지 않는다)
         "regular_session": regular_session or {},
+        # 5선 벤치 판정 (2026-09-21). benched면 화면·브리핑이 "관찰 목록"으로 낮춰 부른다
+        "ideas_bench": ideas_bench or {},
         "insider_trades": insider_trades or [],
         "mines": mines or [],
         "swing": swing or [],
@@ -3838,6 +3926,12 @@ def run_full(max_universe=None, out_path=None):
     if news_compass:
         print(f"  → 점화 테마 {len(news_compass['hot_themes'])} · 데뷔 {len(news_compass['debuts'])}")
     strategies = build_strategies(stocks)
+    ideas_bench = build_ideas_bench(hist_dir, today={
+        "market_date": market_date,
+        "all_stocks": [{"code": s["code"], "price": s.get("price")} for s in stocks]})
+    if ideas_bench.get("benched"):
+        print(f"  → 5선 벤치: 최근 {ideas_bench['n']}일 중 {ideas_bench['win']}일만 시장 평균 상회 "
+              f"(평균 {ideas_bench['avg_pct']}%p)")
     strategy_race = build_strategy_race(
         hist_dir, {"market_date": market_date,
                    "all_stocks": [{"code": s["code"], "price": s.get("price")} for s in stocks]})
@@ -4006,7 +4100,8 @@ def run_full(max_universe=None, out_path=None):
                     swing_stats=swing_stats, kill_watch=kill_watch,
                     phase_track=phase_track, reports=reports,
                     wave_pullback=wave_pullback, dump_stats=dump_stats,
-                    earnings=earnings, regular_session=regular_session)
+                    earnings=earnings, regular_session=regular_session,
+                    ideas_bench=ideas_bench)
 
 
 def main():

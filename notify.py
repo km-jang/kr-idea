@@ -301,7 +301,13 @@ def build_message(data):
 
     ideas = data.get("ideas") or []
     if ideas:
-        lines.append("<b>오늘의 아이디어 5선</b>")
+        bench = data.get("ideas_bench") or {}
+        if bench.get("benched"):      # 5선 벤치 (2026-09-21): 성적 부진 구간엔 낮춰 부른다
+            lines.append("<b>오늘의 관찰 목록 5선</b>")
+            lines.append(f"<i>🪑 최근 {bench.get('n')}거래일 중 시장 평균을 이긴 날 "
+                         f"{bench.get('win')}일 · 회복하면 자동 복귀</i>")
+        else:
+            lines.append("<b>오늘의 아이디어 5선</b>")
         for i, s in enumerate(ideas, 1):
             reasons = " · ".join(s.get("reasons", [])[:2]) or "-"
             lines.append(f"{i}. <b>{e(s['name'])}</b> ({s.get('score')}점)")
@@ -580,7 +586,8 @@ def build_evening_message(data):
     if ideas:
         names = " · ".join(
             f"{e(s['name'])}{' 🆕' if s.get('idea_days') == 1 else ''}" for s in ideas)
-        lines.append(f"오늘의 5선: {names}")
+        label = "관찰 목록 5선" if (data.get("ideas_bench") or {}).get("benched") else "오늘의 5선"
+        lines.append(f"{label}: {names}")
     lines.extend([""] if compass_lines(data, brief=True) else [])
     lines.extend(compass_lines(data, brief=True))
     movers = sorted([s for s in (data.get("all_stocks") or [])
@@ -601,13 +608,76 @@ def build_evening_message(data):
     return "\n".join(lines)
 
 
-def build_weekly_message(data):
+def week_span(trend):
+    """주간 등락의 구간: 지난주 마지막 거래일 종가 → 이번 주 마지막 종가.
+    예전엔 최근 5개 점의 첫날을 기준으로 삼아 월요일 하루 등락이 빠졌다
+    (2026-09-14 주: 월요일 -5%가 빠져 +3.14%로 표시). 날짜를 못 읽으면 옛 방식."""
+    if len(trend) < 2:
+        return []
+    try:
+        last = datetime.strptime(trend[-1]["d"], "%Y-%m-%d")
+        monday = (last - timedelta(days=last.weekday())).strftime("%Y-%m-%d")
+        prev = [t for t in trend if t["d"] < monday]
+        if prev:
+            return [prev[-1], trend[-1]]
+    except Exception:
+        pass
+    return trend[-5:]
+
+
+def ideas_vs_market(hist_dir=None, max_days=30):
+    """5선이 시장 평균(전 종목 단순 평균)을 이겼는지 날짜별로 한 번씩만 센다.
+
+    성적표의 '선정일→현재' 승률은 같은 종목이 매일 뽑히면 한 묶음을 여러 번
+    세는 값이라, 다음날·5거래일 뒤 기준의 시장 대비 성적을 나란히 보여준다.
+    history/만 읽는다 (요청 0, data.json 무변경). 표본 5일 미만이면 None."""
+    hist_dir = Path(hist_dir) if hist_dir else ROOT / "history"
+    try:
+        files = sorted(hist_dir.glob("*.json"))[-(max_days + 5):]
+    except Exception:
+        return None
+    days = []
+    for f in files:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        px = {s["code"]: s["price"] for s in d.get("all_stocks") or []
+              if s.get("code") and s.get("price")}
+        ideas = [s for s in d.get("ideas") or [] if s.get("code") and s.get("price")]
+        days.append((px, ideas))
+
+    def excess(i, h):
+        px, ideas = days[i]
+        nxt = days[i + h][0]
+        uni = [nxt[c] / p - 1 for c, p in px.items() if c in nxt]
+        mine = [nxt[s["code"]] / s["price"] - 1 for s in ideas if s["code"] in nxt]
+        if len(uni) < 50 or not mine:
+            return None
+        return (sum(mine) / len(mine) - sum(uni) / len(uni)) * 100
+
+    out = {}
+    for h in (1, 5):
+        ex = [x for x in (excess(i, h) for i in range(len(days) - h)) if x is not None]
+        ex = ex[-max_days:]
+        if len(ex) >= 5:
+            out[f"d{h}"] = {"n": len(ex), "avg": round(sum(ex) / len(ex), 2),
+                            "win_pct": round(sum(1 for x in ex if x > 0) / len(ex) * 100)}
+    # 쏠림: 최근 5일 5선에서 한 섹터가 차지한 비중
+    secs = [s.get("sector") for _, ideas in days[-5:] for s in ideas if s.get("sector")]
+    if len(secs) >= 10:
+        top = max(set(secs), key=secs.count)
+        out["crowd"] = {"sector": top, "pct": round(secs.count(top) / len(secs) * 100)}
+    return out or None
+
+
+def build_weekly_message(data, hist_dir=None):
     """일요일 저녁 주간 결산 - 성과 트래킹 기반."""
     e = lambda s: html.escape(str(s or ""))
     lines = ["📅 <b>주간 결산</b>", ""]
 
     trend = data.get("kospi_trend") or []
-    week = trend[-5:] if len(trend) >= 2 else []
+    week = week_span(trend)
     if len(week) >= 2 and week[0].get("v"):
         chg = (week[-1]["v"] / week[0]["v"] - 1) * 100
         sign = "▲" if chg > 0 else ("▼" if chg < 0 else "-")
@@ -625,13 +695,24 @@ def build_weekly_message(data):
         lines.append(f"· 승률: {s.get('win_rate_pct')}%  ·  "
                      f"KOSPI 대비 우위: {s.get('beat_kospi_pct')}%  ·  "
                      f"추적 {p['days']}일")
+        lines.append("  <i>위 두 값은 지난 선정분을 모두 오늘 가격으로 잰 것이라, "
+                     "같은 종목이 여러 날 뽑히면 한꺼번에 움직입니다.</i>")
+        vm = ideas_vs_market(hist_dir) or {}
+        for h, label in ((1, "다음 거래일"), (5, "5거래일 뒤")):
+            x = vm.get(f"d{h}")
+            if x:
+                lines.append(f"· {label} 시장 평균을 이긴 날: {x['win_pct']}% "
+                             f"({x['n']}일, 평균 {x['avg']:+.2f}%p)")
+        c = vm.get("crowd")
+        if c and c["pct"] >= 50:
+            lines.append(f"· ⚠️ 쏠림: 최근 5일 5선의 {c['pct']}%가 {e(c['sector'])}")
         recs = p.get("records") or []
         if recs:
             best = max(recs, key=lambda r: r["avg_ret_pct"])
             worst = min(recs, key=lambda r: r["avg_ret_pct"])
             lines.append(f"· 최고의 날: {e(best['date'][5:])} "
-                         f"(+{best['avg_ret_pct']}%) / 아쉬운 날: {e(worst['date'][5:])} "
-                         f"({worst['avg_ret_pct']}%)")
+                         f"({best['avg_ret_pct']:+}%) / 아쉬운 날: {e(worst['date'][5:])} "
+                         f"({worst['avg_ret_pct']:+}%)")
             # 이번 주 최다 선정 종목
             cnt = {}
             for r in recs[:5]:
@@ -650,7 +731,12 @@ def build_weekly_message(data):
         lines.append("<b>🏁 전략 리그 순위</b>")
         for i, x in enumerate(race, 1):
             v = x["total_pct"]
-            lines.append(f"{i}위 {e(x['name'])} {'+' if v > 0 else ''}{v}%")
+            note = " (시험 선수 · 합류 전 구간은 재계산값)" if x["name"] == "전환형" else ""
+            lines.append(f"{i}위 {e(x['name'])} {'+' if v > 0 else ''}{v}%{note}")
+    duel = (data.get("strategy_race") or {}).get("duel") or {}
+    if duel.get("days"):
+        lines.append(f"🆕 {e(duel.get('name'))} 합류 후 {duel['days']}일: "
+                     f"{duel.get('pct') or 0:+}% · 기본형 {duel.get('base_pct') or 0:+}%")
     lines.append("")
     lines.extend(weekly_extra_lines(data))
     lines.append(f'📈 <a href="{SITE_URL}">대시보드에서 상세 보기</a>')
@@ -677,7 +763,9 @@ def weekly_extra_lines(data, today=None):
         if parts:
             out.append("🎓 졸업생 복기: " + " · ".join(parts))
     # S13: 전략 리그 기반 튜닝 제안
-    rank = (data.get("strategy_race") or {}).get("rank") or []
+    # 전환형은 가중치 조합이 아닌 시험 선수(합류 전 구간은 재계산값)라 이 제안에서 뺀다
+    rank = [x for x in (data.get("strategy_race") or {}).get("rank") or []
+            if x.get("name") != "전환형"]
     if len(rank) >= 2:
         leader = rank[0]
         base = next((x for x in rank if "기본" in x.get("name", "")), None)
