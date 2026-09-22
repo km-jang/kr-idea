@@ -6515,9 +6515,7 @@
   "applied": 569,
   "failed": 1,
   "etf_skipped": 130,
-  "failed_codes": [
-   "131290"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-09-18 실패분 가격 4종목"
   ],
