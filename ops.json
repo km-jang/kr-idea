@@ -297,6 +297,6 @@
   "pulse": true,
   "evening": true,
   "scan": true,
-  "recover": "ok"
+  "recover": "none"
  }
 ]
