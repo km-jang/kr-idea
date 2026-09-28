@@ -1133,8 +1133,8 @@
    "code": "402340",
    "name": "SK스퀘어",
    "market": "KOSPI",
-   "price": 1181000.0,
-   "change_pct": 4.24,
+   "price": 1190000.0,
+   "change_pct": 5.03,
    "mktcap_100m": 1558022.0,
    "pbr": 2.84,
    "per": 4.76,
@@ -6463,9 +6463,7 @@
   "applied": 569,
   "failed": 1,
   "etf_skipped": 130,
-  "failed_codes": [
-   "402340"
-  ],
+  "failed_codes": [],
   "check": {
    "day": "2026-09-22",
    "n": 695,
@@ -7211,8 +7209,8 @@
     "외인 5일",
     "뉴스"
    ],
-   "entry": 1181000,
-   "chg": 4.24,
+   "entry": 1190000,
+   "chg": 5.03,
    "stop": 1119219,
    "stop_pct": -5.2,
    "target": 1304563,
@@ -16113,8 +16111,8 @@
    "code": "402340",
    "name": "SK스퀘어",
    "market": "KOSPI",
-   "price": 1181000.0,
-   "change_pct": 4.24,
+   "price": 1190000.0,
+   "change_pct": 5.03,
    "mktcap_100m": 1558022.0,
    "pbr": 2.84,
    "per": 4.76,
