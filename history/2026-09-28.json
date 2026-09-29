@@ -6566,10 +6566,7 @@
   "applied": 569,
   "failed": 2,
   "etf_skipped": 129,
-  "failed_codes": [
-   "420770",
-   "358570"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-09-23 실패분 가격 1종목"
   ],
@@ -39548,8 +39545,8 @@
    "code": "358570",
    "name": "지아이이노베이션",
    "market": "KOSDAQ",
-   "price": 8630.0,
-   "change_pct": -2.71,
+   "price": 8580.0,
+   "change_pct": -3.27,
    "mktcap_100m": 5568.0,
    "pbr": 5.76,
    "per": null,
