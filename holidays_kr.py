@@ -9,11 +9,15 @@
 
 CLI: `python holidays_kr.py [YYYY-MM-DD]`
   → 휴장이면 사유를 출력(예: "제헌절"), 거래일이면 아무것도 출력하지 않는다.
+`python holidays_kr.py --base` → 기준일 출력 (아래 base_day).
 """
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
+LATE_NIGHT_UNTIL = 6          # ops_log.base_day·closing_scan.base_day와 같은 규칙 (00~06시 = 전날 몫)
+BASE_ENV = "KR_BASE_DAY"      # update.yml 첫 단계 "기준일 정하기"가 넣는 환경변수
 
 # 주중 휴장일만 기록 (주말은 코드가 자동 판정). 출처: KRX 2026 휴장일정 + 제헌절 재지정(2026 시행).
 KRX_CLOSED = {
@@ -54,10 +58,30 @@ KRX_CLOSED = {
 }
 
 
+def base_day(now=None):
+    """기준일 'YYYY-MM-DD' = 이 실행이 어느 날 몫인가 (B안, 2026-09-22).
+
+    now를 넘기면 그 시각으로만 계산한다 (순수 함수). 안 넘기면 워크플로가 작업 맨 처음에
+    정해 둔 KR_BASE_DAY를 쓰고, 없거나 형식이 틀리면(손으로 돌릴 때) 지금 시각으로 계산한다.
+    그래서 23:50에 시작해 00:20에 끝나는 수집도 처음부터 끝까지 같은 날을 본다."""
+    if now is None:
+        env = os.environ.get(BASE_ENV, "")
+        try:
+            datetime.strptime(env, "%Y-%m-%d")
+            return env
+        except ValueError:
+            now = datetime.now(KST)
+    if now.hour < LATE_NIGHT_UNTIL:
+        now = now - timedelta(days=1)
+    return now.strftime("%Y-%m-%d")
+
+
 def closed_reason(date_str=None):
-    """휴장 사유 반환 (거래일이면 None). date_str 없으면 오늘(KST)."""
+    """휴장 사유 반환 (거래일이면 None). date_str 없으면 기준일(base_day).
+
+    예전엔 달력 날짜를 써서, 금요일 몫 복구 수집이 토요일 새벽에 돌면 "주말"로 보고 건너뛰었다."""
     if not date_str:
-        date_str = datetime.now(KST).strftime("%Y-%m-%d")
+        date_str = base_day()
     if date_str in KRX_CLOSED:
         return KRX_CLOSED[date_str]
     try:
@@ -74,17 +98,16 @@ def is_trading_day(date_str=None):
 
 
 def last_trading_day(date_str=None, max_back=15):
-    """기준일(없으면 오늘 KST) '이전'의 가장 최근 거래일을 'YYYY-MM-DD'로 돌려준다.
+    """기준일(없으면 base_day) '이전'의 가장 최근 거래일을 'YYYY-MM-DD'로 돌려준다.
 
     용도 (V6.6, 2026-09-14): 아침 자가복구의 신선도 판정. 예전 규칙은 "4일 이내면 신선"이라
     금요일 저녁 수집이 실패해도 월요일 아침이 목요일 데이터를 그대로 통과시켰다 (사고 10).
     이제 "직전 거래일 마감분이 있어야 신선"으로 판정한다. 주말·연휴는 달력이 건너뛴다.
     CLI: `python holidays_kr.py --last` → 직전 거래일 출력."""
     try:
-        base = (datetime.strptime(date_str, "%Y-%m-%d") if date_str
-                else datetime.now(KST).replace(tzinfo=None))
+        base = datetime.strptime(date_str or base_day(), "%Y-%m-%d")
     except ValueError:
-        base = datetime.now(KST).replace(tzinfo=None)
+        base = datetime.strptime(base_day(), "%Y-%m-%d")
     d = base
     for _ in range(max_back):
         d = d - timedelta(days=1)
@@ -98,6 +121,8 @@ if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else None
     if arg == "--last":
         print(last_trading_day(sys.argv[2] if len(sys.argv) > 2 else None))
+    elif arg == "--base":
+        print(base_day())
     else:
         reason = closed_reason(arg)
         if reason:

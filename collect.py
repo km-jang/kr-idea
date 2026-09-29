@@ -3720,9 +3720,12 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
 
     flow_rank = sorted(stocks, key=lambda s: -(s.get("flow_score") or 0))[:30]
     value_rank = sorted(stocks, key=lambda s: -(s.get("value_score") or 0))[:30]
+    if not market_date:               # 지수 응답에 거래일이 없을 때만. 새벽 실행은 전날 몫 (B안)
+        import holidays_kr
+        market_date = holidays_kr.base_day()
     return {
-        "generated_at": now.strftime("%Y-%m-%d %H:%M KST"),
-        "market_date": market_date or now.strftime("%Y-%m-%d"),
+        "generated_at": now.strftime("%Y-%m-%d %H:%M KST"),   # 실제 수집 시각 그대로 (성적표 수집시각 열)
+        "market_date": market_date,
         "sample": sample,
         "indices": indices,
         "ideas": [slim(s, with_closes=True) for s in ideas],

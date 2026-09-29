@@ -856,8 +856,14 @@ def already_sent(mode):
     except Exception:
         return False
 
-def kst_today():
-    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
+def kst_today(now=None):
+    """발송 장부·경고 문구의 '오늘' = 기준일 (B안, 2026-09-22). 06시 전 실행은 전날 몫.
+    예전엔 달력 날짜라 8/31 저녁 발송이 9/1 새벽에 돌자 장부에 9/1로 적혀 성적표가 X가 됐다."""
+    try:
+        import holidays_kr
+    except ImportError:          # 달력 모듈이 없으면 옛 방식 (보정 없음)
+        return (datetime.now(KST) if now is None else now).strftime("%Y-%m-%d")
+    return holidays_kr.base_day(now)
 
 
 def main():

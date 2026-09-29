@@ -1294,10 +1294,15 @@ def test_insider_briefing_line():
     d = collect.build_sample()        # 고정 픽스처 (실제 data.json 의존 금지 - 조용한 실패 방지)
     d["insider_trades"] = []          # 방향 데이터 없음 → 경량판 표시
     d["insider_watch"] = [{"company": "CJ ENM", "count": 3}]
-    msg = notify.build_message(d)
-    assert "내부자·대주주 신고 몰림" in msg and "CJ ENM(3건)" in msg
-    d["insider_watch"] = []
-    assert "내부자·대주주" not in notify.build_message(d)
+    old_us = notify.us_market_block
+    try:
+        notify.us_market_block = lambda: []       # 시험이 외부 요청을 하지 않게 (2026-09-22: stooq 무응답에 수 분씩 걸렸다)
+        msg = notify.build_message(d)
+        assert "내부자·대주주 신고 몰림" in msg and "CJ ENM(3건)" in msg
+        d["insider_watch"] = []
+        assert "내부자·대주주" not in notify.build_message(d)
+    finally:
+        notify.us_market_block = old_us
 
 
 def test_stale_notice():
@@ -1455,13 +1460,18 @@ def test_insider_trades_briefing():
     d["insider_trades"] = [
         {"name": "CJ ENM", "net_amt_100m": 10.7, "buys": 3, "sells": 0},
         {"name": "LG화학", "net_amt_100m": -6.6, "buys": 0, "sells": 2}]
-    msg = notify.build_message(d)
-    assert "내부자 매수 우세" in msg and "CJ ENM" in msg
-    assert "내부자 매도 우세" in msg and "LG화학" in msg
-    d["insider_trades"] = []
-    d["insider_watch"] = [{"company": "한미반도체", "count": 2}]
-    msg2 = notify.build_message(d)
-    assert "신고 몰림" in msg2 and "매수 우세" not in msg2
+    old_us = notify.us_market_block
+    try:
+        notify.us_market_block = lambda: []       # 시험이 외부 요청을 하지 않게
+        msg = notify.build_message(d)
+        assert "내부자 매수 우세" in msg and "CJ ENM" in msg
+        assert "내부자 매도 우세" in msg and "LG화학" in msg
+        d["insider_trades"] = []
+        d["insider_watch"] = [{"company": "한미반도체", "count": 2}]
+        msg2 = notify.build_message(d)
+        assert "신고 몰림" in msg2 and "매수 우세" not in msg2
+    finally:
+        notify.us_market_block = old_us
 
 
 def test_build_mines():
@@ -2841,6 +2851,97 @@ def test_chart_pack_regular_closes():
             {"code": "005930", "price": 249000.0}, {"code": "000660", "price": 9.0}]}), encoding="utf-8")
         led = collect.history_price_ledger(P(td), ["005930"])
         assert led == {"005930": {"2026.09.14": 249000.0}}
+
+
+def _with_base_env(value, fn):
+    """KR_BASE_DAY를 잠시 바꿔 fn을 돌리고 원래 값으로 되돌린다 (Actions에선 늘 들어 있는 값)."""
+    import os
+    saved = os.environ.get("KR_BASE_DAY")
+    try:
+        if value is None:
+            os.environ.pop("KR_BASE_DAY", None)
+        else:
+            os.environ["KR_BASE_DAY"] = value
+        fn()
+    finally:
+        if saved is None:
+            os.environ.pop("KR_BASE_DAY", None)
+        else:
+            os.environ["KR_BASE_DAY"] = saved
+
+
+def test_base_day_unified():
+    """B안 (2026-09-22): 네 모듈이 같은 순간을 같은 날로 센다. 06시 전 = 전날, 워크플로의 KR_BASE_DAY 우선."""
+    import holidays_kr as hk, notify, ops_log, closing_scan as cs
+    from datetime import datetime
+    def pure():
+        for h, m, want in [(3, 3, "2026-08-31"), (5, 59, "2026-08-31"), (6, 0, "2026-09-01"), (23, 50, "2026-09-01")]:
+            now = datetime(2026, 9, 1, h, m, tzinfo=hk.KST)
+            got = {hk.base_day(now), ops_log.base_day(now), cs.base_day(now), notify.kst_today(now)}
+            assert got == {want}, (h, m, got)
+        assert len(hk.base_day()) == 10 and notify.kst_today() == hk.base_day()   # 기본 인자 경로 (사고 6 교훈)
+    _with_base_env(None, pure)
+    def env():
+        assert hk.base_day() == notify.kst_today() == "2026-09-18"
+        assert hk.base_day(datetime(2026, 9, 20, 12, 0, tzinfo=hk.KST)) == "2026-09-20"   # now를 넘기면 환경변수 무시
+    _with_base_env("2026-09-18", env)
+    def bad():
+        assert hk.base_day() != "garbage" and len(hk.base_day()) == 10                   # 형식이 틀리면 무시
+    _with_base_env("garbage", bad)
+
+
+def test_closed_reason_follows_base_day():
+    """날짜 생략 휴장 판정이 기준일을 따른다: 금요일 몫 복구가 토요일 새벽에 돌아도 수집을 건너뛰지 않는다."""
+    import holidays_kr as hk
+    def fri():
+        assert hk.closed_reason() is None and hk.last_trading_day() == "2026-09-17"
+    _with_base_env("2026-09-18", fri)
+    def eve():
+        assert hk.closed_reason() is None          # 9/23 몫 수집이 9/24 추석 새벽으로 밀려도 거래일
+    _with_base_env("2026-09-23", eve)
+    def holiday():
+        assert hk.closed_reason() == "추석 연휴"
+    _with_base_env("2026-09-24", holiday)
+    def sat():
+        assert hk.closed_reason() == "주말"
+    _with_base_env("2026-09-19", sat)
+
+
+def test_is_final():
+    """마감 판정 하나로 통일 (B안): 수집 시각을 날짜까지 비교해 새벽 복구 수집도 전날 마감분으로 센다."""
+    import ops_log
+    f = ops_log.is_final
+    assert f({"market_date": "2026-08-31", "generated_at": "2026-08-31 19:14 KST"}, "2026-08-31")
+    assert f({"market_date": "2026-08-31", "generated_at": "2026-09-01 01:05 KST"}, "2026-08-31")      # 새벽 복구
+    assert not f({"market_date": "2026-08-31", "generated_at": "2026-08-31 14:00 KST"}, "2026-08-31")  # 장중 스냅샷
+    assert not f({"market_date": "2026-08-28", "generated_at": "2026-08-28 19:14 KST"}, "2026-08-31")  # 전 거래일 데이터
+    assert f({"market_date": "2026-09-18", "generated_at": "2026-09-21 07:50 KST"}, "2026-09-18")      # 월요일 아침 복구
+    assert f({"generated_at": "2026-07-17 19:15 KST"}, "2026-07-17")                                   # 옛 형식
+    assert not f({}, "2026-08-31") and not f(None, "2026-08-31")
+    assert not f({"market_date": "2026-08-31", "generated_at": "zzzz"}, "2026-08-31")
+    r = ops_log.build_record({"market_date": "2026-08-31", "generated_at": "2026-09-01 01:05 KST"},
+                             {}, [], "2026-08-31")
+    assert r["data_final"] is True                                                                    # 성적표에도
+
+
+def test_date_cli_for_workflow():
+    """update.yml이 부르는 명령줄 3종 (holidays_kr --base·--last, ops_log --final)을 실제 프로세스로 확인."""
+    import json, os, subprocess, tempfile
+    from pathlib import Path as P
+    here = P(__file__).resolve().parent
+    env = dict(os.environ, KR_BASE_DAY="2026-09-18", PYTHONIOENCODING="utf-8")
+    def run(args, cwd=here):
+        return subprocess.run([sys.executable, *args], cwd=cwd, env=env, capture_output=True,
+                              text=True, encoding="utf-8").stdout.strip()
+    assert run([str(here / "holidays_kr.py"), "--base"]) == "2026-09-18"
+    assert run([str(here / "holidays_kr.py"), "--last", "2026-09-28"]) == "2026-09-23"
+    assert run([str(here / "holidays_kr.py"), "--last"]) == "2026-09-17"
+    with tempfile.TemporaryDirectory() as td:
+        P(td, "data.json").write_text(json.dumps({"market_date": "2026-08-31",
+                                                  "generated_at": "2026-09-01 01:05 KST"}), encoding="utf-8")
+        assert run([str(here / "ops_log.py"), "--final", "2026-08-31"], td) == "yes"
+        assert run([str(here / "ops_log.py"), "--final", "2026-09-01"], td) == "no"
+        assert not P(td, "ops.json").exists()          # 판정만 하고 장부는 안 쓴다
 
 
 if __name__ == "__main__":

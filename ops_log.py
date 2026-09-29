@@ -4,6 +4,7 @@
 대시보드 자가진단(신호등 클릭)에서 최근 5영업일 매트릭스로 표시된다.
 사용: python ops_log.py [none|ok|fail] [YYYY-MM-DD]
       1번 인자 = 그날 자가복구 결과, 2번 인자 = 기준일(생략 시 자동 판정)
+      python ops_log.py --final YYYY-MM-DD → data.json이 그날 마감분이면 yes, 아니면 no
 """
 import json
 import sys
@@ -34,12 +35,30 @@ def valid_date(text):
     return str(text)
 
 
+def is_final(data, day):
+    """data가 day(또는 그 뒤 거래일)의 마감 후 수집인가. 순수 함수 (B안, 2026-09-22).
+
+    기준 = market_date가 day 이상이고, 수집 시각이 그 market_date 15:40 이후.
+    수집 시각을 날짜까지 붙여 통째로 비교하므로 다음 날 새벽 복구 수집도 전날 마감분으로 센다.
+    (예전 식은 수집 시각의 날짜 부분만 봐서, 새벽 1시 복구가 성공해도 '미반영'으로 판정했다)
+    market_date가 없는 옛 형식은 수집 시각의 날짜를 market_date로 본다.
+    update.yml의 마감 판정 4곳도 `python ops_log.py --final 날짜`로 이 함수를 쓴다."""
+    gen = str((data or {}).get("generated_at") or "")
+    md = str((data or {}).get("market_date") or gen[:10])
+    try:
+        datetime.strptime(gen[:16], "%Y-%m-%d %H:%M")
+        datetime.strptime(md, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return md >= (day or "") and gen[:16] >= f"{md} 15:40"
+
+
 def build_record(data, sent, scans, today, recover="none"):
     """당일 실행 결과 1건을 조립한다 (모든 입력은 이미 파싱된 객체, 오프라인 테스트 가능)."""
     gen = str((data or {}).get("generated_at") or "")
     return {
         "date": today,
-        "data_final": bool(gen[:10] == today and gen[11:16] >= "15:40"),
+        "data_final": is_final(data, today),
         "data_gen": gen,
         "morning": (sent or {}).get("morning") == today,
         "pulse": (sent or {}).get("pulse") == today,
@@ -82,6 +101,9 @@ def _load(path, default):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--final":   # 워크플로의 마감 판정: yes/no 출력
+        print("yes" if is_final(_load("data.json", {}), sys.argv[2] if len(sys.argv) > 2 else "") else "no")
+        return
     recover = sys.argv[1] if len(sys.argv) > 1 else "none"
     if recover not in ("none", "ok", "fail"):
         recover = "none"
