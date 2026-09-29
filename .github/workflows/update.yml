@@ -57,6 +57,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # ── 기준일 정하기 (B안, 2026-09-22) ────────────────────────────────────
+      # "이 실행이 어느 날 몫인가"를 작업 맨 처음에 한 번만 정한다. 00~06시(KST) 실행은 전날 몫.
+      # 뒤 단계의 셸($KR_BASE_DAY)과 파이썬(holidays_kr.base_day)이 모두 이 값을 쓴다.
+      # 예전엔 단계·파일마다 따로 계산해서 자정을 넘긴 실행이 같은 순간을 다른 날로 셌다.
+      # 시각 창 가드·무단 실행 감지·지연 머리말은 실제 시각이 필요하므로 이 값을 쓰지 않는다.
+      - name: 기준일 정하기 (자정 넘김 보정)
+        shell: bash
+        run: |
+          HH=$(TZ=Asia/Seoul date '+%-H')
+          if [ "$HH" -lt 6 ]; then
+            D=$(TZ=Asia/Seoul date -d 'yesterday' '+%Y-%m-%d')
+            echo "자정 넘김 실행 감지(현재 ${HH}시), 기준일을 전날($D)로 보정"
+          else
+            D=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          fi
+          echo "KR_BASE_DAY=$D" >> "$GITHUB_ENV"
+          echo "기준일 $D"
+
       # ── 무단 실행 감지 (2026-09-01) ────────────────────────────────────────
       # 외부 정시 스케줄러가 토큰으로 이 워크플로를 부른다. 토큰이 탈취되면
       # 공격자도 같은 호출을 할 수 있고, 지금까지는 그게 조용히 지나갔다.
@@ -160,8 +178,8 @@ jobs:
           # 신선도 = "직전 거래일 마감(15:40 이후) 데이터가 있는가" (V6.6, 2026-09-14).
           # 예전 규칙 "4일 이내"는 금요일 저녁 실패를 월요일 아침이 그냥 통과시켰다 (사고 10).
           # LASTDAY 계산이 실패하면 빈 문자열 → 비교가 항상 참 → 재수집 안 함 (예전과 같은 안전한 쪽).
-          LASTDAY=$(python holidays_kr.py --last 2>/dev/null || echo "")
-          FRESH=$(python -c "g='$GEN'; print('yes' if g[:10]>='$LASTDAY' and g[11:16]>='15:40' else 'no')" 2>/dev/null || echo no)
+          LASTDAY=$(python holidays_kr.py --last "$KR_BASE_DAY" 2>/dev/null || echo "")
+          FRESH=$(python ops_log.py --final "$LASTDAY" 2>/dev/null || echo no)
           if [ "$FRESH" != "yes" ]; then
             echo "직전 거래일($LASTDAY) 마감 데이터 없음(현재: $GEN), 아침 자가복구 수집 시도"
             if python test_parsers.py && python collect.py; then
@@ -229,16 +247,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          HH=$(TZ=Asia/Seoul date '+%-H')
-          if [ "$HH" -lt 6 ]; then
-            TODAY=$(TZ=Asia/Seoul date -d 'yesterday' '+%Y-%m-%d')
-            echo "자정 넘김 실행 감지(현재 ${HH}시), 기준일을 전날($TODAY)로 보정"
-          else
-            TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
-          fi
+          TODAY="$KR_BASE_DAY"                  # 첫 단계 "기준일 정하기"가 정한 값 (자정 넘김 보정 포함)
           HAVE=$(python -c "import json;print(json.load(open('data.json')).get('market_date',''))" 2>/dev/null || echo "")
           GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
-          FINAL=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+          FINAL=$(python ops_log.py --final "$TODAY" 2>/dev/null || echo no)
           if [ "$FINAL" = "yes" ]; then
             echo "본 수집 완료 확인(마감 후 수집 $GEN), 예비 알람 조용히 종료"
             exit 0
@@ -296,7 +308,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
+          TODAY="$KR_BASE_DAY"                  # 첫 단계 "기준일 정하기"가 정한 값
           DONE=$(python -c "import json;rs=json.load(open('scans.json'));print('yes' if any(r.get('date')=='$TODAY' for r in rs) else 'no')" 2>/dev/null || echo "no")
           if [ "$DONE" = "yes" ]; then echo "본 스캔 완료 확인 - 예비 조용히 종료"; exit 0; fi
           echo "본 스캔 누락 감지 - 예비 스캔 시작"
@@ -318,7 +330,8 @@ jobs:
           ${ERRT:-로그 없음}
           이 줄을 그대로 복사해 AI에게 주세요 (PLAYBOOK 2.7절).
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \n              -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
             exit $RC
           fi
 
@@ -333,17 +346,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ]; then echo "시크릿 없음 - 생략"; exit 0; fi
-          HH=$(TZ=Asia/Seoul date '+%-H')
-          if [ "$HH" -lt 6 ]; then
-            TODAY=$(TZ=Asia/Seoul date -d 'yesterday' '+%Y-%m-%d')
-            echo "자정 넘김 실행 감지(현재 ${HH}시), 기준일을 전날($TODAY)로 보정"
-          else
-            TODAY=$(TZ=Asia/Seoul date '+%Y-%m-%d')
-          fi
+          TODAY="$KR_BASE_DAY"                  # 첫 단계 "기준일 정하기"가 정한 값 (자정 넘김 보정 포함)
           H=$(python holidays_kr.py "$TODAY" 2>/dev/null || true)
           if [ -n "$H" ]; then echo "휴장일($H), 자가 점검·성적표 기록 생략"; exit 0; fi
           GEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
-          FRESH=$(python -c "g='$GEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+          FRESH=$(python ops_log.py --final "$TODAY" 2>/dev/null || echo no)
           RECOVER=none
           NEWGEN="$GEN"
           if [ "$FRESH" != "yes" ]; then
@@ -361,7 +368,7 @@ jobs:
               git add earnings.json 2>/dev/null || true   # V7.0 분기 실적 캐시 (없어도 통과)
               git diff --cached --quiet || (git commit -m "data(자가복구): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')" && (git push || (git pull --rebase && git push) || (sleep 7 && git pull --rebase && git push)))
               NEWGEN=$(python -c "import json;print(json.load(open('data.json')).get('generated_at',''))" 2>/dev/null || echo "")
-              NEWFRESH=$(python -c "g='$NEWGEN'; print('yes' if g[:10]=='$TODAY' and g[11:16]>='15:40' else 'no')")
+              NEWFRESH=$(python ops_log.py --final "$TODAY" 2>/dev/null || echo no)
               if [ "$NEWFRESH" = "yes" ]; then
                 RECOVER=ok
                 python notify.py --evening --if-not-sent || true
@@ -431,7 +438,8 @@ jobs:
           ${ERRT:-로그 없음}
           이 줄을 그대로 복사해 AI에게 주세요 (PLAYBOOK 2.7절).
           https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \n              -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$MSG" > /dev/null || true
             exit $RC
           fi
 
