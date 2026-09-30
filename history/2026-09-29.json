@@ -6527,9 +6527,7 @@
   "applied": 569,
   "failed": 1,
   "etf_skipped": 130,
-  "failed_codes": [
-   "121440"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-09-28 실패분 가격 2종목"
   ],
@@ -44452,8 +44450,8 @@
    "code": "121440",
    "name": "골프존홀딩스",
    "market": "KOSDAQ",
-   "price": 7690.0,
-   "change_pct": 0.26,
+   "price": 7620.0,
+   "change_pct": -0.65,
    "mktcap_100m": 3294.0,
    "pbr": 0.4,
    "per": 21.07,
