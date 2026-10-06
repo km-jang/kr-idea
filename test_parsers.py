@@ -2944,6 +2944,83 @@ def test_date_cli_for_workflow():
         assert not P(td, "ops.json").exists()          # 판정만 하고 장부는 안 쓴다
 
 
+def _find_bash():
+    """환경변수가 제대로 넘어가는 bash를 찾는다 (윈도우는 Git Bash 우선, 없으면 None = 시험 건너뜀)."""
+    import os, shutil, subprocess
+    cands = [r"C:\Program Files\Git\bin\bash.exe"] if os.name == "nt" else []
+    cands.append(shutil.which("bash"))
+    for b in cands:
+        if not b or not os.path.exists(b):
+            continue
+        try:
+            r = subprocess.run([b, "-c", 'echo "$KR_PROBE"'], env=dict(os.environ, KR_PROBE="ok"),
+                               capture_output=True, text=True, timeout=20)
+        except Exception:
+            continue
+        if r.stdout.strip() == "ok":
+            return b
+    return None
+
+
+def test_base_day_step_schedule_aware():
+    """update.yml 첫 단계 "기준일 정하기"를 실제 bash로 돌린다 (2026-10-06 보완).
+
+    예약 실행은 "예정 시각이 지난 가장 최근 날", 정시 호출·손 실행은 06시 규칙.
+    10/5 휴일 야간 예비가 10/6 06:27에 시작해 10/6 몫으로 헛경보를 낸 실사고를 재현한다.
+    date는 가짜 함수로 바꿔 시각을 고정한다. bash가 없으면 건너뛴다."""
+    import os, subprocess, tempfile
+    from pathlib import Path as P
+    bash = _find_bash()
+    if not bash:
+        print("  (bash 없음, 기준일 단계 시험 건너뜀)")
+        return
+    text = (P(__file__).resolve().parent / ".github" / "workflows" / "update.yml").read_text(encoding="utf-8")
+    start = text.index("- name: 기준일 정하기")
+    head = text[start:text.index("run: |", start)]
+    # env 줄에 오타가 나면 값이 빈 문자열이 되어 예약 실행이 조용히 06시 규칙으로 돌아간다 (검토 지적, 2026-10-06)
+    assert "EVENT: ${{ github.event_name }}" in head and "SCHED: ${{ github.event.schedule }}" in head, head
+    lines = text[text.index("run: |", start):].splitlines()[1:]
+    body = []
+    for ln in lines:
+        if ln.strip() and not ln.startswith(" " * 10):
+            break
+        body.append(ln[10:])
+    fake = ('date() { case "$*" in *yesterday*) echo "$FAKE_YDAY";; *%Y-%m-%d*) echo "$FAKE_TODAY";;'
+            ' *%H*) echo "$FAKE_H";; *%M*) echo "$FAKE_M";; *) command date "$@";; esac; }\n')
+    T, Y = "2026-10-06", "2026-10-05"
+    cases = [  # (이벤트, 크론, 시, 분, 기대 기준일)
+        ("schedule", "3 14 * * 1-5", "06", "27", Y),        # 실사고: 23:03 야간 예비가 다음 날 06:27 시작
+        ("schedule", "3 14 * * 1-5", "09", "11", Y),        # 사고 5: 다음 날 09:11 시작
+        ("schedule", "3 14 * * 1-5", "23", "10", T),        # 거의 정시
+        ("schedule", "3 14 * * 1-5", "23", "03", T),        # 정시 경계 (-lt를 -le로 잘못 바꾸면 걸린다)
+        ("schedule", "38 3 * * 1-5", "12", "40", T),        # 12:38 점심 예비
+        ("schedule", "38 3 * * 1-5", "06", "30", Y),
+        ("schedule", "7 6 * * 1-5", "15", "10", T),         # 15:07 스캔 예비
+        ("schedule", "43 10 * * 1-5", "08", "10", Y),       # 19:43 저녁 예비가 다음 날 아침
+        ("schedule", "43 10 * * 1-5", "19", "50", T),
+        ("schedule", "7 9 * * 0", "07", "00", Y),           # 일요일 18:07 주간 결산이 월요일 아침
+        ("schedule", "7 9 * * 0", "23", "44", T),           # 10/4처럼 같은 날 밤
+        ("schedule", "28 23 * * 0-4", "08", "40", T),       # 08:28 아침 예비 (UTC 23:28)
+        ("workflow_dispatch", "", "03", "00", Y),           # 정시 호출·손 실행은 06시 규칙
+        ("workflow_dispatch", "", "05", "59", Y),
+        ("workflow_dispatch", "", "06", "00", T),
+        ("workflow_dispatch", "", "09", "05", T),           # 09가 8진수로 읽히면 bash가 죽는다
+        ("schedule", "x y", "03", "00", Y),                 # 크론을 못 읽으면 06시 규칙으로
+        ("schedule", "x y", "07", "00", T),
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        for ev, sched, h, m, want in cases:
+            genv = P(td) / "genv"
+            genv.write_text("", encoding="utf-8")
+            env = dict(os.environ, EVENT=ev, SCHED=sched, FAKE_H=h, FAKE_M=m, FAKE_TODAY=T, FAKE_YDAY=Y,
+                       GITHUB_ENV=str(genv))
+            r = subprocess.run([bash, "-e", "-c", fake + "\n".join(body)], env=env, capture_output=True,
+                               text=True, encoding="utf-8", timeout=30)
+            got = genv.read_text(encoding="utf-8").strip()
+            assert r.returncode == 0, (ev, sched, h, m, r.stderr[-300:])
+            assert got == f"KR_BASE_DAY={want}", (ev, sched, h, m, got)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
