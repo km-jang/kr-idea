@@ -57,23 +57,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # ── 기준일 정하기 (B안, 2026-09-22) ────────────────────────────────────
-      # "이 실행이 어느 날 몫인가"를 작업 맨 처음에 한 번만 정한다. 00~06시(KST) 실행은 전날 몫.
+      # ── 기준일 정하기 (B안, 2026-09-22 · 예약 실행 보완 2026-10-06) ─────────
+      # "이 실행이 어느 날 몫인가"를 작업 맨 처음에 한 번만 정한다.
       # 뒤 단계의 셸($KR_BASE_DAY)과 파이썬(holidays_kr.base_day)이 모두 이 값을 쓴다.
-      # 예전엔 단계·파일마다 따로 계산해서 자정을 넘긴 실행이 같은 순간을 다른 날로 셌다.
+      # 예약(schedule) 실행: 크론 문자열로 KST 예정 시각을 구해 "예정 시각이 지난 가장 최근 날"을 기준일로.
+      #   예약은 일찍 시작하는 일이 없으니 하루 안의 지연이면 몇 시간이 밀려도 원래 몫으로 센다.
+      #   (2026-10-06 실사고: 10/5 휴일의 야간 예비가 7시간 24분 밀려 06:27에 시작했는데, 06시 규칙으로
+      #    10/6 몫이 되어 복구 실패 헛경보와 10/6 성적표 오기록을 남겼다. 사고 5의 8/28 09:11도 같은 유형)
+      # 정시 호출(cron-job.org)·손 실행(workflow_dispatch): 예정 시각 정보가 없으니 00~06시(KST)는 전날 몫.
       # 시각 창 가드·무단 실행 감지·지연 머리말은 실제 시각이 필요하므로 이 값을 쓰지 않는다.
       - name: 기준일 정하기 (자정 넘김 보정)
         shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHED: ${{ github.event.schedule }}
         run: |
-          HH=$(TZ=Asia/Seoul date '+%-H')
-          if [ "$HH" -lt 6 ]; then
+          NOW_H=$(TZ=Asia/Seoul date '+%H'); NOW_M=$(TZ=Asia/Seoul date '+%M')
+          NOWM=$(( 10#$NOW_H * 60 + 10#$NOW_M ))     # 10# = 08·09를 8진수로 읽지 않게 (사고 1)
+          read -r SM SH _ <<< "$SCHED"
+          if [ "$EVENT" = "schedule" ] && [[ "$SM" =~ ^[0-9]+$ && "$SH" =~ ^[0-9]+$ ]]; then
+            DUE=$(( (10#$SH * 60 + 10#$SM + 540) % 1440 ))   # 크론은 UTC, +9시간 = KST 예정 시각(분)
+            WHY="예약 예정 $(printf '%02d:%02d' $((DUE / 60)) $((DUE % 60))) KST"
+            if [ "$NOWM" -lt "$DUE" ]; then BACK=1; else BACK=0; fi
+          else
+            WHY="06시 규칙"
+            if [ "$NOWM" -lt 360 ]; then BACK=1; else BACK=0; fi
+          fi
+          if [ "$BACK" = 1 ]; then
             D=$(TZ=Asia/Seoul date -d 'yesterday' '+%Y-%m-%d')
-            echo "자정 넘김 실행 감지(현재 ${HH}시), 기준일을 전날($D)로 보정"
+            echo "자정 넘김 실행 감지(현재 ${NOW_H}:${NOW_M}, ${WHY}), 기준일을 전날($D)로 보정"
           else
             D=$(TZ=Asia/Seoul date '+%Y-%m-%d')
           fi
           echo "KR_BASE_DAY=$D" >> "$GITHUB_ENV"
-          echo "기준일 $D"
+          echo "기준일 $D (${WHY})"
 
       # ── 무단 실행 감지 (2026-09-01) ────────────────────────────────────────
       # 외부 정시 스케줄러가 토큰으로 이 워크플로를 부른다. 토큰이 탈취되면
