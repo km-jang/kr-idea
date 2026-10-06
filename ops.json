@@ -291,12 +291,12 @@
  },
  {
   "date": "2026-10-06",
-  "data_final": false,
-  "data_gen": "2026-10-02 19:13 KST",
-  "morning": false,
-  "pulse": false,
-  "evening": false,
-  "scan": false,
-  "recover": "fail"
+  "data_final": true,
+  "data_gen": "2026-10-06 19:13 KST",
+  "morning": true,
+  "pulse": true,
+  "evening": true,
+  "scan": true,
+  "recover": "none"
  }
 ]
