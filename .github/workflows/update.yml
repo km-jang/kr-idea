@@ -55,7 +55,10 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 30에서 50으로 (2026-10-06 V7.3b): 저녁 수집이 17~30분 걸려 9/23에 30분 제한으로 강제 종료됐다 (사고 12).
+    # 제한에 걸린 작업은 '실패'가 아니라 '취소'로 끝나 실패 알림이 안 나가므로, 수집을 돌리는
+    # 단계에는 40분 제한을 따로 걸어 그 전에 '실패'로 끝나게 한다 (아래 세 곳).
+    timeout-minutes: 50
     steps:
       # ── 기준일 정하기 (B안, 2026-09-22 · 예약 실행 보완 2026-10-06) ─────────
       # "이 실행이 어느 날 몫인가"를 작업 맨 처음에 한 번만 정한다.
@@ -160,7 +163,9 @@ jobs:
 
       - name: 데이터 수집
         if: github.event.schedule == '13 10 * * 1-5' || github.event.inputs.job == 'evening' || github.event.inputs.job == 'collect_only'
+        timeout-minutes: 40   # 넘기면 '실패'로 끝나 아래 실패 자동 통보가 나간다 (V7.3b)
         env:
+          PYTHONUNBUFFERED: "1"   # 시간 제한으로 끊겨도 마지막 출력 줄이 run_log.txt에 남게 (V7.3b)
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
@@ -184,6 +189,7 @@ jobs:
 
       - name: 아침 브리핑 발송 (신선도 확인 + 자가복구)
         if: github.event.schedule == '3 23 * * 0-4' || github.event.inputs.job == 'morning'
+        timeout-minutes: 40   # 자가복구 수집이 길어지면 '실패'로 끝나 실패 자동 통보가 나간다 (V7.3b)
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
@@ -356,6 +362,7 @@ jobs:
         if: github.event.schedule == '3 14 * * 1-5' || github.event.inputs.job == 'night'
         continue-on-error: true
         env:
+          PYTHONUNBUFFERED: "1"   # 복구가 시간 제한으로 끊겨도 마지막 출력 줄이 recover_log.txt에 남게 (V7.3b)
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
@@ -374,8 +381,11 @@ jobs:
             echo "마감 수집 미반영 감지 (현재: $GEN), 자동 복구 시도"
             RECOVER=fail
             set +e
-            { python test_parsers.py && python collect.py ; } > recover_log.txt 2>&1
+            # 이 단계는 continue-on-error라 단계 제한으로는 알림이 안 나간다. 복구 명령에만 40분 제한을 걸어
+            # 넘기면 아래 '자동 복구도 실패' 알림과 성적표 fail 기록으로 가게 한다 (V7.3b, timeout 종료코드 124)
+            { timeout 5m python test_parsers.py && timeout 40m python collect.py ; } > recover_log.txt 2>&1
             ROK=$?
+            if [ "$ROK" = "124" ]; then echo "복구 수집이 40분을 넘겨 멈췄습니다 (시간 제한, PLAYBOOK 2.13절)" >> recover_log.txt; fi
             set -e
             cat recover_log.txt
             if [ "$ROK" = "0" ]; then
