@@ -28,6 +28,13 @@ from pathlib import Path
 
 import requests
 
+try:   # V7.4: 종목 이름 링크와 서식 거부 대비는 notify와 같은 함수를 쓴다. 못 읽으면 링크 없이 이름만 (스캔은 계속)
+    from notify import stock_link, tg_post
+except Exception as _exc:
+    print(f"notify.py를 읽지 못해 종목 링크·서식 거부 대비 없이 보냅니다: {_exc}")
+    stock_link = lambda name, code=None, index=None: html.escape(str(name or ""))
+    tg_post = lambda url, payload: requests.post(url, json=payload, timeout=20)
+
 KST = timezone(timedelta(hours=9))
 ROOT = Path(__file__).resolve().parent
 DATA_PATH = ROOT / "data.json"
@@ -250,13 +257,13 @@ def build_scan_message(cands, now=None, dumps=None, show_dumps=True):
         lines.append("오늘은 조건을 만족하는 종목이 없습니다. (무리한 진입 금지 신호로 해석)")
     else:
         for i, c in enumerate(cands, 1):
-            lines.append(f"{i}. <b>{e(c['name'])}</b> {c['price']:,.0f}원")
+            lines.append(f"{i}. <b>{stock_link(c['name'], c.get('code'))}</b> {c['price']:,.0f}원")
             lines.append(f"   {e(' · '.join(c['notes']))}")
     if dumps and show_dumps:
         lines.append("")
         lines.append("🩸 <b>마감 투매 눌림</b> <i>(재료는 살아있는데 막판에 밀린 종목 · 관찰용)</i>")
         for c in dumps:
-            lines.append(f"· <b>{e(c['name'])}</b> {c['price']:,.0f}원 · {e(' · '.join(c['notes']))}")
+            lines.append(f"· <b>{stock_link(c['name'], c.get('code'))}</b> {c['price']:,.0f}원 · {e(' · '.join(c['notes']))}")
         lines.append("<i>투매 구간은 반등도 크지만 재료 소멸이면 더 밀립니다. 성적은 대시보드에 자동 집계됩니다.</i>")
     lines.append("")
     lines.append(f'📈 <a href="{SITE_URL}">대시보드</a>')
@@ -279,7 +286,8 @@ def retry_after(payload, default=0):
 def send_telegram(text, retries=3, wait_s=4, max_wait=600):
     """텔레그램 발송. notify.send와 같은 재시도 정책 + 429는 서버가 알려준 만큼 기다린다.
 
-    max_wait는 대기 시간의 총 상한(초)이다. 러너 제한 30분 안에 반드시 끝나야 한다.
+    max_wait는 대기 시간의 총 상한(초)이다. 러너 제한(V7.3b부터 50분) 안에 반드시 끝나야 한다.
+    V7.4: 서식 거부면 notify.tg_post가 보통 글로 한 번 더 보낸다.
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
@@ -290,9 +298,9 @@ def send_telegram(text, retries=3, wait_s=4, max_wait=600):
     for attempt in range(1, retries + 1):
         wait = wait_s
         try:
-            r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                              json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                                    "disable_web_page_preview": True}, timeout=20)
+            r = tg_post(f"https://api.telegram.org/bot{token}/sendMessage",
+                        {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                         "disable_web_page_preview": True})
             if r.status_code == 200 and r.json().get("ok"):
                 print("발송 완료")
                 return True
@@ -339,7 +347,7 @@ def build_pulse_message(data, quotes, now=None):
     for s in ideas:
         q = quotes.get(s.get("code"))
         if q and q.get("chg") is not None:
-            perf.append((s["name"], q["chg"]))
+            perf.append((stock_link(s["name"], s.get("code")), q["chg"]))   # V7.4 링크 (이스케이프 포함)
     if perf:
         avg = sum(p[1] for p in perf) / len(perf)
         head = " · ".join(f"{n} {'+' if c > 0 else ''}{c:.1f}%" for n, c in perf[:5])
@@ -349,7 +357,7 @@ def build_pulse_message(data, quotes, now=None):
     # 장중 급등 (유니버스 기준 상위)
     universe = {s["code"]: s for s in data.get("all_stocks") or []}
     movers = sorted(
-        ((universe[c]["name"], q["chg"]) for c, q in quotes.items()
+        ((stock_link(universe[c]["name"], c), q["chg"]) for c, q in quotes.items()
          if c in universe and q.get("chg") is not None and q["chg"] >= 5),
         key=lambda x: -x[1])[:3]
     if movers:
@@ -366,7 +374,7 @@ def build_pulse_message(data, quotes, now=None):
     for code in watch:
         q = quotes.get(code)
         if q and q.get("chg") is not None and abs(q["chg"]) >= 3:
-            nm = universe.get(code, {}).get("name", code)
+            nm = stock_link(universe.get(code, {}).get("name", code), code)
             wl.append(f"{nm} {'+' if q['chg'] > 0 else ''}{q['chg']:.1f}%")
     if wl:
         lines.append("⭐ 관심종목 특이: " + " · ".join(wl[:4]))

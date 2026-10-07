@@ -15,6 +15,7 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,55 @@ ROOT = Path(__file__).resolve().parent
 DATA_PATH = ROOT / "data.json"
 WATCHLIST_PATH = ROOT / "watchlist.txt"
 SITE_URL = "https://km-jang.github.io/kr-idea/"
+# V7.4 (2026-10-07): 텔레그램 종목 이름을 누르면 네이버 증권 휴대폰 종목 화면이 열린다 (알파와 같은 주소).
+# 대시보드의 '차트' 버튼은 옛 PC 주소 그대로다 (휴대폰에서 열면 한 번 넘어간다).
+NAVER_STOCK = "https://m.stock.naver.com/domestic/stock/{}/total"
+STOCK_CODE = re.compile(r"[0-9A-Z]{6}")   # 숫자 6자리 + 영문 섞인 새 번호 (예: 0126Z0, 00680K)
+TAG_RE = re.compile(r"<[^>]+>")
+
+
+def name_index(data):
+    """그날 all_stocks로 만든 이름별 종목번호 표. 회사 이름만 있는 줄(공시 등)에 링크를 걸 때 쓴다 (V7.4)."""
+    return {s.get("name"): s.get("code") for s in ((data or {}).get("all_stocks") or [])
+            if s.get("name") and s.get("code")}
+
+
+def stock_link(name, code=None, index=None):
+    """종목 이름 하나를 텔레그램 HTML로 (V7.4). 종목번호가 있으면(없으면 index에서 이름으로 찾아)
+    누르면 네이버 증권이 열리게 링크를 건다. 번호를 못 구하면 이스케이프한 이름만 쓴다."""
+    nm = html.escape(str(name or ""))
+    c = str(code or (index or {}).get(name) or "")
+    return f'<a href="{NAVER_STOCK.format(c)}">{nm}</a>' if STOCK_CODE.fullmatch(c) else nm
+
+
+def plain_text(text):
+    """HTML 서식을 걷어낸 보통 글 (보이는 글자 그대로). 길이 셈과 서식 거부 재발송에 쓴다 (V7.4)."""
+    return html.unescape(TAG_RE.sub("", text or ""))
+
+
+def tg_len(text):
+    """텔레그램 길이 셈: 서식을 뺀 보이는 글자를 UTF-16 단위로 (이모지는 2로 센다).
+    텔레그램이 글자 수와 UTF-16 단위 중 무엇으로 4096을 재는지 확인 못 해 더 긴 쪽으로 센다 (V7.4)."""
+    return len(plain_text(text).encode("utf-16-le")) // 2
+
+
+def parse_rejected(status, body):
+    """텔레그램이 HTML 서식을 해석하지 못해 거부했나 (400 "can't parse entities")."""
+    return status == 400 and "can't parse entities" in (body or "").lower()
+
+
+def tg_post(url, payload, post=None):
+    """텔레그램에 한 번 보낸다. HTML 서식을 거부하면 서식을 뺀 보통 글로 그 자리에서 한 번 더 보낸다
+    (V7.4, 알파와 같은 대비. 재시도 횟수에 넣지 않는다). 마지막 응답을 돌려준다.
+    notify.send와 closing_scan.send_telegram이 같이 쓴다."""
+    post = post or requests.post
+    r = post(url, json=payload, timeout=20)
+    if payload.get("parse_mode") and parse_rejected(r.status_code, r.text):
+        print(f"텔레그램이 서식을 거부해 서식을 빼고 다시 보냅니다: {r.status_code} {r.text[:200]}")
+        plain = {k: v for k, v in payload.items() if k != "parse_mode"}
+        plain["text"] = plain_text(payload["text"])
+        r = post(url, json=plain, timeout=20)
+    return r
 
 
 def parse_watchlist(text):
@@ -40,7 +90,7 @@ def parse_watchlist(text):
 
 
 def watchlist_lines(data, codes):
-    """관심종목 현황 라인 생성 (data.json의 all_stocks 기준)."""
+    """관심종목 현황 라인 생성 (data.json의 all_stocks 기준). V7.4부터 HTML 줄이다 (종목 이름은 링크)."""
     if not codes:
         return []
     pool = {s["code"]: s for s in (data.get("all_stocks") or [])}
@@ -58,7 +108,7 @@ def watchlist_lines(data, codes):
         extra = ""
         if (s.get("f_streak") or 0) >= 3:
             extra = f" · 외인{s['f_streak']}일↑"
-        out.append(f"· {s['name']} {fmt_num(s.get('price'), 0)}{chg_s}{extra}")
+        out.append(f"· {stock_link(s['name'], c)} {fmt_num(s.get('price'), 0)}{chg_s}{extra}")
     return out
 
 
@@ -190,8 +240,9 @@ def load_us_map():
         return []
 
 
-def gap_signal_lines(fetch=None, threshold=3.0):
-    """연동주 매핑: 미국 종목 ±threshold% 이상이면 국내 관련주 라인 생성."""
+def gap_signal_lines(fetch=None, threshold=3.0, index=None):
+    """연동주 매핑: 미국 종목 ±threshold% 이상이면 국내 관련주 라인 생성.
+    index(이름별 종목번호 표)를 주면 국내 종목 이름에 링크를 건다 (V7.4)."""
     fetch = fetch or fetch_stooq_change
     out = []
     for m in load_us_map()[:10]:
@@ -200,9 +251,9 @@ def gap_signal_lines(fetch=None, threshold=3.0):
             continue
         sign = "▲" if chg > 0 else "▼"
         mood = "주목" if chg > 0 else "약세 주의"
-        krs = "·".join(m.get("kr", [])[:3])
-        out.append(f"⚡ {m.get('us_name')} {sign}{abs(chg):.1f}% → "
-                   f"{m.get('theme')} ({krs}) {mood}")
+        krs = "·".join(stock_link(n, index=index) for n in m.get("kr", [])[:3])
+        out.append(f"⚡ {html.escape(str(m.get('us_name') or ''))} {sign}{abs(chg):.1f}% → "
+                   f"{html.escape(str(m.get('theme') or ''))} ({krs}) {mood}")
     return out[:4]
 
 
@@ -226,8 +277,9 @@ def earn_note(s):
             "turn_loss": " · 🩹적자 전환", "loss": " · 🩹연속 적자"}.get(tag, "")
 
 
-def us_market_block():
-    """아침 브리핑용 미국장 블록. 어떤 실패에도 빈 리스트 반환 (브리핑 발송은 계속)."""
+def us_market_block(index=None):
+    """아침 브리핑용 미국장 블록. 어떤 실패에도 빈 리스트 반환 (브리핑 발송은 계속).
+    index는 연동주 이름 링크용 이름별 종목번호 표 (V7.4)."""
     try:
         chg_map, parts, misses = {}, [], []
         for sym, name in US_INDICES:
@@ -245,7 +297,7 @@ def us_market_block():
         mood = us_mood_line(chg_map)
         if mood:
             lines.append(f"<i>{mood}</i>")
-        lines.extend(gap_signal_lines())
+        lines.extend(gap_signal_lines(index=index))
         lines.append("")
         return lines
     except Exception:
@@ -285,9 +337,10 @@ def build_message(data):
     e = lambda s: html.escape(str(s or ""))
     md = (data.get("market_date") or "").replace("-", ".")
     lines = [f"📊 <b>국내장 아이디어 브리핑</b>  <i>({e(md)} 장 마감 기준)</i>", ""]
+    name_codes = name_index(data)     # 회사 이름만 있는 줄에 종목 링크를 걸 때 (V7.4)
 
-    lines.extend(us_market_block())   # 🌎 밤사이 미국장 (실패 시 자동 생략)
-    lines.extend(compass_lines(data))  # 🧭 뉴스 나침반 (테마 점화·데뷔)
+    lines.extend(us_market_block(name_codes))   # 🌎 밤사이 미국장 (실패 시 자동 생략)
+    lines.extend(compass_lines(data, index=name_codes))  # 🧭 뉴스 나침반 (테마 점화·데뷔)
 
     idx = data.get("indices") or {}
     k, q = idx.get("KOSPI") or {}, idx.get("KOSDAQ") or {}
@@ -310,7 +363,7 @@ def build_message(data):
             lines.append("<b>오늘의 아이디어 5선</b>")
         for i, s in enumerate(ideas, 1):
             reasons = " · ".join(s.get("reasons", [])[:2]) or "-"
-            lines.append(f"{i}. <b>{e(s['name'])}</b> ({s.get('score')}점)")
+            lines.append(f"{i}. <b>{stock_link(s['name'], s.get('code'))}</b> ({s.get('score')}점)")
             lines.append(f"   {e(reasons)}{earn_note(s)}")
     else:
         lines.append("오늘은 조건을 만족하는 종목이 없습니다.")
@@ -318,13 +371,13 @@ def build_message(data):
 
     pos = [d for d in (data.get("disclosures") or []) if d.get("sentiment") == "positive"]
     if pos:
-        head = ", ".join(f"{e(d['company'])}({e(d['tag'])})" for d in pos[:4])
+        head = ", ".join(f"{stock_link(d['company'], index=name_codes)}({e(d['tag'])})" for d in pos[:4])
         more = f" 외 {len(pos)-4}건" if len(pos) > 4 else ""
         lines.append(f"🟢 호재성 공시: {head}{more}")
 
     neg = [d for d in (data.get("disclosures") or []) if d.get("sentiment") == "negative"]
     if neg:
-        head = ", ".join(f"{e(d['company'])}({e(d['tag'])})" for d in neg[:3])
+        head = ", ".join(f"{stock_link(d['company'], index=name_codes)}({e(d['tag'])})" for d in neg[:3])
         more = f" 외 {len(neg)-3}건" if len(neg) > 3 else ""
         lines.append(f"🔴 악재성 공시: {head}{more}")
 
@@ -333,15 +386,16 @@ def build_message(data):
         buys = [x for x in it if x["net_amt_100m"] > 0][:3]
         sells = [x for x in it if x["net_amt_100m"] < 0][:2]
         if buys:
-            head = " · ".join(f"<b>{e(x['name'])}</b>(+{x['net_amt_100m']}억)" for x in buys)
+            head = " · ".join(f"<b>{stock_link(x['name'], x.get('code'))}</b>(+{x['net_amt_100m']}억)"
+                              for x in buys)
             lines.append(f"👤 내부자 매수 우세: {head}")
         if sells:
-            head = " · ".join(f"{e(x['name'])}({x['net_amt_100m']}억)" for x in sells)
+            head = " · ".join(f"{stock_link(x['name'], x.get('code'))}({x['net_amt_100m']}억)" for x in sells)
             lines.append(f"👤 내부자 매도 우세: {head}")
     else:
         iw = data.get("insider_watch") or []
         if iw:
-            head = " · ".join(f"{e(x['company'])}({x['count']}건)" for x in iw[:4])
+            head = " · ".join(f"{stock_link(x['company'], index=name_codes)}({x['count']}건)" for x in iw[:4])
             lines.append(f"👤 내부자·대주주 신고 몰림: {head} · 매수/매도 방향은 공시 원문 확인")
 
     if pos or neg:
@@ -358,7 +412,7 @@ def build_message(data):
            if (s.get("trend_ratio") or 0) >= 3 or (s.get("news_24h") or 0) >= 10]
     if hot:
         hot.sort(key=lambda s: -(s.get("trend_ratio") or 0))
-        names = ", ".join(e(s["name"]) for s in hot[:5])
+        names = ", ".join(stock_link(s["name"], s.get("code")) for s in hot[:5])
         lines.append(f"🔥 관심 급증: {names}")
         lines.append("")
 
@@ -367,12 +421,12 @@ def build_message(data):
     events = watchlist_events(data, codes)
     if events:
         lines.append("<b>🚨 관심종목 이벤트</b>")
-        lines.extend(e(x) for x in events)
+        lines.extend(events)          # V7.4부터 HTML 줄 (종목 이름 링크, 이스케이프는 함수 안에서)
         lines.append("")
     wl = watchlist_lines(data, codes)
     if wl:
         lines.append("<b>⭐ 내 관심종목</b>")
-        lines.extend(e(x) for x in wl)
+        lines.extend(wl)
         lines.append("")
 
     lines.append(f'📈 <a href="{SITE_URL}">대시보드 전체 보기</a>')
@@ -381,7 +435,7 @@ def build_message(data):
 
 
 def watchlist_events(data, codes):
-    """관심종목에 생긴 주목 이벤트: 5선 진입 / 급등락 / 공시 발생."""
+    """관심종목에 생긴 주목 이벤트: 5선 진입 / 급등락 / 공시 발생. V7.4부터 HTML 줄이다 (종목 이름은 링크)."""
     if not codes:
         return []
     out = []
@@ -389,9 +443,9 @@ def watchlist_events(data, codes):
     names = {c: pool[c]["name"] for c in codes if c in pool}
     idea_codes = {s["code"]: s for s in (data.get("ideas") or [])}
     for c in codes:
-        nm = names.get(c)
-        if not nm:
+        if c not in names:
             continue
+        nm = stock_link(names[c], c)
         if c in idea_codes:
             days = idea_codes[c].get("idea_days")
             tag = "오늘의 5선 진입!" if days == 1 else f"5선 {days}일째 선정"
@@ -400,18 +454,19 @@ def watchlist_events(data, codes):
         if chg is not None and abs(chg) >= 5:
             out.append(f"· {nm} · {'급등' if chg > 0 else '급락'} "
                        f"{'+' if chg > 0 else ''}{chg:.1f}%")
-    watch_names = set(names.values())
+    watch_codes = {nm: c for c, nm in names.items()}
     for d in (data.get("disclosures") or []):
-        if d.get("company") in watch_names:
+        if d.get("company") in watch_codes:
             mark = {"positive": "호재성", "negative": "악재성"}.get(d.get("sentiment"), "")
-            out.append(f"· {d['company']} · {mark} 공시: {d.get('tag')}")
+            out.append(f"· {stock_link(d['company'], watch_codes[d['company']])} · {mark} 공시: "
+                       f"{html.escape(str(d.get('tag') or ''))}")
     return out[:6]
 
 
 
 
-def compass_lines(data, brief=False):
-    """뉴스 나침반 블록 (아침·저녁 공용). brief=True면 압축판."""
+def compass_lines(data, brief=False, index=None):
+    """뉴스 나침반 블록 (아침·저녁 공용). brief=True면 압축판. index는 이름별 종목번호 표 (V7.4, 없으면 만든다)."""
     e = lambda s: html.escape(str(s or ""))
     nc = data.get("news_compass")
     if not nc:
@@ -422,15 +477,16 @@ def compass_lines(data, brief=False):
     if not hot and not debuts:
         return []
     lines.append("🧭 <b>뉴스 나침반</b>")
+    name_codes = name_index(data) if index is None else index   # 테마 종목에 번호가 없을 때 (V7.4)
     for t in hot[:3]:
         lines.append(f"🔥 {e(t['name'])} 점화 · 기사 {t['count']}건 (평소 {t['mult']}배)")
         for s in (t.get("stocks") or [])[:3]:
             chg = s.get("change_pct")
             chg_s = "" if chg is None else f" {'+' if chg > 0 else ''}{chg:.1f}%"
-            lines.append(f"   {e(s['name'])}{chg_s} · {e(s['verdict'])}")
+            lines.append(f"   {stock_link(s['name'], s.get('code'), name_codes)}{chg_s} · {e(s['verdict'])}")
     if debuts and not brief:
         names = " · ".join(
-            f"{e(d['name'])}({d['news_24h']}건{'·호재' if (d.get('news_pos') or 0) > (d.get('news_neg') or 0) else ''})"
+            f"{stock_link(d['name'], d.get('code'))}({d['news_24h']}건{'·호재' if (d.get('news_pos') or 0) > (d.get('news_neg') or 0) else ''})"
             for d in debuts[:4])
         lines.append(f"🐣 뉴스 데뷔: {names}")
     elif debuts:
@@ -460,7 +516,7 @@ def screen_lines(data):
         if benched and not st.get("revived"):
             continue
         if hits:
-            names = " · ".join(f"<b>{e(h['name'])}</b>({e(h['why'])})" for h in hits[:3])
+            names = " · ".join(f"<b>{stock_link(h['name'], h.get('code'))}</b>({e(h['why'])})" for h in hits[:3])
             out.append(f"{'🔁 ' if benched else ''}{label}: {names}")
     if out:
         out.insert(0, "🔎 <b>조건 검색 적중</b>")
@@ -478,7 +534,7 @@ def swing_lines(data, top=3):
     for p in swing[:top]:
         setup = e(p["setups"][0]) if p.get("setups") else ""
         tail = f" · {setup}" if setup else ""
-        out.append(f"<b>{e(p.get('name'))}</b> {p.get('swing')}점{tail} · "
+        out.append(f"<b>{stock_link(p.get('name'), p.get('code'))}</b> {p.get('swing')}점{tail} · "
                    f"목표 +{p.get('target_pct')}% / 손절 {p.get('stop_pct')}%")
     out.append("")
     return out
@@ -515,15 +571,15 @@ def swing_exit_lines(data):
             continue
         sig = swing_exit_signal(s)
         if sig:
-            hits.append((sig[0], s.get("name"), sig[1]))
+            hits.append((sig[0], s.get("name"), sig[1], c))
     if not hits:
         return []
     order = {"stop": 0, "warn": 1}
     hits.sort(key=lambda h: order.get(h[0], 9))
     out = ["🚪 <b>내 종목 청산 신호</b>"]
-    for lvl, name, why in hits[:5]:
+    for lvl, name, why, code in hits[:5]:
         icon = "🔴" if lvl == "stop" else "🟡"
-        out.append(f"{icon} <b>{e(name)}</b> · {e(why)}")
+        out.append(f"{icon} <b>{stock_link(name, code)}</b> · {e(why)}")
     out.append("")
     return out
 
@@ -550,7 +606,7 @@ def mine_lines(data):
         return []
     top = mines[0]
     extra = f" 외 {len(mines)-1}종목" if len(mines) > 1 else ""
-    out = [f"💣 위험 신호 누적: <b>{e(top['name'])}</b>({top['score']}점 · "
+    out = [f"💣 위험 신호 누적: <b>{stock_link(top['name'], top.get('code'))}</b>({top['score']}점 · "
            f"{e(top['reasons'][0] if top.get('reasons') else '')}){extra}"]
     try:
         codes = parse_watchlist(WATCHLIST_PATH.read_text(encoding="utf-8"))
@@ -559,7 +615,7 @@ def mine_lines(data):
     hit = [m for m in mines if m.get("code") in codes]
     if hit:
         out.append("⚠️ <b>관심종목 중 지뢰 감지</b>: " +
-                   " · ".join(f"{e(m['name'])}({m['score']}점)" for m in hit[:3]))
+                   " · ".join(f"{stock_link(m['name'], m.get('code'))}({m['score']}점)" for m in hit[:3]))
     out.append("")
     return out
 
@@ -585,7 +641,7 @@ def build_evening_message(data):
     ideas = data.get("ideas") or []
     if ideas:
         names = " · ".join(
-            f"{e(s['name'])}{' 🆕' if s.get('idea_days') == 1 else ''}" for s in ideas)
+            f"{stock_link(s['name'], s.get('code'))}{' 🆕' if s.get('idea_days') == 1 else ''}" for s in ideas)
         label = "관찰 목록 5선" if (data.get("ideas_bench") or {}).get("benched") else "오늘의 5선"
         lines.append(f"{label}: {names}")
     lines.extend([""] if compass_lines(data, brief=True) else [])
@@ -595,14 +651,14 @@ def build_evening_message(data):
                     key=lambda s: -abs(s.get("change_pct") or 0))[:3]
     if movers:
         lines.append("🚀 오늘 급등락: " + " · ".join(
-            f"{e(s['name'])} {'+' if s['change_pct']>0 else ''}{s['change_pct']:.1f}%"
+            f"{stock_link(s['name'], s.get('code'))} {'+' if s['change_pct']>0 else ''}{s['change_pct']:.1f}%"
             for s in movers))
     wl = watchlist_lines(data, parse_watchlist(
         WATCHLIST_PATH.read_text(encoding="utf-8") if WATCHLIST_PATH.exists() else ""))
     if wl:
         lines.append("")
         lines.append("<b>⭐ 내 관심종목</b>")
-        lines.extend(e(x) for x in wl)
+        lines.extend(wl)              # V7.4부터 HTML 줄
     lines.append("")
     lines.append(f'상세는 내일 아침 8시 브리핑 또는 <a href="{SITE_URL}">대시보드</a>에서.')
     return "\n".join(lines)
@@ -714,14 +770,15 @@ def build_weekly_message(data, hist_dir=None):
                          f"({best['avg_ret_pct']:+}%) / 아쉬운 날: {e(worst['date'][5:])} "
                          f"({worst['avg_ret_pct']:+}%)")
             # 이번 주 최다 선정 종목
-            cnt = {}
+            cnt, code_of = {}, {}
             for r in recs[:5]:
                 for it in r.get("ideas", []):
                     cnt[it["name"]] = cnt.get(it["name"], 0) + 1
+                    code_of.setdefault(it["name"], it.get("code"))   # V7.4 이름 링크용
             top = sorted(cnt.items(), key=lambda x: -x[1])[:3]
             if top:
                 lines.append("· 최다 선정: " +
-                             ", ".join(f"{e(n)}({c}회)" for n, c in top))
+                             ", ".join(f"{stock_link(n, code_of.get(n))}({c}회)" for n, c in top))
     else:
         lines.append("아직 성과 데이터가 쌓이는 중입니다. 다음 주부터 성적표가 나옵니다.")
 
@@ -755,10 +812,10 @@ def weekly_extra_lines(data, today=None):
         best, worst = grads[0], grads[-1]
         parts = []
         if best.get("ret_pct", 0) >= 3:
-            parts.append(f"아쉬움 <b>{html.escape(best['name'])}</b> "
+            parts.append(f"아쉬움 <b>{stock_link(best['name'], best.get('code'))}</b> "
                          f"제외 후 +{best['ret_pct']}%")
         if worst.get("ret_pct", 0) <= -3 and worst is not best:
-            parts.append(f"잘 내보냄 <b>{html.escape(worst['name'])}</b> "
+            parts.append(f"잘 내보냄 <b>{stock_link(worst['name'], worst.get('code'))}</b> "
                          f"{worst['ret_pct']}%")
         if parts:
             out.append("🎓 졸업생 복기: " + " · ".join(parts))
@@ -799,28 +856,38 @@ def weekly_extra_lines(data, today=None):
 
 def clamp_telegram(text, limit=4096):
     """텔레그램 4096자 제한 방어. 초과 시 줄 경계에서 잘라 태그 균형 유지 + 안내 한 줄.
-    (줄 단위로 자르므로 <b>…</b> 같은 한 줄 안의 태그가 중간에 끊기지 않는다.)"""
-    if len(text) <= limit:
+    (줄 단위로 자르므로 <b>…</b> 같은 한 줄 안의 태그가 중간에 끊기지 않는다.)
+    V7.4: 텔레그램은 서식을 해석한 뒤 보이는 글자로 세므로 태그·링크 주소는 빼고 센다 (tg_len)
+    (예전처럼 원문으로 세면 종목 링크 40개 안팎이 붙은 아침 브리핑 끝이 잘린다)."""
+    if tg_len(text) <= limit:
         return text
     notice = "\n…(길어서 일부 생략 · 대시보드에서 전체 확인)"
-    budget = limit - len(notice)
-    cut = text.rfind("\n", 0, budget)
-    if cut < budget // 2:            # 적당한 줄 경계가 없으면 통째로 자름
-        cut = budget
-    return text[:cut] + notice
+    budget = limit - tg_len(notice)
+    kept, used = [], 0
+    for line in text.split("\n"):
+        n = tg_len(line) + (1 if kept else 0)
+        if used + n > budget:
+            break
+        kept.append(line)
+        used += n
+    if used < budget // 2:           # 적당한 줄 경계가 없으면 서식을 빼고 보이는 글자로 자름
+        cut = plain_text(text)[:budget]
+        while len(cut.encode("utf-16-le")) // 2 > budget:   # 이모지(UTF-16 2단위)가 섞이면 더 덜어낸다
+            cut = cut[:-1]
+        return html.escape(cut, quote=False) + notice
+    return "\n".join(kept) + notice
 
 
 def send(token, chat_id, text, retries=3, wait_s=4):
-    """텔레그램 발송. 일시적 오류(네트워크·서버)는 재시도, 설정 오류(400번대)는 즉시 중단."""
+    """텔레그램 발송. 일시적 오류(네트워크·서버)는 재시도, 설정 오류(400번대)는 즉시 중단.
+    V7.4: 서식 거부면 tg_post가 보통 글로 한 번 더 보낸다."""
     text = clamp_telegram(text)
     last = ""
     for attempt in range(1, retries + 1):
         try:
-            r = requests.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-                      "disable_web_page_preview": True},
-                timeout=20)
+            r = tg_post(f"https://api.telegram.org/bot{token}/sendMessage",
+                        {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                         "disable_web_page_preview": True})
             if r.status_code == 200 and r.json().get("ok"):
                 return True
             last = f"{r.status_code} {r.text[:300]}"

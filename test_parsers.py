@@ -1032,16 +1032,16 @@ def test_ideas_bench():
     import notify
     old_us = notify.us_market_block
     try:
-        notify.us_market_block = lambda: []       # 시험이 외부 요청을 하지 않게
+        notify.us_market_block = lambda *a, **k: []       # 시험이 외부 요청을 하지 않게
         data = {"ideas": [{"code": "000000", "name": "가", "score": 50, "reasons": []}],
                 "ideas_bench": {"n": 20, "win": 7, "avg_pct": -0.5, "benched": True}}
         msg = notify.build_message(data)
         assert "관찰 목록 5선" in msg and "오늘의 아이디어 5선" not in msg and "—" not in msg
-        assert "관찰 목록 5선: 가" in notify.build_evening_message(data)
+        assert "관찰 목록 5선: 가" in notify.plain_text(notify.build_evening_message(data))   # V7.4 이름 링크
         data["ideas_bench"]["benched"] = False
         assert "오늘의 아이디어 5선" in notify.build_message(data)
         assert "오늘의 아이디어 5선" in notify.build_message({"ideas": data["ideas"]})   # 옛 데이터
-        assert "오늘의 5선: 가" in notify.build_evening_message(data)
+        assert "오늘의 5선: 가" in notify.plain_text(notify.build_evening_message(data))
     finally:
         notify.us_market_block = old_us
 
@@ -1296,9 +1296,9 @@ def test_insider_briefing_line():
     d["insider_watch"] = [{"company": "CJ ENM", "count": 3}]
     old_us = notify.us_market_block
     try:
-        notify.us_market_block = lambda: []       # 시험이 외부 요청을 하지 않게 (2026-09-22: stooq 무응답에 수 분씩 걸렸다)
+        notify.us_market_block = lambda *a, **k: []       # 시험이 외부 요청을 하지 않게 (2026-09-22: stooq 무응답에 수 분씩 걸렸다)
         msg = notify.build_message(d)
-        assert "내부자·대주주 신고 몰림" in msg and "CJ ENM(3건)" in msg
+        assert "내부자·대주주 신고 몰림" in msg and "CJ ENM(3건)" in notify.plain_text(msg)   # V7.4 이름 링크
         d["insider_watch"] = []
         assert "내부자·대주주" not in notify.build_message(d)
     finally:
@@ -1462,7 +1462,7 @@ def test_insider_trades_briefing():
         {"name": "LG화학", "net_amt_100m": -6.6, "buys": 0, "sells": 2}]
     old_us = notify.us_market_block
     try:
-        notify.us_market_block = lambda: []       # 시험이 외부 요청을 하지 않게
+        notify.us_market_block = lambda *a, **k: []       # 시험이 외부 요청을 하지 않게
         msg = notify.build_message(d)
         assert "내부자 매수 우세" in msg and "CJ ENM" in msg
         assert "내부자 매도 우세" in msg and "LG화학" in msg
@@ -1657,11 +1657,24 @@ def test_clamp_telegram():
     import notify
     short = "짧은 메시지\n<b>굵게</b>"
     assert notify.clamp_telegram(short) == short           # 제한 이하 → 그대로
-    big = "\n".join(f"<b>줄{i}</b> 내용" for i in range(600))  # 4096 초과
+    big = "\n".join(f"<b>줄{i}</b> 내용" for i in range(600))  # 보이는 글자로도 4096 초과
     out = notify.clamp_telegram(big)
-    assert len(out) <= 4096
+    assert len(notify.plain_text(out)) <= 4096               # V7.4: 텔레그램처럼 보이는 글자로 센다
     assert "생략" in out
     assert out.count("<b>") == out.count("</b>")            # 태그 균형 (한 줄 중간 안 끊김)
+    # V7.4: 링크 주소 때문에 원문만 길고 보이는 글자는 짧으면 자르지 않는다
+    linked = "\n".join(notify.stock_link(f"종목{i}", f"{i:06d}") for i in range(80))
+    assert len(linked) > 4096 and notify.clamp_telegram(linked) == linked
+    # 한 줄이 너무 길어 줄 경계가 없으면 서식을 빼고 보이는 글자로 자른다 (태그 조각이 남지 않게)
+    one = "<b>" + "가" * 5000 + "</b>"
+    cut = notify.clamp_telegram(one)
+    assert "<b>" not in cut and "생략" in cut and len(notify.plain_text(cut)) <= 4096
+    # 이모지는 UTF-16 2단위라 글자 수로는 안 넘어도 단위로는 넘을 수 있다. 더 긴 쪽(UTF-16)으로 센다
+    emo = "\n".join(f"📈 <b>줄{i}</b>" for i in range(700))
+    out = notify.clamp_telegram(emo)
+    assert notify.tg_len(out) <= 4096 and "생략" in out
+    one_emo = notify.clamp_telegram("📈" * 3000)
+    assert notify.tg_len(one_emo) <= 4096 and "생략" in one_emo
 
 
 def test_swing_exit_signal():
@@ -3019,6 +3032,150 @@ def test_base_day_step_schedule_aware():
             got = genv.read_text(encoding="utf-8").strip()
             assert r.returncode == 0, (ev, sched, h, m, r.stderr[-300:])
             assert got == f"KR_BASE_DAY={want}", (ev, sched, h, m, got)
+
+
+def test_stock_link_and_name_index():
+    """V7.4 텔레그램 종목 링크: 6자리 번호(영문 섞인 새 번호 포함)면 네이버 증권 휴대폰 주소 링크,
+    아니면 이름만. 이름의 특수문자(KT&G)는 이스케이프."""
+    import notify
+    assert notify.stock_link("삼성전자", "005930") == \
+        '<a href="https://m.stock.naver.com/domestic/stock/005930/total">삼성전자</a>'
+    assert "/0126Z0/total" in notify.stock_link("삼성에피스홀딩스", "0126Z0")
+    assert notify.stock_link("KT&G", "033780").endswith(">KT&amp;G</a>")
+    assert notify.stock_link("KT&G") == "KT&amp;G"              # 번호 없음
+    assert notify.stock_link("이상한", "12345") == "이상한"       # 5자리
+    assert notify.stock_link("이상한", "abc123") == "이상한"      # 소문자
+    idx = notify.name_index({"all_stocks": [{"code": "005930", "name": "삼성전자"},
+                                            {"code": "", "name": "빈번호"}]})
+    assert idx == {"삼성전자": "005930"}
+    assert "/005930/" in notify.stock_link("삼성전자", index=idx)
+    assert notify.stock_link("없는회사", index=idx) == "없는회사"
+    assert notify.name_index({}) == {} and notify.name_index(None) == {}
+    assert notify.plain_text('<b>KT&amp;G</b> <a href="x">링크</a>') == "KT&G 링크"
+
+
+class _TgResp:
+    """V7.4 시험용 텔레그램 가짜 응답."""
+    def __init__(self, status, text):
+        self.status_code, self.text = status, text
+    def json(self): return {"ok": self.status_code == 200}
+
+
+def _tg_fake_post(sent, reject_plain=False):
+    """HTML 서식이면 거부(can't parse entities), 보통 글이면 성공(reject_plain이면 그것도 거부)하는 가짜 post."""
+    bad = _TgResp(400, "Bad Request: can't parse entities: Unsupported start tag \"x\" at byte offset 3")
+    def post(url, json=None, timeout=None):
+        sent.append(json)
+        return bad if ("parse_mode" in json or reject_plain) else _TgResp(200, "ok")
+    return post
+
+
+def test_send_parse_reject_fallback():
+    """V7.4: 서식 거부(can't parse entities)면 서식을 뺀 보통 글로 한 번 더 보낸다.
+    재시도 횟수와 별개이고, 보통 글도 거부되면 거기서 끝난다 (무한 재발송 없음).
+    종가 스캔·맥박 발송(closing_scan.send_telegram)도 같은 함수(notify.tg_post)를 쓴다."""
+    import notify
+    import closing_scan as cs
+    sent = []
+    orig_post, orig_sleep = notify.requests.post, notify.time.sleep
+    notify.requests.post, notify.time.sleep = _tg_fake_post(sent), (lambda s: None)
+    env = _fake_env(None)
+    try:
+        assert notify.send("tok", "chat", '<b>KT&amp;G</b> <a href="x">링크</a>', retries=1) is True
+        assert len(sent) == 2 and "parse_mode" not in sent[1]
+        assert sent[1]["text"] == "KT&G 링크"
+        sent.clear()
+        assert cs.send_telegram("<b>F&amp;F</b>", retries=1) is True
+        assert len(sent) == 2 and sent[1]["text"] == "F&F" and "parse_mode" not in sent[1]
+        sent.clear()
+        notify.requests.post = _tg_fake_post(sent, reject_plain=True)
+        assert notify.send("tok", "chat", "<b>x</b>", retries=3) is False
+        assert len(sent) == 2, f"서식 거부 뒤 보통 글까지 거부되면 2회여야 하는데 {len(sent)}회"
+    finally:
+        notify.requests.post, notify.time.sleep = orig_post, orig_sleep
+        _restore_env(env)
+
+
+def test_message_stock_links():
+    """V7.4: 아침·저녁·주간·종가 스캔·맥박 메시지의 종목 이름에 링크가 걸리고,
+    회사 이름만 있는 공시는 이름표로 찾아 걸며, 유니버스 밖 회사는 이름만 남는다. 이중 이스케이프 없음."""
+    import notify
+    import closing_scan as cs
+    data = {
+        "market_date": "2026-10-06", "indices": {},
+        "all_stocks": [{"code": "005930", "name": "삼성전자", "price": 1000, "change_pct": 9.0},
+                       {"code": "033780", "name": "KT&G", "price": 100, "change_pct": 1.0},
+                       {"code": "000660", "name": "SK하이닉스", "price": 500, "change_pct": 0.5}],
+        "ideas": [{"code": "005930", "name": "삼성전자", "score": 60, "reasons": ["외국인 순매수"],
+                   "idea_days": 1}],
+        "disclosures": [{"company": "KT&G", "tag": "배당결정", "sentiment": "positive"},
+                        {"company": "유니버스밖", "tag": "유상증자", "sentiment": "negative"}],
+        "insider_trades": [{"code": "000660", "name": "SK하이닉스", "net_amt_100m": 12.5}],
+        "swing": [{"code": "000660", "name": "SK하이닉스", "swing": 70, "setups": [],
+                   "target_pct": 5, "stop_pct": -3}],
+        "mines": [{"code": "033780", "name": "KT&G", "score": 40, "reasons": ["적자"]}],
+        "graduates": [{"code": "005930", "name": "삼성전자", "ret_pct": 5.0},
+                      {"code": "000660", "name": "SK하이닉스", "ret_pct": -4.0}],
+    }
+    link = lambda code, name: f'/{code}/total">{name}</a>'
+    old_us, old_wl = notify.us_market_block, notify.WATCHLIST_PATH
+    notify.us_market_block = lambda *a, **k: []        # 시험이 외부 요청을 하지 않게
+    notify.WATCHLIST_PATH = Path(__file__).resolve().parent / "_없는_관심종목_시험용.txt"
+    try:
+        am = notify.build_message(data)
+        assert link("005930", "삼성전자") in am
+        assert link("033780", "KT&amp;G") + "(배당결정)" in am     # 공시는 이름표로 찾아 건다
+        assert "유니버스밖(유상증자)" in am                          # 못 찾으면 이름만
+        assert link("000660", "SK하이닉스") in am                   # 내부자
+        pm = notify.build_evening_message(data)
+        assert link("005930", "삼성전자") in pm and link("000660", "SK하이닉스") in pm
+        assert link("033780", "KT&amp;G") in pm                     # 위험 신호
+        wk = "\n".join(notify.weekly_extra_lines(data, today="2026-10-11"))
+        assert link("005930", "삼성전자") in wk and link("000660", "SK하이닉스") in wk
+        wl = notify.watchlist_lines(data, ["033780"])
+        assert link("033780", "KT&amp;G") in wl[0] and "&amp;amp;" not in wl[0]
+        ev = "\n".join(notify.watchlist_events(data, ["005930", "033780"]))   # 이스케이프가 함수 안으로 옮겨졌다
+        assert link("005930", "삼성전자") + " · 오늘의 5선 진입!" in ev
+        assert link("033780", "KT&amp;G") + " · 호재성 공시: 배당결정" in ev and "&amp;amp;" not in ev
+        # 이름만 있는 자리: 뉴스 나침반 테마 종목(이름표로 찾음)·데뷔, 내부자 관심 회사
+        nc = dict(data, insider_trades=[], insider_watch=[{"company": "KT&G", "count": 3}],
+                  news_compass={"hot_themes": [{"name": "반도체", "count": 5, "mult": 3,
+                                                "stocks": [{"name": "SK하이닉스", "change_pct": 1.0,
+                                                            "verdict": "주도주"}]}],
+                                "debuts": [{"code": "005930", "name": "삼성전자", "news_24h": 6}]})
+        am2 = notify.build_message(nc)
+        assert link("000660", "SK하이닉스") + " +1.0%" in am2 and link("005930", "삼성전자") + "(6건)" in am2
+        assert link("033780", "KT&amp;G") + "(3건)" in am2
+        # 주간 결산 최다 선정 (V7.4 검토에서 빠진 자리로 지적됨)
+        import tempfile
+        wkd = dict(data, performance={"days": 3, "summary": {"avg_ret_pct": 1.0},
+                                      "records": [{"date": "2026-10-06", "avg_ret_pct": 1.0,
+                                                   "ideas": [{"code": "005930", "name": "삼성전자"}]}]})
+        with tempfile.TemporaryDirectory() as td:
+            wm = notify.build_weekly_message(wkd, hist_dir=td)
+        assert "최다 선정: <a href=" in wm and link("005930", "삼성전자") + "(1회)" in wm
+        for msg in (am, pm, wk, am2, wm):
+            assert msg.count("<a ") == msg.count("</a>") and "&amp;amp;" not in msg
+    finally:
+        notify.us_market_block, notify.WATCHLIST_PATH = old_us, old_wl
+    old_map = notify.load_us_map
+    notify.load_us_map = lambda: [{"us": "x", "us_name": "A&B", "theme": "R&D",
+                                   "kr": ["SK하이닉스", "없는종목"]}]
+    try:   # 미국장 연동주: 이름표로 번호를 찾고, 미국 쪽 이름·테마도 이스케이프
+        gl = notify.gap_signal_lines(fetch=lambda s: (100, 5.0), index=notify.name_index(data))[0]
+        assert link("000660", "SK하이닉스") + "·없는종목" in gl and "A&amp;B" in gl and "R&amp;D" in gl
+    finally:
+        notify.load_us_map = old_map
+    sm = cs.build_scan_message([{"code": "005930", "name": "삼성전자", "price": 1000, "notes": ["고가 유지"]}],
+                               dumps=[{"code": "033780", "name": "KT&G", "price": 100, "notes": ["투매"]}])
+    assert link("005930", "삼성전자") in sm and link("033780", "KT&amp;G") in sm
+    old_rt = cs.fetch_realtime
+    cs.fetch_realtime = lambda codes, chunk=20: {}             # 지수 조회도 외부 요청이라 막는다
+    try:
+        pu = cs.build_pulse_message(data, {"005930": {"chg": 6.0}, "033780": {"chg": 1.0}})
+        assert link("005930", "삼성전자") in pu                   # 5선 장중·장중 급등
+    finally:
+        cs.fetch_realtime = old_rt
 
 
 if __name__ == "__main__":
