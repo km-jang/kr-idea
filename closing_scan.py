@@ -366,8 +366,9 @@ def build_pulse_message(data, quotes, now=None):
     # 관심종목 특이 (±3% 이상)
     try:
         sys.path.insert(0, str(ROOT))
-        from notify import parse_watchlist
-        watch = parse_watchlist()
+        from notify import parse_watchlist, WATCHLIST_PATH
+        # 아침·저녁 관심종목 줄과 같이 1군(상위 15)만 본다
+        watch = parse_watchlist(WATCHLIST_PATH.read_text(encoding="utf-8"))[:15]
     except Exception:
         watch = []
     wl = []

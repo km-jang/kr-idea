@@ -1345,6 +1345,31 @@ def test_pulse_message():
         cs.fetch_realtime = orig
 
 
+def test_pulse_watchlist_line():
+    """점심 맥박 관심종목 특이 줄: watchlist.txt를 읽어 1군(상위 15) 중 ±3% 이상만 싣는다.
+    예전엔 parse_watchlist()를 인자 없이 불러 늘 빈 목록이었다 (2026-10-08 수정)."""
+    import closing_scan as cs, notify, tempfile, os
+    orig_rt, orig_path = cs.fetch_realtime, notify.WATCHLIST_PATH
+    cs.fetch_realtime = lambda codes, chunk=20: {}
+    codes = [f"{100000 + i}" for i in range(16)]   # 16번째는 2군
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    os.close(fd)
+    try:
+        Path(path).write_text("# 1군\n" + "\n".join(codes) + "\n", encoding="utf-8")
+        notify.WATCHLIST_PATH = Path(path)
+        data = {"all_stocks": [{"code": c, "name": f"종목{i}"} for i, c in enumerate(codes)]}
+        quotes = {codes[0]: {"chg": 3.5}, codes[1]: {"chg": -4.2},
+                  codes[2]: {"chg": 2.0}, codes[15]: {"chg": 4.0}}
+        msg = cs.build_pulse_message(data, quotes)
+        assert "관심종목 특이" in msg
+        assert "종목0</a> +3.5%" in msg and "종목1</a> -4.2%" in msg
+        assert "종목2<" not in msg            # 3% 미만
+        assert "종목15<" not in msg           # 2군은 텔레그램 대상 아님
+    finally:
+        cs.fetch_realtime, notify.WATCHLIST_PATH = orig_rt, orig_path
+        os.remove(path)
+
+
 def test_screens():
     """조건 검색 5종: 각 검색식이 목표 종목만 잡는지."""
     import tempfile
