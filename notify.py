@@ -371,13 +371,13 @@ def build_message(data):
 
     pos = [d for d in (data.get("disclosures") or []) if d.get("sentiment") == "positive"]
     if pos:
-        head = ", ".join(f"{stock_link(d['company'], index=name_codes)}({e(d['tag'])})" for d in pos[:4])
+        head = ", ".join(f"{stock_link(d['company'], d.get('code'), index=name_codes)}({e(d['tag'])})" for d in pos[:4])
         more = f" 외 {len(pos)-4}건" if len(pos) > 4 else ""
         lines.append(f"🟢 호재성 공시: {head}{more}")
 
     neg = [d for d in (data.get("disclosures") or []) if d.get("sentiment") == "negative"]
     if neg:
-        head = ", ".join(f"{stock_link(d['company'], index=name_codes)}({e(d['tag'])})" for d in neg[:3])
+        head = ", ".join(f"{stock_link(d['company'], d.get('code'), index=name_codes)}({e(d['tag'])})" for d in neg[:3])
         more = f" 외 {len(neg)-3}건" if len(neg) > 3 else ""
         lines.append(f"🔴 악재성 공시: {head}{more}")
 
@@ -395,7 +395,7 @@ def build_message(data):
     else:
         iw = data.get("insider_watch") or []
         if iw:
-            head = " · ".join(f"{stock_link(x['company'], index=name_codes)}({x['count']}건)" for x in iw[:4])
+            head = " · ".join(f"{stock_link(x['company'], x.get('code'), index=name_codes)}({x['count']}건)" for x in iw[:4])
             lines.append(f"👤 내부자·대주주 신고 몰림: {head} · 매수/매도 방향은 공시 원문 확인")
 
     if pos or neg:

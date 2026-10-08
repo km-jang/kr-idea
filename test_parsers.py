@@ -1245,6 +1245,41 @@ def test_insider_watch():
     out = collect.build_insider_watch(discs, min_count=2)
     assert len(out) == 1
     assert out[0]["company"] == "CJ ENM" and out[0]["count"] == 3
+    assert "code" not in out[0]                       # 번호가 없던 예전 공시는 키도 없다
+
+
+def test_disclosure_stock_code():
+    """공시에 DART 목록의 stock_code를 남기고 (2026-10-08 키 추가), 텔레그램이 그 번호로 링크를 건다.
+    예전엔 번호를 버려 그날 all_stocks 이름표에 없는 회사는 링크가 안 걸렸다."""
+    import notify
+    orig = collect.get_json
+    collect.get_json = lambda url, **k: {"status": "000", "total_page": 1, "list": [
+        {"rcept_dt": "20261008", "corp_name": "바른손이앤에이", "report_nm": "기타시장안내",
+         "rcept_no": "1", "corp_cls": "K", "stock_code": "035620"},
+        {"rcept_dt": "20261008", "corp_name": "비상장사", "report_nm": "감사보고서",
+         "rcept_no": "2", "corp_cls": "E", "stock_code": " "}]}
+    try:
+        raw = collect.fetch_dart_openapi("키", days=1)
+    finally:
+        collect.get_json = orig
+    assert raw[0]["code"] == "035620" and raw[1]["code"] == ""
+    iw = collect.build_insider_watch(
+        [{"company": "CJ ENM", "tag": "5%룰 보고", "code": "035760"},
+         {"company": "CJ ENM", "tag": "5%룰 보고", "code": "035760"}], min_count=2)
+    assert iw == [{"company": "CJ ENM", "count": 2, "code": "035760"}]
+    d = collect.build_sample()
+    d["all_stocks"] = []                              # 이름표에 없어도 번호로 링크
+    d["disclosures"] = [{"company": "바른손이앤에이", "code": "035620", "tag": "상폐 위험",
+                         "sentiment": "negative", "title": "t"}]
+    d["insider_trades"], d["insider_watch"] = [], iw
+    old_us = notify.us_market_block
+    try:
+        notify.us_market_block = lambda *a, **k: []   # 외부 요청 막기
+        msg = notify.build_message(d)
+    finally:
+        notify.us_market_block = old_us
+    assert notify.NAVER_STOCK.format("035620") in msg
+    assert notify.NAVER_STOCK.format("035760") in msg
 
 
 def test_graduates():

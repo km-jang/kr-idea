@@ -1228,6 +1228,7 @@ def fetch_dart_openapi(api_key, days=3):
                 "title": it.get("report_nm", ""),
                 "url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={it.get('rcept_no','')}",
                 "market": {"Y": "KOSPI", "K": "KOSDAQ"}.get(it.get("corp_cls"), ""),
+                "code": (it.get("stock_code") or "").strip(),   # 2026-10-08 키 추가 (텔레그램 링크용, 비상장은 "")
             })
         if page >= int(data.get("total_page", 1)):
             break
@@ -3119,11 +3120,14 @@ def build_insider_watch(disclosures, min_count=None):
     if min_count is None:
         min_count = CONFIG.get("insider_min_count", 2)
     tags = {"내부자 지분변동", "5%룰 보고"}
-    cnt = {}
+    cnt, codes = {}, {}
     for d in disclosures or []:
         if d.get("tag") in tags and d.get("company"):
             cnt[d["company"]] = cnt.get(d["company"], 0) + 1
-    out = [{"company": c, "count": n} for c, n in cnt.items() if n >= min_count]
+            if d.get("code"):
+                codes[d["company"]] = d["code"]
+    out = [{"company": c, "count": n, **({"code": codes[c]} if c in codes else {})}
+           for c, n in cnt.items() if n >= min_count]
     out.sort(key=lambda x: (-x["count"], x["company"]))
     return out[:8]
 
