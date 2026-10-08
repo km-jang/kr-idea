@@ -575,8 +575,8 @@ const setWatch = a => { try { localStorage.setItem(WKEY, JSON.stringify(a)); } c
 const starHtml = code =>
   `<span class="star${getWatch().includes(code)?" on":""}" data-code="${code}" title="관심종목 추가/제거">${getWatch().includes(code)?"★":"☆"}</span>`;
 const linksHtml = code =>
-  `<a class="xlink" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">차트</a>`+
-  `<a class="xlink" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">뉴스</a>`;
+  `<a class="xlink" target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${code}/total">차트</a>`+
+  `<a class="xlink" target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${code}/news">뉴스</a>`;
 
 function allStocks(d){
   if(d.all_stocks && d.all_stocks.length) return d.all_stocks;
@@ -1036,7 +1036,7 @@ function ideaCards(d, override){
     ${scoreBar(s)}
     <div class="sc">종합 <b>${s.score}</b> · 수급 ${s.flow_score} · 밸류 ${s.value_score}${s.mom_score!=null?` · 모멘텀 ${s.mom_score}`:""} · 공시 ${s.disc_score>=0?"+":""}${s.disc_score}</div>
     <div class="tags">${(s.reasons||[]).slice(0,4).map(r=>`<span class="tag">${esc(r)}</span>`).join("")}</div>
-    <div class="links">${starHtml(s.code)}${linksHtml(s.code)}<span class="fbbtn" data-fb="up" data-code="${s.code}" title="이런 종목 더">👍</span><span class="fbbtn" data-fb="down" data-code="${s.code}" title="이런 종목 덜">👎</span><a class="xlink" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(s.name)}">공시</a></div>
+    <div class="links">${starHtml(s.code)}${linksHtml(s.code)}<span class="fbbtn" data-fb="up" data-code="${s.code}" title="이런 종목 더">👍</span><span class="fbbtn" data-fb="down" data-code="${s.code}" title="이런 종목 덜">👎</span><a class="xlink" target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${s.code}/disclosure">공시</a></div>
   </div>`).join("");
 }
 
@@ -2582,9 +2582,9 @@ function openQsheet(code, name){
     <h3>${esc(name)} <span class="cd2">${esc(code)}</span></h3>${mineWarn}${fomoWarn}${earnBox}
     <div class="qrow">
       <a class="qbtn" href="chart.html?c=${code}">📊 차트 카드</a>
-      <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">📈 네이버 차트</a>
-      <a class="qbtn" target="_blank" rel="noopener" href="https://finance.naver.com/item/news.naver?code=${code}">📰 뉴스</a>
-      <a class="qbtn" target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(name)}">📄 공시</a>
+      <a class="qbtn" target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${code}/total">📈 네이버 차트</a>
+      <a class="qbtn" target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${code}/news">📰 뉴스</a>
+      <a class="qbtn" target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${code}/disclosure">📄 공시</a>
       <button class="qbtn" onclick="closeQsheet();showDevil('${code}')">😈 반론 보기</button>
       <button class="qbtn" data-cmp="${code}" data-cmpn="${esc(name)}">⚖️ ${CMP_PICK && CMP_PICK.code !== code ? "비교 보기 (vs "+esc(CMP_PICK.name)+")" : "비교에 담기"}</button>
       <a class="qbtn" href="pair.html?c=${code}">🤝 동료주 찾기</a>
