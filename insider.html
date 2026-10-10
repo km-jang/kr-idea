@@ -114,8 +114,8 @@ function card(x, kind){
     <div class="amt ${amt>0?"up":"down"}">${sign}${amt}억 <span>순${amt>0?"매수":"매도"} · 매수 ${x.buys}건 / 매도 ${x.sells}건</span></div>
     <div class="people">${(x.people||[]).map(esc).join("<br>")}</div>
     <div class="tags">
-      <span class="tag"><a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${x.code}">차트</a></span>
-      <span class="tag"><a target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(x.name)}">공시 원문</a></span>
+      <span class="tag"><a target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${x.code}/total">차트</a></span>
+      <span class="tag"><a target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?autoSearch=Y&option=corp&textCrpNm=${encodeURIComponent(x.name)}">공시 원문</a></span>
     </div>
   </div>`;
 }

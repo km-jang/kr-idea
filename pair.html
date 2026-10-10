@@ -153,7 +153,7 @@ function grade(n){
   return '<span class="grade" style="color:var(--ink-3)">🌱 표본 부족</span>';
 }
 function nvLink(code, name){
-  return `<a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${code}">${esc(name)}</a>`;
+  return `<a target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${code}/total">${esc(name)}</a>`;
 }
 /* 우선주 짝 판별: 삼성전자 / 삼성전자우 처럼 같은 회사의 본주·우선주만 제외.
    LG → LG화학 같은 그룹주 짝은 동료주의 핵심이므로 제외하지 않는다. */

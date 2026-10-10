@@ -208,7 +208,7 @@ function card(p){
     </div>
     <div class="chart">${swingChart(p)}</div>
     <div class="qlinks">
-      <a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${p.code}">차트</a>
+      <a target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${p.code}/total">차트</a>
       <a target="_blank" rel="noopener" href="https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(p.name)}">뉴스</a>
       <a target="_blank" rel="noopener" href="https://finance.naver.com/item/frgn.naver?code=${p.code}">수급</a>
     </div>
@@ -235,7 +235,7 @@ fetch("data.json?t="+Date.now())
       (d.all_stocks || []).forEach(s => { if(s && s.name) byName[s.name] = s.code; });
       const nm = it => {
         const c = it.code || byName[it.name];   /* V5.7부터 code 동봉, 없으면 이름 매칭 폴백 */
-        return c ? `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${c}">${esc(it.name)}</a>`
+        return c ? `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://m.stock.naver.com/domestic/stock/${c}/total">${esc(it.name)}</a>`
                  : esc(it.name);
       };
       document.getElementById("reviewBox").innerHTML =
@@ -265,7 +265,7 @@ fetch("data.json?t="+Date.now())
     const pHidden = !!pbench.benched && !pbench.revived;
     if(!pHidden && (ptw.length || (pt.chase && pt.chase.n))){
       document.getElementById("phaseSec").style.display = "";
-      const nm = w => `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${w.code}">${esc(w.name)}</a>`;
+      const nm = w => `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://m.stock.naver.com/domestic/stock/${w.code}/total">${esc(w.name)}</a>`;
       const groups = [1,2].map(adj=>{
         const rows = ptw.filter(w=>w.adj===adj);
         if(!rows.length) return "";
@@ -287,7 +287,7 @@ fetch("data.json?t="+Date.now())
                 loose:{t:"아직 활발", c:"var(--ink-3)"}};
     if(wpw.length || (wp.stats && Object.keys(wp.stats).length)){
       document.getElementById("waveSec").style.display = "";
-      const nm2 = w => `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${w.code}">${esc(w.name)}</a>`;
+      const nm2 = w => `<a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://m.stock.naver.com/domestic/stock/${w.code}/total">${esc(w.name)}</a>`;
       const rows = wpw.map(w=>{
         const b = WB[w.band] || WB.loose;
         return `<div>${nm2(w)} <span style="color:${b.c};font-weight:700">${esc(b.t)} ${Math.round(w.ratio*100)}%</span>
@@ -321,7 +321,7 @@ fetch("data.json?t="+Date.now())
         if(k.flags.includes("volume"))
           parts.push(`🔇 거래대금이 포착일의 ${Math.round((k.vol_ratio||0)*100)}% <span class="down">관심 식음</span>`);
         const held = myset.has(k.code) ? ' <span class="tag warn">보유·관심</span>' : "";
-        return `<b><a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://finance.naver.com/item/main.naver?code=${k.code}">${esc(k.name)}</a></b>${held} · ${parts.join(" · ")}`;
+        return `<b><a target="_blank" rel="noopener" style="color:inherit;text-decoration:underline dotted" href="https://m.stock.naver.com/domestic/stock/${k.code}/total">${esc(k.name)}</a></b>${held} · ${parts.join(" · ")}`;
       }).join("<br>") +
       `<div style="font-size:11.5px;color:var(--ink-3);margin-top:8px">스윙은 짧은 승부입니다. 시간이 지났는데 안 가는 종목은 이유가 있습니다 · 기준: 포착 후 ${4}영업일↑ 등락 ±2% 미만, 대금 40% 이하 (튜닝: collect.py CONFIG_SWING의 kill_*)</div>`;
     }

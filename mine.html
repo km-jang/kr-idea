@@ -130,8 +130,8 @@ fetch("data.json?t="+Date.now())
         <div class="score">위험 ${m.score}점 <span>높을수록 확인 필요</span></div>
         <div class="reasons">${(m.reasons||[]).map(r=>"· "+esc(r)).join("<br>")}</div>
         <div class="tags">
-          <span class="tag"><a target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?option=corp&textCrpNm=${encodeURIComponent(m.name)}">공시 원문</a></span>
-          <span class="tag"><a target="_blank" rel="noopener" href="https://finance.naver.com/item/main.naver?code=${m.code}">차트</a></span>
+          <span class="tag"><a target="_blank" rel="noopener" href="https://dart.fss.or.kr/dsab007/main.do?autoSearch=Y&option=corp&textCrpNm=${encodeURIComponent(m.name)}">공시 원문</a></span>
+          <span class="tag"><a target="_blank" rel="noopener" href="https://m.stock.naver.com/domestic/stock/${m.code}/total">차트</a></span>
         </div>
       </div>`).join("")
       : '<div class="empty">현재 위험 점수 20점을 넘는 종목이 없습니다.<br><span style="font-size:11.5px">공시 이력이 쌓일수록(최대 30일) 감지가 정교해집니다.</span></div>';
