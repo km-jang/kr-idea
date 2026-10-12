@@ -3238,6 +3238,26 @@ def test_message_stock_links():
         cs.fetch_realtime = old_rt
 
 
+def test_v74b_us_escape_and_events_first_tier():
+    """V7.4b (2026-10-12): 아침 미국장 지수 줄의 &를 이스케이프하고(S&P500은 S&amp;P500, 보이는 글자는 같다),
+    관심종목 이벤트는 1군 15종목만 본다 (watchlist.txt: 16번째부터 2군은 텔레그램 알림 제외)."""
+    import notify
+    old_fetch, old_map = notify.fetch_stooq_change, notify.load_us_map
+    notify.fetch_stooq_change = lambda sym: (5000.0, 0.5)
+    notify.load_us_map = lambda: []
+    try:
+        us = notify.us_market_block()
+        assert "S&amp;P500 ▲0.5%" in us[1] and "S&P" not in us[1]
+        assert notify.plain_text(us[1]).startswith("S&P500 ▲0.5%")
+    finally:
+        notify.fetch_stooq_change, notify.load_us_map = old_fetch, old_map
+    hot = {"all_stocks": [{"code": "033780", "name": "KT&G", "change_pct": 7.0}]}
+    first15 = [f"{i:06d}" for i in range(100001, 100016)]
+    assert notify.watchlist_events(hot, first15 + ["033780"]) == []      # 16번째는 2군
+    ev = notify.watchlist_events(hot, ["033780"])
+    assert len(ev) == 1 and "급등" in ev[0]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

@@ -293,7 +293,7 @@ def us_market_block(index=None):
               + (f" (실패: {', '.join(misses)})" if misses else ""))
         if not parts:
             return []
-        lines = ["🌎 <b>밤사이 미국장</b>", " · ".join(parts)]
+        lines = ["🌎 <b>밤사이 미국장</b>", html.escape(" · ".join(parts))]   # S&P500의 & (V7.4b)
         mood = us_mood_line(chg_map)
         if mood:
             lines.append(f"<i>{mood}</i>")
@@ -438,6 +438,7 @@ def watchlist_events(data, codes):
     """관심종목에 생긴 주목 이벤트: 5선 진입 / 급등락 / 공시 발생. V7.4부터 HTML 줄이다 (종목 이름은 링크)."""
     if not codes:
         return []
+    codes = codes[:15]   # 1군만 (watchlist.txt 머리말: 16번째부터 2군은 텔레그램 알림 제외, V7.4b)
     out = []
     pool = {s["code"]: s for s in (data.get("all_stocks") or [])}
     names = {c: pool[c]["name"] for c in codes if c in pool}
