@@ -6881,9 +6881,6 @@
   "failed": 4,
   "etf_skipped": 133,
   "failed_codes": [
-   "053800",
-   "018000",
-   "309710",
    "182400"
   ],
   "backfill": [
@@ -33357,8 +33354,8 @@
    "code": "053800",
    "name": "안랩",
    "market": "KOSDAQ",
-   "price": 88200.0,
-   "change_pct": 1.85,
+   "price": 88400.0,
+   "change_pct": 2.08,
    "mktcap_100m": 9814.0,
    "pbr": 2.12,
    "per": 19.72,
