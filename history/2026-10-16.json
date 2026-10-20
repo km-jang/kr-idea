@@ -6880,9 +6880,7 @@
   "applied": 563,
   "failed": 4,
   "etf_skipped": 133,
-  "failed_codes": [
-   "182400"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-10-15 실패분 가격 8종목"
   ],
