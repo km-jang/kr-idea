@@ -7011,12 +7011,7 @@
   "applied": 565,
   "failed": 4,
   "etf_skipped": 131,
-  "failed_codes": [
-   "078930",
-   "018000",
-   "309710",
-   "182400"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-10-16 실패분 가격 1종목",
    "2026-10-19 실패분 가격 7종목"
@@ -20141,8 +20136,8 @@
    "code": "078930",
    "name": "GS",
    "market": "KOSPI",
-   "price": 88400.0,
-   "change_pct": -5.76,
+   "price": 89000.0,
+   "change_pct": -5.12,
    "mktcap_100m": 82120.0,
    "pbr": 0.51,
    "per": 3.58,
