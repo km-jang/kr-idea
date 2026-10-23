@@ -7019,12 +7019,7 @@
   "applied": 564,
   "failed": 4,
   "etf_skipped": 132,
-  "failed_codes": [
-   "095660",
-   "018000",
-   "309710",
-   "182400"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-10-21 실패분 가격 3종목"
   ],
@@ -42290,8 +42285,8 @@
    "code": "095660",
    "name": "네오위즈",
    "market": "KOSDAQ",
-   "price": 18480.0,
-   "change_pct": 0.16,
+   "price": 18440.0,
+   "change_pct": -0.05,
    "mktcap_100m": 3998.0,
    "pbr": 0.65,
    "per": 6.35,
