@@ -6890,9 +6890,7 @@
   "applied": 558,
   "failed": 9,
   "etf_skipped": 133,
-  "failed_codes": [
-   "121800"
-  ],
+  "failed_codes": [],
   "check": {
    "day": "2026-10-14",
    "n": 685,

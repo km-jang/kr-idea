@@ -7014,12 +7014,7 @@
   "applied": 563,
   "failed": 4,
   "etf_skipped": 133,
-  "failed_codes": [
-   "018000",
-   "220100",
-   "309710",
-   "182400"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-10-22 실패분 가격 4종목"
   ],
