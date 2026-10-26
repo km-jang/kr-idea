@@ -3258,6 +3258,142 @@ def test_v74b_us_escape_and_events_first_tier():
     assert len(ev) == 1 and "급등" in ev[0]
 
 
+def _rb_days(n, build):
+    """n거래일짜리 합성 기록. build(i)가 그날의 {코드: 필드} 를 돌려준다."""
+    return [(f"2026-03-{i + 1:02d}", build(i)) for i in range(n)]
+
+
+def _rb_stock(p, chg=0.0, fs=0, op=None, name="종목", cap=2000, turnover=40):
+    vol = int(turnover * 1e8 / p)
+    return {"p": p, "chg": chg, "vol": vol, "cap": cap, "fs": fs, "op": op, "name": name}
+
+
+def test_rebound_variant_boundaries():
+    """V7.5: 변형 A(낙폭 20%↑·+3%↑)와 B(낙폭 15%↑·+2%↑·외인 순매수)의 경계값, ETF·유동성 제외."""
+    def build(i):
+        m = {"FLAT": _rb_stock(100.0)}
+        top = 100.0
+        if i < 10:
+            for c in ("D199", "D200", "U29", "NOFS", "SMALL", "ETFX"):
+                m[c] = _rb_stock(top)
+        else:
+            m["D199"] = _rb_stock(80.1, 3.0, fs=1)          # 낙폭 19.9%: A 아님, B 맞음
+            m["D200"] = _rb_stock(80.0, 3.0, fs=0)          # 낙폭 정확히 20.0%: A 맞음, B는 외인 없어 아님
+            m["U29"] = _rb_stock(70.0, 2.9, fs=2)           # 반등 +2.9%: A 아님, B 맞음
+            m["NOFS"] = _rb_stock(70.0, 2.5, fs=0)          # 외인 없음 +2.5%: 둘 다 아님
+            m["SMALL"] = dict(_rb_stock(70.0, 5.0, fs=1), cap=500)   # 시총 미달
+            m["ETFX"] = _rb_stock(70.0, 5.0, fs=1, name="KODEX 레버리지")
+        return m
+    days = _rb_days(11, build)
+    etf = {"ETFX"}
+    sigs = collect.rebound_signals(days, etf)
+    got = {v: sorted(e["code"] for e in sigs[v].get(10, [])) for v in "AB"}
+    assert got["A"] == ["D200"], got
+    assert got["B"] == ["D199", "U29"], got
+    # 고점을 볼 기록이 10개 미만이면 신호 없음 (신규 상장 등)
+    short = _rb_days(11, lambda i: {"FLAT": _rb_stock(100.0), "NEW": _rb_stock(70.0, 9.0, fs=1)} if i >= 3
+                     else {"FLAT": _rb_stock(100.0)})
+    assert collect.rebound_signals(short, set())["A"] == {}
+
+
+def test_rebound_regime_levels():
+    """V7.5: 장세 구간. 평온 · 하락 진행(5일 -4% 이하 또는 최근 5일 안 하루 -3% 이하) · 반등 시도."""
+    cfg = collect.CONFIG_REBOUND
+    assert collect.rebound_regime([0.0] * 12, 11, cfg)[0] == "calm"
+    one_day = [0.0] * 6 + [-3.0] + [0.0] * 3                  # 하루 -3.0%: 5일 합 -3%라도 하락 진행
+    assert collect.rebound_regime(one_day, 9, cfg)[0] == "decline"
+    slow = [0.0] * 6 + [-1.0] * 5                              # 하루는 얕아도 5일 -4.9%
+    assert collect.rebound_regime(slow, 10, cfg)[0] == "decline"
+    after = [0.0] * 5 + [-9.0] + [0.0] * 14                    # 큰 낙폭 6일 뒤: 하루 낙폭도 5일 낙폭도 지났다
+    assert collect.rebound_regime(after, 11, cfg)[0] == "attempt"
+    assert collect.rebound_regime(after, 5, cfg)[0] == "decline"
+    assert collect.rebound_regime(after, 17, cfg)[0] == "attempt"  # 5일 낙폭 창에 아직 걸려 있다
+    assert collect.rebound_regime(after, 19, cfg)[0] == "calm"     # 10일이 지나면 평온으로 돌아온다
+
+
+def test_rebound_rescore_once_and_open_entry():
+    """V7.5: 재신호는 표시하되 채점은 처음 한 번만. 시가 진입 기준 값을 따로 센다."""
+    def build(i):
+        m = {f"F{k}": _rb_stock(100.0) for k in range(99)}     # 시장 평균을 안 흔들 평평한 종목 99개
+        px = {**{k: 100.0 for k in range(10)}, 10: 70.0, 11: 77.0, 12: 77.0, 13: 77.0, 14: 77.0, 15: 84.7}
+        chg = {10: 5.0, 11: 10.0}
+        if i in px:
+            m["X"] = _rb_stock(px[i], chg.get(i, 0.0), op=72.0 if i == 11 else None)
+        return m
+    days = _rb_days(16, build)
+    sigs = collect.rebound_signals(days, set())
+    flags = [e["resignal"] for j in (10, 11) for e in sigs["A"][j]]
+    assert flags == [False, True], flags                      # 11일째 신호는 재신호
+    regimes = ["calm"] * 16
+    cfg = dict(collect.CONFIG_REBOUND, since="2026-01-01")
+    st = collect.rebound_score(days, set(), sigs, regimes, cfg)["A"]["forward"]
+    assert st["signal_days"] == 1 and st["n"] == 1, st
+    d1, d5 = st["all"]["d1"], st["all"]["d5"]
+    assert d1["n"] == 1 and abs(d1["avg"] - 10.0) < 0.01 and abs(d1["ex"] - 9.9) < 0.01, d1
+    assert abs(d1["avg_open"] - (77 / 72 - 1) * 100) < 0.01, d1   # 신호 다음 날 시가 72에 샀다면
+    assert abs(d5["avg"] - 21.0) < 0.01, d5                       # 70 -> 84.7
+    # 하락 진행 에피소드: 폭락장 하나로 묶여 1일 뒤 평균이 따로 나온다
+    ep = collect.rebound_score(days, set(), sigs, ["decline"] * 16, cfg)["A"]["episodes"]
+    assert len(ep) == 1 and ep[0]["signal_days"] == 1 and abs(ep[0]["d1"] - 10.0) < 0.01, ep
+    assert collect.rebound_score(days, set(), sigs, regimes, cfg)["A"]["episodes"] == []
+    # 그룹 구분: 시작일 이전 신호는 backfill, 이후는 forward
+    old = collect.rebound_score(days, set(), sigs, regimes, dict(collect.CONFIG_REBOUND, since="2027-01-01"))["A"]
+    assert "backfill" in old and "forward" not in old, list(old)
+
+
+def test_rebound_judge_gates():
+    """V7.5: 합격 기준(계획 6절). 표본이 모자라면 판정 안 함, 하락 진행 구간 1일 뒤가 -1.0%보다 나쁘면 불합격."""
+    good = {"avg": 1.0, "ex": 0.5, "avg_open": 0.5, "ex_open": 0.2, "days": 15}
+    mk = lambda decline_d1: {"A": {"forward": {
+        "signal_days": 15, "decline_days": 3, "n": 40,
+        "all": {"d1": good, "d5": good, "d10": good},
+        "decline": {"d1": {"avg": decline_d1, "days": 3}}}}}
+    assert collect.rebound_judge(mk(-0.9))["A"]["pass"] is True
+    j = collect.rebound_judge(mk(-1.5))["A"]
+    assert j["pass"] is False and j["checks"]["decline_d1"] is False, j
+    few = mk(0.0)
+    few["A"]["forward"]["decline_days"] = 2                    # 하락 진행 신호일 3일 미만
+    assert collect.rebound_judge(few)["A"]["pass"] is None
+    few["A"]["forward"].update(decline_days=3, signal_days=14)
+    assert collect.rebound_judge(few)["A"]["pass"] is None
+    assert collect.rebound_judge({"A": {}})["A"]["pass"] is None   # 기록 없음
+    young = mk(0.0)                                            # 신호일은 충분해도 10일 뒤 결과가 15일치 안 쌓였다
+    young["A"]["forward"]["all"]["d10"] = dict(good, days=9)
+    assert collect.rebound_judge(young)["A"]["pass"] is None
+    weak = mk(0.0)                                             # 시가 진입이 시장보다 못하면 불합격
+    weak["A"]["forward"]["all"]["d5"] = dict(good, ex_open=-0.1)
+    jw = collect.rebound_judge(weak)["A"]
+    assert jw["pass"] is False and jw["checks"]["open_plus"] is False, jw
+
+
+def test_build_rebound_safe_and_additive():
+    """V7.5: 기록이 없거나 형식이 달라도 {}로 끝나고, data.json에는 키 하나만 더해진다."""
+    import tempfile, os
+    assert collect.build_rebound("/없는폴더", [{"code": "A", "price": 1}], "2026-08-07") == {}
+    assert collect.build_rebound("history", [{"code": "A", "price": 1, "name": "A"}], None) == {}   # 기준일 없음
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "2026-08-01.json").write_text('{"market_date": "2026-08-01"}', encoding="utf-8")  # all_stocks 없음
+        (Path(td) / "2026-08-02.json").write_text("깨진 파일", encoding="utf-8")
+        assert collect.build_rebound(td, [{"code": "A", "price": 1, "name": "A"}], "2026-08-07") == {}
+    data = collect.build_sample()
+    assert "rebound" in data and data["rebound"]["today"][0]["variant"] == "A"
+    json.dumps(data, ensure_ascii=False)
+
+
+def test_rebound_reproduces_plan_numbers():
+    """V7.5: 소급 계산이 계획 문서 2절의 숫자(낙폭 20%↑·+3%↑: 28일 156건)를 같은 기록으로 되풀이하는지.
+    기록이 없는 환경(다른 저장소 사본 등)에서는 건너뛴다."""
+    hd = Path(collect.__file__).resolve().parent / "history"
+    if not hd.exists():
+        return
+    days = collect._rebound_days(hd, [], "2026-10-24")
+    if not days or days[-1][0] != "2026-10-23" or days[0][0] != "2026-07-14":
+        return
+    etf = {c for _, m in days for c, s in m.items() if collect.is_index_product(s["name"])}
+    a = collect.rebound_signals(days, etf)["A"]
+    assert len(a) == 28 and sum(len(v) for v in a.values()) == 156, (len(a), sum(len(v) for v in a.values()))
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

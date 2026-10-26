@@ -2574,6 +2574,23 @@ def build_sample():
                                              "mid": {"n": 83, "win": 39, "avg_pct": -0.47},
                                              "loose": {"n": 290, "win": 133, "avg_pct": -1.18}}},
                     dump_stats={"n": 12, "win": 7, "avg_pct": 1.1},
+                    rebound={"since": "2026-10-27", "date": "2026-07-10",
+                             "regime": {"key": "decline", "m5": -6.2},
+                             "today": [{"variant": "A", "code": "005930", "name": "삼성전자", "dd": -21.4,
+                                       "chg": 3.4, "price": 71200, "resignal": False}],
+                             "today_n": {"A": 1, "B": 0},
+                             "stats": {"A": {"backfill": {"signal_days": 27, "decline_days": 15, "n": 123,
+                                                          "all": {"d1": {"days": 26, "n": 121, "avg": 0.64, "ex": 0.19,
+                                                                         "win": 9, "open_days": 13, "avg_open": -0.74}},
+                                                          "decline": {"d1": {"days": 7, "n": 40, "avg": -4.27, "ex": -2.49,
+                                                                             "win": 1, "open_days": 3, "avg_open": -5.0}}}},
+                                       "B": {}},
+                             "judge": {"A": {"signal_days": 0, "decline_days": 0, "ready": False, "pass": None,
+                                             "checks": {}},
+                                       "B": {"signal_days": 0, "decline_days": 0, "ready": False, "pass": None,
+                                             "checks": {}}},
+                             "defs": {"A": {"dd": 20.0, "up": 3.0, "foreign": False},
+                                      "B": {"dd": 15.0, "up": 2.0, "foreign": True}}},
                     reports=[{"code": "005930", "name": "삼성전자", "broker": "미리내증권",
                               "title": "HBM 사이클의 두 번째 파도", "date": "26.07.10",
                               "nid": "sample"},
@@ -3298,6 +3315,261 @@ def build_wave_pullback(hist_dir, stocks, market_date, cfg=None):
 
 
 # ---------------------------------------------------------------------------
+# 반등 관찰 후보 (V7.5, 소유자 승인 2026-10-26, 근거 PLAN-REBOUND-261026.md)
+#   며칠간 크게 빠진 뒤 오늘 오른 종목을 "관찰용"으로만 기록·채점한다. 사라는 뜻이 아니다.
+#   점수·5선·텔레그램에는 반영하지 않고 화면은 기본 숨김이다. 후보 정의와 합격 기준은
+#   계획 문서 5.2절·6절에서 결과를 보기 전에 정했으므로 배포 뒤 바꾸지 않는다.
+#   장세 구간 문턱도 같다(10월 폭락장을 보고 정한 사후 설정이라 첫 판정 전까지 고정).
+# ---------------------------------------------------------------------------
+
+CONFIG_REBOUND = {
+    "since": "2026-10-27",        # 이 날 이후 신호만 forward(증거), 그 전은 backfill(소급, 증거 아님)
+    "look": 10,                   # 고점을 보는 거래일 수 (오늘 포함 11개 기록 중 10개 이상 있어야 함)
+    "min_mktcap": 1000, "min_turnover": 30,
+    "variants": {"A": {"dd": 20.0, "up": 3.0, "foreign": False},
+                 "B": {"dd": 15.0, "up": 2.0, "foreign": True}},
+    "resignal_days": 5,           # 직전 N거래일 안에 같은 변형이 잡은 종목은 재신호(채점은 처음 한 번만)
+    "ks": (1, 5, 10),
+    "today_cap": 40,              # 변형별 하루 표시 상한 (낙폭 큰 순)
+    # 장세 구간: 하락 진행 = 시장 5일 -4% 이하 또는 최근 5일 안 하루 -3% 이하
+    #            반등 시도 = 그 밖이지만 최근 10일 안 시장 5일 -8% 이하가 있었음, 나머지 평온
+    "decline_m5": -4.0, "decline_m1": -3.0, "decline_look": 5,
+    "attempt_m5": -8.0, "attempt_look": 10,
+    # 합격 기준 (계획 6절)
+    "min_signal_days": 15, "min_decline_days": 3, "decline_d1_floor": -1.0,
+}
+
+
+def _rebound_days(hist_dir, stocks, market_date):
+    """[(날짜, {코드: 필드 dict})]. 기록(history) 전체 + 오늘. 실패한 파일은 건너뛴다."""
+    try:
+        files = sorted(Path(hist_dir).glob("*.json"))
+    except Exception:
+        return []
+    pick = lambda s: {"p": s.get("price"), "chg": s.get("change_pct"),
+                      "vol": s.get("volume") or 0, "cap": s.get("mktcap_100m") or 0,
+                      "fs": s.get("f_streak") or 0, "op": s.get("day_open"),
+                      "name": s.get("name") or ""}
+    days = []
+    for f in files:
+        if market_date and f.stem >= market_date:
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        m = {s["code"]: pick(s) for s in d.get("all_stocks") or [] if s.get("code") and s.get("price")}
+        if m:
+            days.append((f.stem, m))
+    today = {s["code"]: pick(s) for s in stocks if s.get("code") and s.get("price")}
+    if today:
+        days.append((market_date or "today", today))
+    return days
+
+
+def rebound_market(days, etf):
+    """시장 동일가중 일 수익률(%) 목록. ETF·ETN 제외, 이틀 모두 있는 종목만. 첫날은 0."""
+    out = [0.0]
+    for i in range(1, len(days)):
+        prev = days[i - 1][1]
+        rs = [days[i][1][c]["p"] / prev[c]["p"] - 1 for c in days[i][1]
+              if c in prev and c not in etf and prev[c]["p"]]
+        out.append(sum(rs) / len(rs) * 100 if rs else 0.0)
+    return out
+
+
+def _five_day(m1, j):
+    """j번째 날까지 5거래일 복리 수익률(%). 5일치가 안 되면 0."""
+    if j < 5:
+        return 0.0
+    v = 1.0
+    for k in range(j - 4, j + 1):
+        v *= 1 + m1[k] / 100
+    return (v - 1) * 100
+
+
+def rebound_regime(m1, i, cfg=None):
+    """i번째 날의 장세 구간 키 (decline · attempt · calm)와 5일 수익률."""
+    cfg = cfg or CONFIG_REBOUND
+    five = _five_day(m1, i)
+    recent = range(max(1, i - cfg["decline_look"] + 1), i + 1)
+    if five <= cfg["decline_m5"] or any(m1[j] <= cfg["decline_m1"] for j in recent):
+        return "decline", five
+    wide = range(max(5, i - cfg["attempt_look"] + 1), i + 1)
+    if any(_five_day(m1, j) <= cfg["attempt_m5"] for j in wide):
+        return "attempt", five
+    return "calm", five
+
+
+def rebound_signals(days, etf, cfg=None):
+    """변형별 일별 신호 {변형: {날짜 위치: [{code,name,dd,chg,price,resignal}]}}. 재신호도 포함."""
+    cfg = cfg or CONFIG_REBOUND
+    look = cfg["look"]
+    sigs = {v: {} for v in cfg["variants"]}
+    min_up = min(v["up"] for v in cfg["variants"].values())
+    for i in range(look, len(days)):
+        for c, s in days[i][1].items():
+            if c in etf or s["chg"] is None or s["chg"] < min_up:
+                continue
+            if s["cap"] < cfg["min_mktcap"] or s["p"] * s["vol"] / 1e8 < cfg["min_turnover"]:
+                continue
+            hist = [days[j][1][c]["p"] for j in range(i - look, i + 1) if c in days[j][1]]
+            if len(hist) < look:
+                continue
+            dd = round((s["p"] / max(hist) - 1) * 100, 4)      # 경계값(정확히 -20.0)이 부동소수 오차로 빗나가지 않게
+            for v, vc in cfg["variants"].items():
+                if dd <= -vc["dd"] and s["chg"] >= vc["up"] and (not vc["foreign"] or s["fs"] >= 1):
+                    prior = {e["code"] for j in range(max(look, i - cfg["resignal_days"]), i)
+                             for e in sigs[v].get(j, [])}
+                    sigs[v].setdefault(i, []).append({
+                        "code": c, "name": s["name"], "dd": round(dd, 1), "chg": round(s["chg"], 1),
+                        "price": s["p"], "resignal": c in prior})
+    return sigs
+
+
+def _mean(xs):
+    return sum(xs) / len(xs) if xs else None
+
+
+def rebound_score(days, etf, sigs, regimes, cfg=None):
+    """처음 잡힌 신호만 채점. 하루를 표본 하나로 친다(그날 무리 평균 - 그날 시장 평균).
+    반환 {변형: {"forward"|"backfill": {"signal_days", "decline_days", "n",
+              구간키("all","decline","attempt","calm"): {"d1": {...}, "d5": {...}, "d10": {...}}}}}"""
+    cfg = cfg or CONFIG_REBOUND
+    n = len(days)
+    mk = {}
+
+    def market(i, k):
+        if (i, k) not in mk:
+            rs = [days[i + k][1][c]["p"] / days[i][1][c]["p"] - 1 for c in days[i][1]
+                  if c not in etf and i + k < n and c in days[i + k][1]]
+            mk[(i, k)] = sum(rs) / len(rs) * 100 if rs else None
+        return mk[(i, k)]
+
+    # 하락 진행 에피소드: 5거래일 넘게 끊겼다가 다시 하락 진행이 되면 새 폭락장으로 센다.
+    # 폭락장마다 결과가 갈렸으므로(7월 말 급반등, 10월 연속 하락) 구간 평균을 하나로 합치지 않고 따로 보여준다.
+    ep_of, ep_no, last_decl = {}, 0, None
+    for i in range(n):
+        if regimes[i] == "decline":
+            if last_decl is None or i - last_decl > 5:
+                ep_no += 1
+            ep_of[i], last_decl = ep_no, i
+    out = {}
+    for v in cfg["variants"]:
+        acc = {}                                  # (그룹, 구간, k) -> [(절대, 초과, 시가진입 or None, 건수)]
+        res = {}
+        eps = {}                                  # 에피소드 -> [(날짜, 1일 뒤 절대, 1일 뒤 초과, 건수)]
+        for i, entries in sigs[v].items():
+            fresh = [e for e in entries if not e["resignal"]]
+            if not fresh:
+                continue
+            grp = "forward" if days[i][0] >= cfg["since"] else "backfill"
+            reg = regimes[i]
+            g = res.setdefault(grp, {"signal_days": 0, "decline_days": 0, "n": 0})
+            g["signal_days"] += 1
+            g["decline_days"] += 1 if reg == "decline" else 0
+            g["n"] += len(fresh)
+            for k in cfg["ks"]:
+                if i + k >= n:
+                    continue
+                m = market(i, k)
+                rs, ops = [], []
+                for e in fresh:
+                    c = e["code"]
+                    nxt = days[i + k][1].get(c)
+                    if not nxt:
+                        continue
+                    rs.append((nxt["p"] / e["price"] - 1) * 100)
+                    op = (days[i + 1][1].get(c) or {}).get("op")
+                    if op and op > 0:
+                        ops.append((nxt["p"] / op - 1) * 100)
+                if not rs or m is None:
+                    continue
+                # 시가 진입의 시장 대비는 같은 날짜의 종가 기준 시장 평균을 뺀다(시장의 시가 자료가 없다)
+                row = (_mean(rs), _mean(rs) - m, _mean(ops), len(rs),
+                       (_mean(ops) - m) if ops else None)
+                for key in ("all", reg):
+                    acc.setdefault((grp, key, k), []).append(row)
+                if k == 1 and i in ep_of:
+                    eps.setdefault(ep_of[i], []).append((days[i][0], row[0], row[1], row[3]))
+        for (grp, key, k), rows in acc.items():
+            ops = [r[2] for r in rows if r[2] is not None]
+            exo = [r[4] for r in rows if r[4] is not None]
+            res[grp].setdefault(key, {})[f"d{k}"] = {
+                "days": len(rows), "n": sum(r[3] for r in rows),
+                "avg": round(_mean([r[0] for r in rows]), 2),
+                "ex": round(_mean([r[1] for r in rows]), 2),
+                "win": sum(1 for r in rows if r[1] > 0),
+                "open_days": len(ops),
+                "avg_open": round(_mean(ops), 2) if ops else None,
+                "ex_open": round(_mean(exo), 2) if exo else None}
+        res["episodes"] = [
+            {"from": r[0][0], "to": r[-1][0], "signal_days": len(r), "n": sum(x[3] for x in r),
+             "d1": round(_mean([x[1] for x in r]), 2), "d1ex": round(_mean([x[2] for x in r]), 2)}
+            for _, r in sorted(eps.items())]
+        out[v] = res
+    return out
+
+
+def rebound_judge(stats, cfg=None):
+    """합격 기준(계획 6절)을 forward 표본으로만 판정. 표본 조건이 모자라면 pass는 None(판정 안 함)."""
+    cfg = cfg or CONFIG_REBOUND
+    out = {}
+    for v, st in stats.items():
+        fw = st.get("forward") or {}
+        sd, dd = fw.get("signal_days", 0), fw.get("decline_days", 0)
+        al = fw.get("all") or {}
+        d1 = (fw.get("decline") or {}).get("d1") or {}
+        # 신호일 수만이 아니라 결과가 나온 날도 모자라지 않아야 한다(10일 뒤 값이 아직 없는 표본으로 미달 판정이 나지 않게)
+        matured = ((al.get("d10") or {}).get("days", 0) >= cfg["min_signal_days"]
+                   and d1.get("days", 0) >= cfg["min_decline_days"])
+        ready = sd >= cfg["min_signal_days"] and dd >= cfg["min_decline_days"] and matured
+        checks = {
+            "abs_plus": all((al.get(f"d{k}") or {}).get("avg", -1) > 0 for k in cfg["ks"]),
+            "ex_plus": all((al.get(f"d{k}") or {}).get("ex", -1) > 0 for k in (5, 10)),
+            "decline_d1": d1.get("avg") is not None and d1["avg"] >= cfg["decline_d1_floor"],
+            "open_plus": all((al.get(f"d{k}") or {}).get("avg_open") is not None
+                             and al[f"d{k}"]["avg_open"] > 0 for k in cfg["ks"])
+                         and all((al.get(f"d{k}") or {}).get("ex_open") is not None
+                                 and al[f"d{k}"]["ex_open"] > 0 for k in (5, 10)),
+        }
+        out[v] = {"signal_days": sd, "decline_days": dd, "ready": ready,
+                  "pass": (all(checks.values()) if ready else None), "checks": checks}
+    return out
+
+
+def build_rebound(hist_dir, stocks, market_date, cfg=None):
+    """반등 관찰 후보. 반환 dict (실패 시 {}):
+      today: 오늘 후보 [{variant,code,name,dd,chg,price,resignal}] (변형별 낙폭 큰 순, 상한 있음)
+      today_n: 변형별 오늘 후보 수 (상한 전)
+      regime: {"key","m5"} 오늘 장세 구간
+      stats: 변형별 forward/backfill 채점, judge: 합격 판정, defs: 후보 정의
+    부가 기능이므로 어떤 실패에도 {}를 돌려주고 수집을 막지 않는다."""
+    cfg = cfg or CONFIG_REBOUND
+    if not market_date:                   # 오늘 날짜를 모르면 history의 오늘 기록과 겹칠 수 있다
+        return {}
+    days = _rebound_days(hist_dir, stocks, market_date)
+    if len(days) <= cfg["look"] or not stocks:
+        return {}
+    etf = {c for _, m in days for c, s in m.items() if is_index_product(s["name"])}
+    m1 = rebound_market(days, etf)
+    regimes = [rebound_regime(m1, i, cfg)[0] for i in range(len(days))]
+    sigs = rebound_signals(days, etf, cfg)
+    stats = rebound_score(days, etf, sigs, regimes, cfg)
+    last = len(days) - 1
+    today, today_n = [], {}
+    for v, per_day in sigs.items():
+        rows = sorted(per_day.get(last, []), key=lambda e: e["dd"])
+        today_n[v] = len(rows)
+        today += [dict(e, variant=v) for e in rows[:cfg["today_cap"]]]
+    return {"since": cfg["since"], "date": days[last][0],
+            "regime": {"key": regimes[last], "m5": round(rebound_regime(m1, last, cfg)[1], 1)},
+            "today": today, "today_n": today_n,
+            "stats": stats, "judge": rebound_judge(stats, cfg),
+            "defs": {v: dict(vc) for v, vc in cfg["variants"].items()}}
+
+
+# ---------------------------------------------------------------------------
 # 🪜 돌파 국면 추적기 (V5.9): 신고가 돌파 후 "첫 조정" 관찰 + 성적 자동 채점
 #   마켓스타PRO의 국면 프레임에서 착안하되, 실시간 알람이 아니라 일배치 관찰과
 #   통계 검증으로 번역했다 (안티 FOMO: 돌파 당일 추격의 실제 성적을 함께 보여줌).
@@ -3682,7 +3954,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
              mines=None, swing=None, swing_review=None, chart_pack=None,
              screen_stats=None, chase_stats=None, swing_stats=None, kill_watch=None,
              phase_track=None, reports=None, wave_pullback=None, dump_stats=None,
-             earnings=None, regular_session=None, ideas_bench=None):
+             earnings=None, regular_session=None, ideas_bench=None, rebound=None):
     def slim(s, with_closes=False):
         out = {k: s.get(k) for k in (
             "code", "name", "market", "price", "change_pct", "mktcap_100m",
@@ -3756,6 +4028,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "reports": reports or [],
         "wave_pullback": wave_pullback or {},
         "dump_stats": dump_stats or {},
+        "rebound": rebound or {},
         "earnings": earnings or {},
         # V7.1: 정규장 기준 보정 기록. applied가 있으면 이 기록의 가격은 정규장 값이다
         # (backfill_history가 이걸 보고 다시 고치지 않는다)
@@ -4029,6 +4302,14 @@ def run_full(max_universe=None, out_path=None):
     except Exception as e:
         errors.append(f"dump_stats: {e}")
         dump_stats = {}
+    # 반등 관찰 후보 (V7.5) — 부가 기능, 실패해도 수집을 막지 않는다
+    try:
+        rebound = build_rebound(hist_dir, stocks, market_date)
+        if rebound.get("today"):
+            print(f"  · 반등 관찰 후보 {rebound['today_n']} 장세 {rebound['regime']['key']}")
+    except Exception as e:
+        errors.append(f"rebound: {e}")
+        rebound = {}
     # 차트 카드 팩 — 부가 기능이므로 실패해도 핵심 수집을 막지 않는다
     try:
         targets = chart_targets(ideas, swing, read_watchlist_codes())
@@ -4108,7 +4389,7 @@ def run_full(max_universe=None, out_path=None):
                     phase_track=phase_track, reports=reports,
                     wave_pullback=wave_pullback, dump_stats=dump_stats,
                     earnings=earnings, regular_session=regular_session,
-                    ideas_bench=ideas_bench)
+                    ideas_bench=ideas_bench, rebound=rebound)
 
 
 def main():

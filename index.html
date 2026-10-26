@@ -553,6 +553,7 @@ table.slim{min-width:0}
     자동 갱신: 매 영업일 19시 (GitHub Actions) · 소스: 네이버 증권 · DART RSS ·
     <a href="#" onclick="openTrust();return false" style="color:inherit;font-weight:600">📋 신호 신뢰도 통지표</a> ·
     <a href="#" onclick="showBadgeGuide();return false" style="color:inherit;font-weight:600">🏷 배지 설명</a> ·
+    <a href="#" id="rebLink" onclick="toggleRebound();return false" style="color:inherit;font-weight:600">🌱 반등 관찰</a> ·
     <a href="pair.html" style="color:inherit;font-weight:600">🤝 동료주 발굴기</a> ·
     <a href="backtest.html" style="color:inherit;font-weight:600">🧪 백테스트 실험실</a>
   </footer>
@@ -1161,6 +1162,103 @@ function screensBox(d){
     <h3>🔎 조건 검색 적중 <span style="font-weight:400;color:var(--ink-3)">· 6개 검색식, 걸린 날만 표시</span> <span data-scgear role="button" title="검색식 켜기/끄기와 성적" style="cursor:pointer;color:var(--ink-3);font-weight:400">⚙ 설정</span></h3>
     ${body}${cfg}</div>`;
 }
+
+/* V7.5 반등 관찰 후보 (소유자 승인 2026-10-26, 계획 PLAN-REBOUND-261026.md).
+   며칠 크게 빠진 뒤 오늘 오른 종목의 관찰용 기록이다. 사라는 뜻이 아니다.
+   기본 숨김(0픽셀): 푸터의 "🌱 반등 관찰" 링크로 이 기기에서만 켠다. 점수·5선·텔레그램에는 반영하지 않는다.
+   서버(collect.py build_rebound)가 후보·장세 구간·채점·합격 판정을 모두 계산해 data.rebound로 내려준다. */
+const REBKEY = "kr_idea_rebound_on";
+const rebOn = () => { try { return localStorage.getItem(REBKEY) === "1"; } catch(e){ return false; } };
+const setRebOn = v => { try { localStorage.setItem(REBKEY, v ? "1" : "0"); } catch(e){} };
+const REB_REG = {decline:"하락 진행", attempt:"반등 시도", calm:"평온", all:"전체"};
+const rebSgn = v => (v > 0 ? "+" : "") + v;
+function rebLine(g, key){
+  const s = g && g[key];
+  if(!s) return "";
+  const cell = k => {
+    const r = s["d" + k];
+    return r ? `${k}일 ${rebSgn(r.avg)}% (시장 대비 ${rebSgn(r.ex)}%p, ${r.days}일)` : `${k}일 표본 없음`;
+  };
+  return `<div style="margin:2px 0"><b>${REB_REG[key]}</b> · ${cell(1)} · ${cell(5)} · ${cell(10)}</div>`;
+}
+function rebOpen(g){
+  const a = g && g.all;
+  if(!a) return "";
+  const cell = k => (a["d" + k] && a["d" + k].avg_open != null) ? `${k}일 ${rebSgn(a["d" + k].avg_open)}%` : `${k}일 -`;
+  return `<div style="margin:2px 0;color:var(--ink-3)">다음 날 시가에 샀다면 · ${cell(1)} · ${cell(5)} · ${cell(10)}</div>`;
+}
+function reboundBox(d){
+  let el = document.getElementById("reboundBox");
+  if(!el){
+    el = document.createElement("div"); el.id = "reboundBox";
+    const fb = document.getElementById("flowBars");
+    fb.parentNode.insertBefore(el, fb);
+  }
+  const link = document.getElementById("rebLink");
+  if(link) link.textContent = rebOn() ? "🌱 반등 관찰 끄기" : "🌱 반등 관찰";
+  const r = d && d.rebound;
+  if(!rebOn() || !r || !r.regime){
+    el.style.display = "none"; el.innerHTML = "";
+    return;
+  }
+  const ST = r.stats || {};
+  const reg = r.regime.key;
+  /* 하락 진행·반등 시도 장세의 경고: 폭락장(에피소드)마다 1일 뒤 결과가 갈렸으므로 평균 하나로 합치지 않고 에피소드별로 나열한다 */
+  const eps = ((ST.A || {}).episodes || []).filter(e => e.signal_days);
+  const md = s => s.slice(5).replace("-", "/");
+  let warn = "";
+  if(reg !== "calm"){
+    warn = `<div style="margin:4px 0 6px;padding:6px 8px;border-radius:8px;background:var(--bg-2,rgba(128,128,128,.12));font-size:12.5px">` +
+      `주의: 지금은 <b>${REB_REG[reg]}</b> 장세입니다. 하루 오른 것을 바닥으로 읽으면 안 됩니다.` +
+      (eps.length ? `<div style="margin-top:3px">지난 하락 진행 구간별 신호의 1일 뒤(변형 A, 소급 계산이라 증거 아님)</div>` +
+        eps.map(e => `<div>${md(e.from)}~${md(e.to)} · 신호일 ${e.signal_days}일 ${e.n}건 · 평균 ${rebSgn(e.d1)}% (시장 대비 ${rebSgn(e.d1ex)}%p)</div>`).join("") : "") +
+      `</div>`;
+  }
+  const defs = r.defs || {};
+  const variants = ["A", "B"].filter(v => defs[v]);
+  const cands = variants.map(v => {
+    const rows = (r.today || []).filter(x => x.variant === v);
+    const n = (r.today_n || {})[v] || 0;
+    const dv = defs[v];
+    const title = `변형 ${v} · 10일 고점 대비 -${dv.dd}%↓ · 오늘 +${dv.up}%↑` + (dv.foreign ? " · 외인 순매수 중" : "");
+    const shown = rows.slice(0, 8).map(x =>
+      `<span class="qn" data-c="${x.code}" data-n="${esc(x.name)}">${esc(x.name)}</span>` +
+      ` <span style="color:var(--ink-3);font-size:11.5px">낙폭 ${x.dd}% · 오늘 +${x.chg}%${x.resignal ? " · 재신호" : ""}</span>`).join(" / ");
+    return `<div style="margin:5px 0"><b>${title}</b> · ${n}건` +
+      (rows.length ? `<div style="margin-top:2px">${shown}${n > 8 ? ` <span style="color:var(--ink-3);font-size:11.5px">외 ${n - 8}건</span>` : ""}</div>` : "") + `</div>`;
+  }).join("");
+  const stats = variants.map(v => {
+    const s = ST[v] || {}, j = (r.judge || {})[v] || {};
+    const fw = s.forward, bk = s.backfill;
+    let verdict = "판정 대기";
+    if(j.pass === true) verdict = "기준 통과 (소유자 검토 대기, 화면 기본 켜짐은 아직 아님)";
+    else if(j.pass === false) verdict = "기준 미달 (벤치 유지)";
+    const need = j.pass == null ? ` · 신호일 ${j.signal_days || 0}/15 · 하락 진행 신호일 ${j.decline_days || 0}/3` : "";
+    const block = (g, label) => g ? `<div style="margin-top:4px"><span style="color:var(--ink-3)">${label} · 신호일 ${g.signal_days}일 ${g.n}건</span>` +
+      ["all", "decline", "attempt", "calm"].map(k => rebLine(g, k)).join("") + rebOpen(g) + `</div>` : "";
+    return `<div style="margin:8px 0 2px"><b>변형 ${v} 채점</b> · ${verdict}${need}` +
+      (fw ? block(fw, "배포 뒤 기록(증거)") : `<div style="color:var(--ink-3);margin-top:2px">배포 뒤 기록 없음, 신호가 나온 다음 날부터 쌓임</div>`) +
+      block(bk, "소급 계산(이 기록을 보고 만든 정의라 증거 아님)") + `</div>`;
+  }).join("");
+  el.style.display = "";
+  el.innerHTML = `<div class="bars" style="border-left:3px solid var(--ink-3)">
+    <h3>🌱 반등 관찰 후보 <span style="font-weight:400;color:var(--ink-3)">· 관찰용, 사라는 뜻 아님 · 점수 미반영</span></h3>
+    <div style="font-size:12.5px;line-height:1.7">
+      <div>오늘 장세 <b>${REB_REG[reg]}</b> (시장 5일 ${rebSgn(r.regime.m5)}%)</div>
+      ${warn}${cands}${stats}
+      <div style="color:var(--ink-3);font-size:11px;margin-top:6px">처음 잡힌 날만 채점하고 같은 종목의 재신호는 세지 않습니다. 하루를 표본 하나로 보고 그날 시장 평균과 비교합니다.
+      합격 기준은 신호일 15일 이상(하락 진행 3일 이상), 1·5·10일 뒤 평균 모두 플러스, 하락 진행 구간 1일 뒤 -1.0% 이상입니다. 푸터의 "반등 관찰 끄기"로 숨깁니다.</div>
+    </div></div>`;
+}
+window.toggleRebound = function(){
+  setRebOn(!rebOn());
+  if(window.DATA) reboundBox(window.DATA);
+  const el = document.getElementById("reboundBox");
+  if(rebOn()){
+    if(window.DATA && !(window.DATA.rebound && window.DATA.rebound.regime)) toast("이 날짜 기록에는 반등 관찰 자료가 없습니다 (다음 수집부터 생깁니다)");
+    else if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+  }
+};
 
 function flowBars(d){
   const rows = (d.flow_scan||[]).filter(s=>(s.f_5d_amt_100m||0)>0)
@@ -2435,7 +2533,7 @@ function renderAll(d, isHistory){
   tiles(d); watchSection(d); perfSection(d); sentiSection(d);
   sectorBars(d); flowBars(d); flowTable(d); valueTable(d); reportsBox(d); discList(d);
   curveChart(d); raceChart(d); portSection(d); silenceSection(d); compassSection(d);
-  screensBox(d); brief3(d); sectionBadges(d);
+  screensBox(d); reboundBox(d); brief3(d); sectionBadges(d);
   if(!isHistory){
     TODAY_DATA = d;
     initSliders(d); initSearch(d); initHistory(d); initPort(d);
