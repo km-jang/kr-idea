@@ -7624,14 +7624,7 @@
   "applied": 561,
   "failed": 6,
   "etf_skipped": 133,
-  "failed_codes": [
-   "069080",
-   "018000",
-   "025900",
-   "309710",
-   "182400",
-   "121800"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-10-27 실패분 가격 1종목",
    "2026-10-28 실패분 가격 3종목"
@@ -43814,8 +43807,8 @@
    "code": "069080",
    "name": "웹젠",
    "market": "KOSDAQ",
-   "price": 11430.0,
-   "change_pct": 0.0,
+   "price": 11530.0,
+   "change_pct": 0.87,
    "mktcap_100m": 3539.0,
    "pbr": 0.48,
    "per": 12.51,
@@ -45730,8 +45723,8 @@
    "code": "025900",
    "name": "동화기업",
    "market": "KOSDAQ",
-   "price": 5680.0,
-   "change_pct": -2.41,
+   "price": 5600.0,
+   "change_pct": -3.78,
    "mktcap_100m": 2872.0,
    "pbr": 0.32,
    "per": null,
