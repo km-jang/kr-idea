@@ -1,0 +1,40 @@
+name: PR 시험
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - '*.html'
+      - '.github/workflows/*.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: 0) 문법 검사 (전체 .py)
+        shell: bash
+        run: python -m compileall -q .
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 1) 단위 테스트
+        shell: bash
+        run: python test_parsers.py
