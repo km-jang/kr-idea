@@ -8043,14 +8043,7 @@
   "applied": 562,
   "failed": 6,
   "etf_skipped": 132,
-  "failed_codes": [
-   "280360",
-   "445680",
-   "018000",
-   "309710",
-   "182400",
-   "121800"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-10-30 실패분 가격 7종목"
   ],
@@ -33123,8 +33116,8 @@
    "code": "280360",
    "name": "롯데웰푸드",
    "market": "KOSPI",
-   "price": 118100.0,
-   "change_pct": 0.85,
+   "price": 118600.0,
+   "change_pct": 1.28,
    "mktcap_100m": 10871.0,
    "pbr": 0.46,
    "per": 12.82,
@@ -35170,8 +35163,8 @@
    "code": "445680",
    "name": "큐리옥스바이오시스템즈",
    "market": "KOSDAQ",
-   "price": 52200.0,
-   "change_pct": 5.67,
+   "price": 53100.0,
+   "change_pct": 7.49,
    "mktcap_100m": 8991.0,
    "pbr": 18.34,
    "per": null,
