@@ -7952,14 +7952,7 @@
   "applied": 562,
   "failed": 6,
   "etf_skipped": 132,
-  "failed_codes": [
-   "259960",
-   "309710",
-   "182400",
-   "448280",
-   "121800",
-   "377460"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-11-03 실패분 가격 5종목"
   ],
@@ -20708,8 +20701,8 @@
    "code": "259960",
    "name": "크래프톤",
    "market": "KOSPI",
-   "price": 211000.0,
-   "change_pct": 16.0,
+   "price": 212000.0,
+   "change_pct": 16.55,
    "mktcap_100m": 95968.0,
    "pbr": 1.27,
    "per": 11.92,
@@ -46742,8 +46735,8 @@
    "code": "448280",
    "name": "에코아이",
    "market": "KOSDAQ",
-   "price": 8950.0,
-   "change_pct": 0.79,
+   "price": 9290.0,
+   "change_pct": 4.62,
    "mktcap_100m": 2652.0,
    "pbr": 2.11,
    "per": 50.0,
