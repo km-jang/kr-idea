@@ -46309,6 +46309,6 @@
  ],
  "universe_size": 700,
  "errors": [
-  "dart: HTTPSConnectionPool(host='opendart.fss.or.kr', port=443): Max retries exceeded with url: /api/list.json?crtfc_key=019a0554f6e6976a0fbd9b2699e11fc7551896cf&bgn_de=20261102&end_de=20261105&page_no=1&page_count=100 (Caused by ConnectTimeoutError(<HTTPSConnection(host='opendart.fss.or.kr', port=443) at 0x738a88bb2450>, 'Connection to opendart.fss.or.kr timed out. (connect timeout=15)'))"
+  "dart: HTTPSConnectionPool(host='opendart.fss.or.kr', port=443): Max retries exceeded with url: /api/list.json?crtfc_key=***&bgn_de=20261102&end_de=20261105&page_no=1&page_count=100 (Caused by ConnectTimeoutError(<HTTPSConnection(host='opendart.fss.or.kr', port=443) at 0x738a88bb2450>, 'Connection to opendart.fss.or.kr timed out. (connect timeout=15)'))"
  ]
 }
