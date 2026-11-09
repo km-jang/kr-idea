@@ -293,7 +293,7 @@
   "date": "2026-11-09",
   "data_final": true,
   "data_gen": "2026-11-09 19:13 KST",
-  "morning": true,
+  "morning": false,
   "pulse": true,
   "evening": true,
   "scan": true,
