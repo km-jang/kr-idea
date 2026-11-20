@@ -3394,8 +3394,25 @@ def test_rebound_reproduces_plan_numbers():
     assert len(a) == 28 and sum(len(v) for v in a.values()) == 156, (len(a), sum(len(v) for v in a.values()))
 
 
+def test_mask_secrets_hides_dart_key():
+    key = "ABCDEF0123456789abcdef0123456789abcdef01"
+    msg = (f"HTTPSConnectionPool(host='opendart.fss.or.kr'): Max retries exceeded with url: "
+           f"/api/list.json?crtfc_key={key}&bgn_de=20261102&end_de=20261105 (Caused by timeout)")
+    out = collect.mask_secrets(msg)
+    assert key not in out and "crtfc_key=***&bgn_de" in out, out
+    # 따옴표·괄호로 끝나는 경우, 키가 마지막인 경우
+    assert key not in collect.mask_secrets(f"url='https://x/y?crtfc_key={key}'")
+    assert key not in collect.mask_secrets(f"failed: https://x/y?crtfc_key={key}")
+    # 키 없는 문구는 그대로
+    assert collect.mask_secrets("flow 005930: timeout") == "flow 005930: timeout"
+    # data.json에 실리는 errors 경로도 가려진다
+    now = collect.datetime.now(collect.KST)
+    data = collect.assemble([], [], [], {}, now, sample=True, errors=[f"dart: crtfc_key={key}&x=1"])
+    assert key not in json.dumps(data, ensure_ascii=False)
+
+
 if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    fns =[v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
     for fn in fns:
         try:

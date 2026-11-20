@@ -117,6 +117,15 @@ def to_num(v, default=None):
         return default
 
 
+_SECRET_RE = re.compile(r"(crtfc_key=)[^&\s'\")]+", re.I)
+
+
+def mask_secrets(text):
+    """오류 문구 속 DART 인증키를 가린다. 공개 저장소(data.json·history·Actions 로그)로
+    키가 새지 않게 errors에 넣거나 출력하기 전에 반드시 거친다 (2026-11-06 노출 사고)."""
+    return _SECRET_RE.sub(r"\1***", str(text))
+
+
 def get_json(url, retries=3, delay=1.0):
     for i in range(retries):
         try:
@@ -127,7 +136,7 @@ def get_json(url, retries=3, delay=1.0):
             if i == retries - 1:
                 raise
         time.sleep(delay * (i + 1))
-    raise RuntimeError(f"failed: {url}")
+    raise RuntimeError(f"failed: {mask_secrets(url)}")
 
 
 def get_text(url, retries=3, delay=1.0, encoding=None):
@@ -2706,7 +2715,7 @@ def build_insider_trades(stocks, api_key, disclosures, today=None,
     try:
         cmap = fetch_codes(api_key, [s["code"] for s in targets])
     except Exception as e:
-        print(f"  내부자: corp_code 매핑 실패 ({e}) - 경량판만 표시")
+        print(f"  내부자: corp_code 매핑 실패 ({mask_secrets(e)}) - 경량판만 표시")
         return []
     out = []
     for s in targets:
@@ -2721,7 +2730,7 @@ def build_insider_trades(stocks, api_key, disclosures, today=None,
                             "price": s.get("price"), "change_pct": s.get("change_pct"),
                             "mktcap_100m": s.get("mktcap_100m"), **agg})
         except Exception as e:
-            print(f"  내부자 {s['name']}: {e}")
+            print(f"  내부자 {s['name']}: {mask_secrets(e)}")
         time.sleep(REQUEST_DELAY)
     out.sort(key=lambda x: -abs(x["net_amt_100m"]))
     return out[:15]
@@ -4043,7 +4052,7 @@ def assemble(stocks, disclosures, ideas, indices, now, sample=False, errors=None
         "all_stocks": [compact(s) for s in
                        sorted(stocks, key=lambda s: -(s.get("mktcap_100m") or 0))],
         "universe_size": len(stocks),
-        "errors": errors or [],
+        "errors": [mask_secrets(e) for e in (errors or [])],
     }
 
 
@@ -4374,7 +4383,7 @@ def run_full(max_universe=None, out_path=None):
         errors.append(f"daily_hl: {e}")
 
     if errors[:5]:
-        print("경고:", *errors[:5], sep="\n  ")
+        print("경고:", *[mask_secrets(e) for e in errors[:5]], sep="\n  ")
     return assemble(stocks, disclosures, ideas, indices, now, errors=errors[:20],
                     market_date=market_date, performance=performance,
                     kospi_trend=kospi_trend, sentiment_enabled=senti_on,
@@ -4432,5 +4441,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        traceback.print_exc()
+        print(mask_secrets(traceback.format_exc()), file=sys.stderr)
         sys.exit(1)
