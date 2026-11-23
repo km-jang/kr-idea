@@ -2878,6 +2878,81 @@ def test_backfill_history_and_check():
         assert collect.regular_check(h, bad, "2026-09-16") == (1, 1, "2026-09-15")
 
 
+BARS_1119 = [_bar("20261119100000", 196000.0, 196500.0, 190500.0, 191000.0, 2786291),
+             _bar("20261119153000", 194200.0, 196000.0, 194000.0, 195500.0, 809347),
+             _bar("20261119160000", 195500.0, 196000.0, 195000.0, 195800.0, 555060),
+             _bar("20261119163000", 196900.0, 196900.0, 196900.0, 196900.0, 1308870),   # 수능일 마감 단일가 봉
+             _bar("20261119170000", 196600.0, 196900.0, 196000.0, 196600.0, 54375)]     # 애프터마켓 봉
+
+
+def test_parse_minute30_late_close_day():
+    """2026-11-19 수능일: 장이 10:00에 열고 16:30에 닫는다. 15:30 봉을 종가로 쓰면 틀린다."""
+    s = collect.parse_minute30(BARS_1119, "20261119")
+    assert s["close"] == 196900.0 and s["high"] == 196900.0, s       # 마감 봉 16:30, 17:00 봉은 제외
+    assert s["vol"] == 2786291 + 809347 + 555060 + 1308870
+    assert collect.close_bar_hhmm("20261119") == "1630" and collect.close_bar_hhmm("2026-11-19") == "1630"
+    assert collect.close_bar_hhmm("20261120") == "1530"              # 평일은 그대로
+    assert collect.parse_minute30(BARS_1119[:2], "20261119") is None  # 마감 봉이 없으면 확정하지 않는다
+    urls = []
+    collect.fetch_regular_session(["005930"], "20261119", fetch_json=lambda u: urls.append(u) or BARS_1119, delay=0)
+    collect.fetch_regular_session(["005930"], "20261120", fetch_json=lambda u: urls.append(u) or [], delay=0)
+    assert urls[0].endswith("endDateTime=202611191630") and urls[1].endswith("endDateTime=202611201530"), urls
+
+
+def test_backfill_redo_late_close_day():
+    """수능일 기록(마감 봉을 15:30으로 읽어 틀린 채 저장)을 정규장 값으로 다시 쓰고, 두 번 하지 않는다."""
+    import tempfile
+    from pathlib import Path as P
+    reg = {"005930": {"2026.11.18": 193000.0, "2026.11.19": 196900.0}}
+    d = {"market_date": "2026-11-19",
+         "regular_session": {"applied": 1, "failed": 0, "failed_codes": []},
+         "all_stocks": [{"code": "005930", "name": "삼성전자", "price": 195500.0, "change_pct": 1.3,
+                         "volume": 2000000, "day_high": 196500.0},
+                        {"code": "069500", "name": "KODEX 200", "price": 50000.0, "change_pct": 0.0}],
+         "ideas": [{"code": "005930", "price": 195500.0}]}
+    calls = []
+
+    def fj(url):
+        calls.append(url)
+        return BARS_1119
+    with tempfile.TemporaryDirectory() as td:
+        f = P(td, "2026-11-19.json")
+        f.write_text(json.dumps(d), encoding="utf-8")
+        logs = collect.backfill_history(P(td), reg, "2026-11-20", fetch_json=fj, delay=0)
+        got = json.loads(f.read_text(encoding="utf-8"))
+        a, etf = got["all_stocks"]
+        assert a["price"] == 196900.0 and a["change_pct"] == 2.02, a      # 196900/193000
+        assert a["volume"] == 2786291 + 809347 + 555060 + 1308870 and a["day_high"] == 196900.0
+        assert got["ideas"][0]["price"] == 196900.0
+        assert etf["price"] == 50000.0                                     # ETF는 30분봉 대상이 아니다
+        assert got["regular_session"]["late_fix"]["done"] is True and len(logs) == 1 and "2026-11-19" in logs[0]
+        assert collect.regular_check(P(td), reg, "2026-11-20") == (1, 0, "2026-11-19")   # 자가 대조 통과
+        n = len(calls)
+        assert collect.backfill_history(P(td), reg, "2026-11-20", fetch_json=fj, delay=0) == []
+        assert len(calls) == n                                             # 끝난 기록은 다시 안 받는다
+        # 30분봉이 없으면 가격만 고치고 두 번까지 시도한 뒤 포기한다
+        f.write_text(json.dumps(d), encoding="utf-8")
+        collect.backfill_history(P(td), reg, "2026-11-20", fetch_json=lambda u: [], delay=0)
+        got = json.loads(f.read_text(encoding="utf-8"))
+        assert got["all_stocks"][0]["price"] == 196900.0 and got["regular_session"]["late_fix"]["done"] is False
+        collect.backfill_history(P(td), reg, "2026-11-20", fetch_json=lambda u: [], delay=0)
+        got = json.loads(f.read_text(encoding="utf-8"))
+        assert got["regular_session"]["late_fix"] == {"price": 1, "bars": 0, "tries": 2, "done": True}
+        # 수급 유도값이 아직 없으면(다음 날 자료 전) 봉만 충분해도 끝내지 않고, 봉 값으로 가격·등락률을 채운다
+        f.write_text(json.dumps(d), encoding="utf-8")
+        collect.backfill_history(P(td), {}, "2026-11-20", fetch_json=fj, delay=0)
+        got = json.loads(f.read_text(encoding="utf-8"))
+        a = got["all_stocks"][0]
+        assert a["price"] == 196900.0 and a["change_pct"] == 2.03, a      # 옛 등락률 1.3에서 기준가를 되짚어 재계산 (반올림 오차 포함)
+        assert got["regular_session"]["late_fix"]["done"] is False and got["regular_session"]["close_bar"] == "1630"
+        # 이미 마감 봉 1630으로 저장된 기록(수정 뒤 수집분)은 다시 받지 않는다
+        d2 = {**d, "regular_session": {"applied": 1, "close_bar": "1630"}}
+        f.write_text(json.dumps(d2), encoding="utf-8")
+        n = len(calls)
+        assert collect.backfill_history(P(td), reg, "2026-11-20", fetch_json=fj, delay=0) == []
+        assert len(calls) == n
+
+
 def test_backfill_failed_codes_only():
     """V7.1 이후 기록은 그날 30분봉을 못 받은 종목만 다음 날 고친다 (나머지는 이미 정규장 값)."""
     import tempfile

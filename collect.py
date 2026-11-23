@@ -785,26 +785,39 @@ CONFIG_REGULAR = {
     "ledger_files": 130,          # 차트 카드 보정용 장부가 읽을 최근 기록 수 (차트 120거래일 + 여유)
     "check_tol_pct": 0.3,         # 어제 기록 자가 대조: 이 오차(%) 넘게 다르면 불일치로 센다
     "check_warn_ratio": 0.05,     # 불일치 종목이 이 비율 이상이면 errors에 한 줄
+    "late_close": {"2026-11-19": "1630"},   # 장이 한 시간 늦게 열고 닫는 날(수능일)의 마감 봉 시각.
+                                  # 2026-11-19에 마감 봉(16:30)을 못 보고 15:30 봉을 종가로 써서 406/693종목이
+                                  # 틀렸다 (실사고). 해마다 수능일이 정해지면 여기에 날짜를 더할 것
 }
 
 MIN30_URL = ("https://api.stock.naver.com/chart/domestic/item/{code}/minute30"
              "?startDateTime={ymd}0900&endDateTime={ymd}1530")
 
 
-def parse_minute30(data, ymd):
+def close_bar_hhmm(ymd):
+    """그날 마감 단일가 봉의 시각 (기본 1530). 수능일처럼 장이 한 시간 늦게 열고 닫는 날은
+    CONFIG_REGULAR['late_close']에 적은 시각(1630)이다. ymd는 YYYYMMDD 또는 YYYY-MM-DD."""
+    s = str(ymd).replace("-", "")
+    day = f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return CONFIG_REGULAR["late_close"].get(day, "1530")
+
+
+def parse_minute30(data, ymd, close_hhmm=None):
     """30분봉 응답 → 그날 정규장 {close, open, high, low, vol} 또는 None.
     봉 시각은 시작 시각이다 (0900 = 09:00~09:30 · 1530 = 마감 단일가). 거래량은 봉별 값이라
     합하면 정규장 거래량이다 (시간외 종가매매 15:40~16:00은 빠진다). 1530 봉이 없으면
-    (거래정지·자료 미완성) 정규장 종가를 확정할 수 없으므로 None을 돌려 원래 값을 두게 한다."""
+    (거래정지·자료 미완성) 정규장 종가를 확정할 수 없으므로 None을 돌려 원래 값을 두게 한다.
+    마감 봉 시각은 close_hhmm으로 바꾼다 (지연 마감일 1630, 2026-11-19 수능일 사고)."""
+    last = close_hhmm or close_bar_hhmm(ymd)
     bars = []
     for b in data if isinstance(data, list) else []:
         if not isinstance(b, dict):
             continue
         t = str(b.get("localDateTime") or "")
-        if len(t) >= 12 and t.startswith(ymd) and t[8:12] <= "1530":
+        if len(t) >= 12 and t.startswith(ymd) and t[8:12] <= last:
             bars.append((t, b))
     bars.sort(key=lambda x: x[0])
-    if not bars or bars[-1][0][8:12] != "1530":
+    if not bars or bars[-1][0][8:12] != last:
         return None
     close = to_num(bars[-1][1].get("currentPrice"))
     if not close:
@@ -822,11 +835,13 @@ def fetch_regular_session(codes, ymd, fetch_json=None, delay=None):
     """종목별 30분봉 1건으로 그날 정규장 값을 모은다. 반환: ({코드: 값}, 실패 수, 중단 여부).
     처음 abort_after건이 연속으로 실패하면 API 장애로 보고 나머지를 요청하지 않는다."""
     out, fail = {}, 0
+    last = close_bar_hhmm(ymd)
+    url_t = MIN30_URL.replace("}1530", "}" + last)      # 지연 마감일은 요청 종료 시각도 늦춘다
     for i, c in enumerate(codes):
         if i >= CONFIG_REGULAR["abort_after"] and not out:
             return out, fail + (len(codes) - i), True
         try:
-            sess = parse_minute30((fetch_json or get_json)(MIN30_URL.format(code=c, ymd=ymd)), ymd)
+            sess = parse_minute30((fetch_json or get_json)(url_t.format(code=c, ymd=ymd)), ymd, last)
         except Exception:
             sess = None
         if sess:
@@ -944,6 +959,47 @@ def _fix_record_prices(d, reg_by_code, key, only=None):
     return done
 
 
+def _redo_late_close(f, d, rs, day, reg_by_code, fetch_json=None, delay=None):
+    """지연 마감일(late_close) 기록 하나를 정규장 값으로 다시 쓴다. 반환: 로그 한 줄.
+    ① 가격·등락률: 다음 날 수급 자료에서 유도한 정규장 종가(reg_by_code)로 전 종목, 요청 0건
+       (유도값이 없는 종목은 30분봉 마감 봉 값으로 가격만 채운다)
+    ② 거래량·시고저: 올바른 마감 봉(1630)까지 다시 받은 30분봉으로. 보관 7거래일 안에서만 된다.
+       봉을 못 받으면 2회까지 다시 시도하고 포기한다. 가격은 첫 실행에서 이미 고쳐진다."""
+    key = day.replace("-", ".")
+    fix = rs.get("late_fix") or {}
+    done_px = _fix_record_prices(d, reg_by_code, key)
+    rows = d.get("all_stocks") or []
+    codes = [r["code"] for r in rows if r.get("code") and not is_index_product(r.get("name"))]
+    ymd = day.replace("-", "")
+    # 봉이 하나도 안 받아지면 fetch_regular_session이 처음 abort_after건에서 스스로 멈춘다
+    sess, _, _ = fetch_regular_session(codes, ymd, fetch_json, delay) if codes else ({}, 0, False)
+    for r in rows:
+        v = sess.get(r.get("code"))
+        if not v:
+            continue
+        if r.get("code") not in done_px and v.get("close"):
+            # 수급 유도값이 없는 종목: 가격은 마감 봉으로, 등락률은 옛 값에서 전일 종가를 되짚어 다시 계산
+            old_px, old_chg = r.get("price"), r.get("change_pct")
+            if old_px and old_chg is not None and old_chg > -100:
+                r["change_pct"] = round((v["close"] / (old_px / (1 + old_chg / 100)) - 1) * 100, 2)
+            r["price"] = v["close"]
+        if v.get("vol"):
+            r["volume"] = v["vol"]
+        for src, dst in (("open", "day_open"), ("high", "day_high"), ("low", "day_low")):
+            if v.get(src):
+                r[dst] = v[src]
+    tries = int(fix.get("tries", 0)) + 1
+    ok = 1 - CONFIG_REGULAR["fail_warn_ratio"]
+    enough = (len(sess) >= len(codes) * ok and len(set(codes) & done_px) >= len(codes) * ok) if codes else True
+    # 가격(수급 유도값)과 봉이 둘 다 충분해야 끝낸다. 아니면 다음 실행에 다시 하고 2회째에 포기
+    d["regular_session"] = {**rs, "close_bar": close_bar_hhmm(day),
+                            "failed_codes": [c for c in rs.get("failed_codes") or [] if c not in sess],
+                            "late_fix": {"price": len(done_px), "bars": len(sess),
+                                         "tries": tries, "done": bool(enough or tries >= 2)}}
+    f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    return f"{day} 지연 마감일 재보정 가격 {len(done_px)}종목 · 거래량·고저 {len(sess)}/{len(codes)}종목"
+
+
 def backfill_history(hist_dir, reg_by_code, market_date, fetch_json=None, bars_cap=None, delay=None):
     """애프터마켓에 오염된 채 저장된 기록(since ~ 어제)을 정규장 값으로 고친다. 반환: 로그 줄 목록.
     ① 가격·등락률: reg_by_code(수급 자료에서 유도한 정규장 종가)로. 요청 0건
@@ -965,6 +1021,12 @@ def backfill_history(hist_dir, reg_by_code, market_date, fetch_json=None, bars_c
             continue
         key = day.replace("-", ".")
         rs = d.get("regular_session") or {}
+        if rs.get("applied") and day in CONFIG_REGULAR["late_close"] \
+                and not (rs.get("late_fix") or {}).get("done") \
+                and not (rs.get("close_bar") == close_bar_hhmm(day) and "late_fix" not in rs):
+            # 지연 마감일 기록: 마감 봉을 잘못 읽은 채 저장됐으므로 전 종목을 다시 고친다
+            logs.append(_redo_late_close(f, d, rs, day, reg_by_code, fetch_json, delay))
+            continue
         if rs.get("applied"):
             # V7.1 이후 기록: 그날 30분봉을 못 받은 종목만 가격·등락률을 고친다 (거래량·고저는 둔다)
             todo = set(rs.get("failed_codes") or [])
@@ -4118,7 +4180,8 @@ def run_full(max_universe=None, out_path=None):
         sess, n_fail, aborted = fetch_regular_session(targets, market_date.replace("-", ""))
         n_ok = apply_regular_session(stocks, sess, market_date, reg_by_code)
         regular_session = {"applied": n_ok, "failed": n_fail,
-                           "etf_skipped": len(stocks) - len(targets)}
+                           "etf_skipped": len(stocks) - len(targets),
+                           "close_bar": close_bar_hhmm(market_date)}   # 이 기록이 읽은 마감 봉 시각 (재보정 판정용)
         if n_ok and n_fail:
             # 30분봉을 못 받은 종목 (15:30 봉 지연 등). 다음 날 수집이 수급 자료 유도값으로 고친다
             regular_session["failed_codes"] = [c for c in targets if c not in sess]
