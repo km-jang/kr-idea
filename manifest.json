@@ -1,6 +1,6 @@
 {
-  "name": "국내장 아이디어 대시보드",
-  "short_name": "아이디어",
+  "name": "오늘종목",
+  "short_name": "오늘종목",
   "description": "수급·밸류·공시 시그널 기반 국내 주식 아이디어",
   "start_url": "./",
   "scope": "./",
