@@ -372,6 +372,32 @@ def test_ops_log_append():
     assert ops_log.append_record("깨진 장부", {"date": "2026-07-01"}) == [{"date": "2026-07-01"}]
 
 
+def test_ops_log_merge_keeps_true():
+    """11/23 실사고: 늦게 도는 예약 사본이 지난 날 행을 다시 쓰며 아침을 false로 내리고 헛경보를 냈다."""
+    import ops_log
+    old = {"date": "2026-11-23", "data_final": True, "data_gen": "2026-11-23 19:13 KST",
+           "morning": True, "pulse": True, "evening": True, "scan": True, "recover": "none"}
+    sent_next_day = {"morning": "2026-11-24", "pulse": "2026-11-23", "evening": "2026-11-23"}
+    new = ops_log.build_record({"generated_at": "2026-11-23 19:13 KST", "market_date": "2026-11-23"},
+                               sent_next_day, [{"date": "2026-11-23"}], "2026-11-23")
+    assert new["morning"] is False and ops_log.missing_sends(new) == ["아침브리핑"]   # 재현: 합치기 전
+    m = ops_log.merge_record(old, new)
+    assert m["morning"] is True and ops_log.missing_sends(m) == []                  # 합친 뒤 헛경보 없음
+    assert ops_log.merge_record(None, new) == new                                    # 옛 행이 없으면 그대로
+    assert ops_log.merge_record({"date": "2026-11-22", "morning": True}, new) == new  # 다른 날짜는 안 섞음
+    # 진짜 누락(처음부터 false)은 그대로 false
+    real = {"date": "2026-11-23", "morning": False, "pulse": True, "evening": True, "scan": True,
+            "data_final": True}
+    assert ops_log.merge_record(real, new)["morning"] is False
+    # 복구 결과: 새 값이 none이면 옛 ok·fail 유지, 새 값이 있으면 새 값
+    assert ops_log.merge_record({"date": "d", "recover": "ok"}, {"date": "d", "recover": "none"})["recover"] == "ok"
+    assert ops_log.merge_record({"date": "d", "recover": "fail"}, {"date": "d", "recover": "ok"})["recover"] == "ok"
+    # 마감 수집이 옛 행에만 있으면 수집 시각도 옛 값을 둔다
+    m2 = ops_log.merge_record({"date": "d", "data_final": True, "data_gen": "A"},
+                              {"date": "d", "data_final": False, "data_gen": "B"})
+    assert m2["data_final"] is True and m2["data_gen"] == "A"
+
+
 def test_holidays_calendar():
     """KRX 휴장일 달력 — 제헌절(2026 재지정)·주말·거래일 판정."""
     import holidays_kr as hk
