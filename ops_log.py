@@ -83,6 +83,27 @@ def missing_sends(record):
             if not record.get(k)]
 
 
+FLAG_KEYS = ("data_final", "morning", "pulse", "evening", "scan")
+
+
+def merge_record(old, new):
+    """같은 날짜 행을 다시 쓸 때 이미 true인 항목을 false로 내리지 않는다. 순수 함수.
+
+    GitHub 예약 사본이 11시간 늦게 돌아 지난 날 몫을 다시 계산하면, 그사이 발송 장부(날짜 하나만 보관)가
+    다음 날로 바뀌어 아침 발송이 false로 보인다 (2026-11-09·11-16·11-23 월요일 실사고, 헛경보 포함).
+    한 번 true가 된 사실은 되돌아갈 수 없으므로 합친다. 복구 결과는 새 값이 none이면 옛 값을 둔다."""
+    if not isinstance(old, dict) or old.get("date") != new.get("date"):
+        return new
+    out = dict(new)
+    for k in FLAG_KEYS:
+        out[k] = bool(old.get(k)) or bool(new.get(k))
+    if new.get("recover", "none") == "none" and old.get("recover") in ("ok", "fail"):
+        out["recover"] = old["recover"]
+    if old.get("data_final") and not new.get("data_final"):
+        out["data_gen"] = old.get("data_gen", new.get("data_gen"))
+    return out
+
+
 def append_record(log, record, keep=KEEP_DAYS):
     """장부에 기록 추가 (같은 날짜는 최신으로 교체, keep일만 유지). 순수 함수."""
     if not isinstance(log, list):
@@ -113,7 +134,11 @@ def main():
     record = build_record(
         _load("data.json", {}), _load("sent_log.json", {}),
         _load("scans.json", []), today, recover)
-    log = append_record(_load("ops.json", []), record)
+    old_log = _load("ops.json", [])
+    old = next((r for r in old_log if isinstance(r, dict) and r.get("date") == today), None) \
+        if isinstance(old_log, list) else None
+    record = merge_record(old, record)          # 늦게 도는 사본이 지난 기록을 false로 덮지 못하게
+    log = append_record(old_log, record)
     with open("ops.json", "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=1)
     print(f"ops 기록 완료: {record}")
