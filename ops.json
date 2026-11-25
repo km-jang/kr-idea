@@ -1,15 +1,5 @@
 [
  {
-  "date": "2026-10-14",
-  "data_final": true,
-  "data_gen": "2026-10-14 19:13 KST",
-  "morning": true,
-  "pulse": true,
-  "evening": true,
-  "scan": true,
-  "recover": "none"
- },
- {
   "date": "2026-10-15",
   "data_final": true,
   "data_gen": "2026-10-15 19:13 KST",
@@ -293,6 +283,16 @@
   "date": "2026-11-24",
   "data_final": true,
   "data_gen": "2026-11-24 19:13 KST",
+  "morning": true,
+  "pulse": true,
+  "evening": true,
+  "scan": true,
+  "recover": "none"
+ },
+ {
+  "date": "2026-11-25",
+  "data_final": true,
+  "data_gen": "2026-11-25 19:13 KST",
   "morning": true,
   "pulse": true,
   "evening": true,
