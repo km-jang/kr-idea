@@ -2148,8 +2148,8 @@
    "code": "003800",
    "name": "에이스침대",
    "market": "KOSDAQ",
-   "price": 29500.0,
-   "change_pct": 0.0,
+   "price": 29350.0,
+   "change_pct": -0.51,
    "mktcap_100m": 3272.0,
    "pbr": 0.41,
    "per": 6.26,
@@ -7692,14 +7692,7 @@
   "failed": 6,
   "etf_skipped": 129,
   "close_bar": "1530",
-  "failed_codes": [
-   "001570",
-   "003800",
-   "309710",
-   "182400",
-   "121800",
-   "377460"
-  ],
+  "failed_codes": [],
   "backfill": [
    "2026-11-24 실패분 가격 5종목"
   ],
@@ -42779,8 +42772,8 @@
    "code": "003800",
    "name": "에이스침대",
    "market": "KOSDAQ",
-   "price": 29500.0,
-   "change_pct": 0.0,
+   "price": 29350.0,
+   "change_pct": -0.51,
    "mktcap_100m": 3272.0,
    "pbr": 0.41,
    "per": 6.26,
